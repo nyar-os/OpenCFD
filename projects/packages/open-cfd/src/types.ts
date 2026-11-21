@@ -346,6 +346,19 @@ export interface MassBalance {
     readonly relativeError: number;
 }
 
+/** Outward mass flow through one outlet side. */
+export interface OutletFlow {
+    readonly side: Side;
+    /** Signed outward mass flow in kg/s; positive when the side discharges. */
+    readonly flow: number;
+    /** Share of the total positive outlet flow; negative for recirculation. */
+    readonly share: number;
+    /** Signed normal velocity averaged over the side in m/s. */
+    readonly meanVelocity: number;
+    /** Side length in m. */
+    readonly length: number;
+}
+
 /** One sampled obstacle force. */
 export interface ForceSample {
     readonly step: number;
@@ -473,6 +486,8 @@ export interface SolveReport {
     readonly meshQuality: MeshQuality;
     /** Net mass flow through the domain boundary. */
     readonly massBalance: MassBalance;
+    /** Per-outlet signed mass flow and share, in side order. */
+    readonly outlets: readonly OutletFlow[];
     /** Minimum vorticity over fluid cells in 1/s. */
     readonly vorticityMin: number;
     /** Maximum vorticity over fluid cells in 1/s. */

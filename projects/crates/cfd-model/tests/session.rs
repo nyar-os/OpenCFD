@@ -874,6 +874,45 @@ fn session_and_cli_export_particle_trajectories() {
 }
 
 #[test]
+fn session_and_cli_report_outlet_allocation() {
+    let directory = temporary_dir("outlets");
+    let path = directory.join("outlets.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.mesh_set(12, 6, 1.0, 1.0).expect("mesh");
+    session.time_set(0.01, 6, 60, None).expect("time");
+    session
+        .boundary_set(Side::Left, BoundaryKind::Inlet, Some(1.0), Some(0.0), None)
+        .expect("inlet");
+    session
+        .boundary_set(Side::Right, BoundaryKind::Outlet, None, None, Some(0.0))
+        .expect("outlet");
+    session
+        .boundary_set(Side::Top, BoundaryKind::Wall, Some(0.0), Some(0.0), None)
+        .expect("top wall");
+    session
+        .boundary_set(Side::Bottom, BoundaryKind::Wall, Some(0.0), Some(0.0), None)
+        .expect("bottom wall");
+    let report = session.solve().expect("solve");
+    assert_eq!(report.outlets.len(), 1);
+    assert_eq!(report.outlets[0].side, "right");
+    assert!((report.outlets[0].share - 1.0).abs() < 1e-12);
+
+    let cli = text(&path);
+    let output = run_cli(&["solve", &cli]);
+    assert!(
+        output.status.success(),
+        "ocfd solve failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let decoded: serde_json::Value = serde_json::from_slice(&output.stdout).expect("solve JSON");
+    let outlets = decoded["outlets"].as_array().expect("outlets array");
+    assert_eq!(outlets.len(), 1);
+    assert_eq!(outlets[0]["side"], "right");
+    assert_eq!(outlets[0]["share"].as_f64(), Some(1.0));
+}
+
+#[test]
 fn session_and_cli_restart_from_checkpoints() {
     let directory = temporary_dir("restart");
     let path = directory.join("restart.ocfd");

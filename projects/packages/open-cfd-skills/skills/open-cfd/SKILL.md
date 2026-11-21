@@ -23,7 +23,8 @@ contains point monitor time series (`probes`), wall shear/friction summaries
 with `meanYPlus` (`wallShear`), the optional log-law wall function flag
 (`wallFunction`), porous region summaries (`porous`), drag/lift/moment
 coefficients (`forces`), sampled continuity and
-boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
+boundary mass balance (`massBalance`), per-outlet flow allocation (`outlets`),
+the selected `timeScheme`, adaptive-step statistics (`adaptive`,
 `averageDt`, `minDt`, `maxDt`), the `terminationReason` and whether Boussinesq
 buoyancy was applied (`buoyancy`). Compressible flow, three-dimensional flow,
 adaptive meshing and external format import are
@@ -137,9 +138,12 @@ rename. Confirm the path before running them.
   `meshQuality`-shaped JSON: non-orthogonality in degrees, cell aspect-ratio
   extremes and interior-face skewness. The mesh is uniform, so the values are
   constant over the domain; a solid obstacle lowers `fluidCells` below `cells`.
-- `solve` stops early on the L2 norm of the velocity change when `--tolerance`  is given and reports `converged`, `steadyState`, `residual`,
+- `solve` stops early on the L2 norm of the velocity change when `--tolerance`
+  is given and reports `converged`, `steadyState`, `residual`,
   `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,
-  `massBalance` and `forces` (with `cm` and the resolved reference quantities).
+  `massBalance`, `outlets` (signed flow, share of the positive outlet total and
+  mean normal velocity per outlet side) and `forces` (with `cm` and the
+  resolved reference quantities).
   `--restart` resumes from an `open-cfd-checkpoint` JSON document and
   `--checkpoint` writes the final state; resumed reports keep cumulative
   `steps` and `time`. The mesh and scalar configuration must match or the

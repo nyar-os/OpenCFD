@@ -90,6 +90,29 @@ pub struct MassBalance {
     pub relative_error: f64,
 }
 
+/// Outward mass flow through one outlet side.
+///
+/// Only `outlet` and `convective` sides are listed. `flow` is signed: it is
+/// positive when the side discharges fluid and negative when recirculation
+/// brings fluid back in. `share` divides that signed flow by the sum of the
+/// positive outlet flows, so the shares of pure outlets add up to one and a
+/// recirculating outlet contributes a negative share. `meanVelocity` is the
+/// signed normal velocity averaged over the side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutletFlow {
+    /// Side identifier (`left`, `right`, `top` or `bottom`).
+    pub side: String,
+    /// Signed outward mass flow (kg/s).
+    pub flow: f64,
+    /// Share of the total positive outlet flow; zero when nothing discharges.
+    pub share: f64,
+    /// Signed normal velocity averaged over the side (m/s).
+    pub mean_velocity: f64,
+    /// Side length (m).
+    pub length: f64,
+}
+
 /// One sampled force coefficient.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -276,6 +299,9 @@ pub struct Report {
     /// Net mass flow through the domain boundary.
     #[serde(default)]
     pub mass_balance: MassBalance,
+    /// Per-outlet signed mass flow and share, in side order.
+    #[serde(default)]
+    pub outlets: Vec<OutletFlow>,
     /// Minimum cell-centred vorticity of fluid cells (1/s).
     #[serde(default)]
     pub vorticity_min: f64,
@@ -702,6 +728,7 @@ pub fn solve_with_checkpoint(
     let divergence = mesh.divergence(&u, &v);
     let divergence_l2 = rms(&divergence);
     let mass_balance = mass_balance(&mesh, &model.boundaries, model.fluid.density, &u, &v);
+    let outlets = outlet_flows(&mesh, &model.boundaries, model.fluid.density, &u, &v);
     let max_velocity = max_velocity(&u, &v);
     let quality = mesh_quality(&mesh);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
@@ -736,6 +763,7 @@ pub fn solve_with_checkpoint(
         divergence_l2,
         mesh_quality: quality,
         mass_balance,
+        outlets,
         vorticity_min,
         vorticity_max,
         stream_function_min,
@@ -3275,6 +3303,72 @@ fn mass_balance(
         net,
         relative_error: if scale > 0.0 { net.abs() / scale } else { 0.0 },
     }
+}
+
+/// Integrates the outward mass flux through every outlet side.
+///
+/// The outward normal is `+x` on the right, `-x` on the left, `+y` on the top
+/// and `-y` on the bottom. Both `outlet` and `convective` sides are included,
+/// so a domain with several outlets reports how the total discharge splits.
+/// Periodic sides are skipped because they exchange no mass with the outside.
+/// Sides are listed in `left`, `right`, `top`, `bottom` order; `share` is
+/// `flow / Σ max(flow, 0)` and is zero when no outlet discharges.
+pub fn outlet_flows(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    density: f64,
+    u: &[f64],
+    v: &[f64],
+) -> Vec<OutletFlow> {
+    let mut outlets = Vec::new();
+    for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+        if boundaries.is_periodic(side) || !boundaries.get(side).kind.is_outlet() {
+            continue;
+        }
+        let (length, flux) = match side {
+            Side::Left => (
+                mesh.length_y,
+                -(0..mesh.ny)
+                    .map(|j| u[mesh.u_index(0, j)] * mesh.dy)
+                    .sum::<f64>(),
+            ),
+            Side::Right => (
+                mesh.length_y,
+                (0..mesh.ny)
+                    .map(|j| u[mesh.u_index(mesh.nx, j)] * mesh.dy)
+                    .sum::<f64>(),
+            ),
+            Side::Bottom => (
+                mesh.length_x,
+                -(0..mesh.nx)
+                    .map(|i| v[mesh.v_index(i, 0)] * mesh.dx)
+                    .sum::<f64>(),
+            ),
+            Side::Top => (
+                mesh.length_x,
+                (0..mesh.nx)
+                    .map(|i| v[mesh.v_index(i, mesh.ny)] * mesh.dx)
+                    .sum::<f64>(),
+            ),
+        };
+        let flow = flux * density;
+        outlets.push(OutletFlow {
+            side: side.as_str().to_string(),
+            flow,
+            share: 0.0,
+            mean_velocity: if length > 0.0 { flux / length } else { 0.0 },
+            length,
+        });
+    }
+    let total: f64 = outlets.iter().map(|outlet| outlet.flow.max(0.0)).sum();
+    for outlet in &mut outlets {
+        outlet.share = if total > 0.0 {
+            outlet.flow / total
+        } else {
+            0.0
+        };
+    }
+    outlets
 }
 
 fn rms(values: &[f64]) -> f64 {

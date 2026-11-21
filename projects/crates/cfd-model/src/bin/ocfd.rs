@@ -989,6 +989,20 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
             report.average_dt, report.min_dt, report.max_dt
         );
     }
+    if !report.outlets.is_empty() {
+        let summary = report
+            .outlets
+            .iter()
+            .map(|outlet| {
+                format!(
+                    "{}={:.6e} kg/s (share {:.4})",
+                    outlet.side, outlet.flow, outlet.share
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!("outlet allocation: {summary}");
+    }
     let json = serde_json::to_string_pretty(&report).map_err(|error| {
         CfdError::new(
             "document/serialize",

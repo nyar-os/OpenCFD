@@ -6,12 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
     export_particles, export_residuals, export_streamlines, export_svg, export_vtk,
-    export_vtk_with_layout, mesh_quality, solve, solve_pressure, solve_with, solve_with_checkpoint,
-    stream_function, trace_particles, transport_scalar, vorticity, Boundaries, Boundary,
-    BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField, ExportLayout, InitialField,
-    InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig, ParticleSeed, PorousRegion,
-    PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution, SolveOptions,
-    ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
+    export_vtk_with_layout, mesh_quality, outlet_flows, solve, solve_pressure, solve_with,
+    solve_with_checkpoint, stream_function, trace_particles, transport_scalar, vorticity,
+    Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField,
+    ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig,
+    ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal,
+    Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -2384,4 +2384,95 @@ fn particle_export_and_validation_are_honest() {
     )
     .expect("default seeds");
     assert_eq!(default.len(), 25, "the default grid is 5x5");
+}
+
+#[test]
+fn outlet_flows_split_the_discharge_between_outlets() {
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 8,
+        ny: 6,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let boundaries = Boundaries {
+        left: Boundary {
+            kind: BoundaryKind::Inlet,
+            velocity: [1.0, 0.0],
+            pressure: 0.0,
+        },
+        right: Boundary {
+            kind: BoundaryKind::Outlet,
+            velocity: [0.0, 0.0],
+            pressure: 0.0,
+        },
+        top: Boundary {
+            kind: BoundaryKind::Convective,
+            velocity: [0.0, 0.0],
+            pressure: 0.0,
+        },
+        ..Default::default()
+    };
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        u[mesh.u_index(mesh.nx, j)] = 1.0;
+    }
+    for i in 0..mesh.nx {
+        v[mesh.v_index(i, mesh.ny)] = 1.0;
+    }
+    let flows = outlet_flows(&mesh, &boundaries, 2.0, &u, &v);
+    assert_eq!(flows.len(), 2, "only the outlet and convective sides");
+    assert_eq!(flows[0].side, "right");
+    assert_eq!(flows[1].side, "top");
+    for outlet in &flows {
+        assert!((outlet.flow - 2.0).abs() < 1e-12);
+        assert!((outlet.share - 0.5).abs() < 1e-12);
+        assert!((outlet.mean_velocity - 1.0).abs() < 1e-12);
+        assert!((outlet.length - 1.0).abs() < 1e-12);
+    }
+    let total: f64 = flows.iter().map(|outlet| outlet.flow).sum();
+    assert!((total - 4.0).abs() < 1e-12);
+}
+
+#[test]
+fn solve_reports_outlet_allocation_and_closed_cavity_has_none() {
+    let mut model = mesh_model(12, 6);
+    model.time.steps = 30;
+    model.time.pressure_iterations = 80;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top = Boundary::wall();
+    model.boundaries.bottom = Boundary::wall();
+    let solution = solve(&model).expect("channel solve");
+    assert_eq!(solution.report.outlets.len(), 1);
+    let outlet = &solution.report.outlets[0];
+    assert_eq!(outlet.side, "right");
+    assert!(
+        outlet.flow > 0.0,
+        "the outlet must discharge, got {}",
+        outlet.flow
+    );
+    assert!((outlet.share - 1.0).abs() < 1e-12);
+    assert!(outlet.mean_velocity > 0.0);
+    assert!(
+        solution.report.mass_balance.outflow >= outlet.flow - 1e-12,
+        "the outlet flow cannot exceed the total outflow"
+    );
+
+    let mut closed = mesh_model(8, 8);
+    closed.time.steps = 3;
+    let closed = solve(&closed).expect("closed cavity solve");
+    assert!(
+        closed.report.outlets.is_empty(),
+        "a fully closed cavity has no outlet allocation"
+    );
 }

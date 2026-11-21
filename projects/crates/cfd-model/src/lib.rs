@@ -24,6 +24,7 @@
 //! * CSV and legacy VTK field export at cell centres or mesh nodes;
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
+//! * per-outlet flow allocation for domains with more than one outlet;
 //! * mesh quality metrics (non-orthogonality, aspect ratio and skewness);
 //! * Lagrangian particle tracing exported as time-accurate trajectories;
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet,
@@ -71,10 +72,10 @@ pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
 pub use crate::solver::{
-    solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar, transport_thermal,
-    ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, PorousSummary, PressureSettings,
-    PressureStats, ProbeSample, ProbeSeries, Report, ResidualSample, Solution, SolveOptions,
-    WallShear, REPORT_FORMAT, REPORT_VERSION,
+    outlet_flows, solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar,
+    transport_thermal, ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, OutletFlow,
+    PorousSummary, PressureSettings, PressureStats, ProbeSample, ProbeSeries, Report,
+    ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -107,6 +108,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "momentCoefficients": "supported",
     "massBalance": "supported",
     "meshQuality": "supported",
+    "outletAllocation": "supported",
     "buoyancy": "supported",
     "compressible": "unsupported",
     "turbulence": "supported",
