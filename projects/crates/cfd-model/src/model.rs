@@ -187,8 +187,10 @@ pub enum BoundaryKind {
     Wall,
     /// Prescribed inflow velocity.
     Inlet,
-    /// Zero-gradient velocity and zero reference pressure.
+    /// Zero-gradient velocity and a prescribed reference pressure.
     Outlet,
+    /// Free-slip wall: zero normal velocity and zero tangential gradient.
+    Slip,
 }
 
 impl BoundaryKind {
@@ -198,6 +200,7 @@ impl BoundaryKind {
             Self::Wall => "wall",
             Self::Inlet => "inlet",
             Self::Outlet => "outlet",
+            Self::Slip => "slip",
         }
     }
 }
@@ -210,9 +213,12 @@ impl FromStr for BoundaryKind {
             "wall" => Ok(Self::Wall),
             "inlet" => Ok(Self::Inlet),
             "outlet" => Ok(Self::Outlet),
+            "slip" | "freeSlip" | "free-slip" | "free_slip" => Ok(Self::Slip),
             other => Err(CfdError::new(
                 "cli/invalid-boundary-kind",
-                format!("unknown boundary kind `{other}`; only wall, inlet or outlet is supported"),
+                format!(
+                    "unknown boundary kind `{other}`; only wall, inlet, outlet or slip is supported"
+                ),
             )),
         }
     }
@@ -226,9 +232,14 @@ pub struct Boundary {
     #[serde(default)]
     pub kind: BoundaryKind,
     /// Prescribed velocity `[u, v]` (m/s). Used by walls and inlets; ignored by
-    /// outlets, which use zero-gradient velocity.
+    /// outlets, which use zero-gradient velocity, and by slip walls, which
+    /// always carry zero normal velocity.
     #[serde(default)]
     pub velocity: [f64; 2],
+    /// Gauge pressure prescribed on an outlet side (Pa). Ignored by other
+    /// boundary kinds.
+    #[serde(default)]
+    pub pressure: f64,
 }
 
 impl Boundary {
@@ -237,6 +248,7 @@ impl Boundary {
         Self {
             kind: BoundaryKind::Wall,
             velocity: [0.0, 0.0],
+            pressure: 0.0,
         }
     }
 }
@@ -957,6 +969,12 @@ impl Model {
                 report.push(Issue::error(
                     "boundary/invalid",
                     format!("velocity on the {name} side must be finite"),
+                ));
+            }
+            if !boundary.pressure.is_finite() {
+                report.push(Issue::error(
+                    "boundary/invalid",
+                    format!("outlet pressure on the {name} side must be finite"),
                 ));
             }
         }

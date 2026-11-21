@@ -133,6 +133,7 @@ export function boundarySet(handle: number, request: BoundarySetRequest): CaseSu
             request.kind,
             request.u,
             request.v,
+            request.pressure,
         ),
     );
 }

@@ -17,7 +17,7 @@ Usage:
   ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
-  ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]
+  ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
@@ -203,18 +203,19 @@ fn time_set(args: &[String]) -> Result<i32, CfdError> {
 }
 
 fn boundary_set(args: &[String]) -> Result<i32, CfdError> {
-    let parsed = parse(args, &["--side", "--kind", "--u", "--v"], &[])?;
+    let parsed = parse(args, &["--side", "--kind", "--u", "--v", "--pressure"], &[])?;
     let file = positional(
         &parsed,
         0,
-        "boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]",
+        "boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]",
     )?;
     let side = required(&parsed, "--side")?.parse::<Side>()?;
     let kind = required(&parsed, "--kind")?.parse::<BoundaryKind>()?;
     let u = number(&parsed, "--u")?;
     let v = number(&parsed, "--v")?;
+    let pressure = number(&parsed, "--pressure")?;
     let mut session = open_session(file)?;
-    let summary = session.boundary_set(side, kind, u, v)?;
+    let summary = session.boundary_set(side, kind, u, v, pressure)?;
     print_boundary(&summary, side);
     Ok(0)
 }
@@ -222,11 +223,12 @@ fn boundary_set(args: &[String]) -> Result<i32, CfdError> {
 fn print_boundary(summary: &CaseSummary, side: Side) {
     let boundary = summary.boundaries.get(side);
     println!(
-        "{} boundary set to {}, velocity=[{}, {}] m/s",
+        "{} boundary set to {}, velocity=[{}, {}] m/s, pressure={} Pa",
         side.as_str(),
         boundary.kind.as_str(),
         boundary.velocity[0],
-        boundary.velocity[1]
+        boundary.velocity[1],
+        boundary.pressure
     );
 }
 

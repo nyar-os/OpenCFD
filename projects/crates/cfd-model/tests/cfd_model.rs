@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
@@ -43,6 +44,7 @@ fn still_cavity_stays_at_rest_without_nan() {
     model.boundaries.top = Boundary {
         kind: BoundaryKind::Wall,
         velocity: [0.0, 0.0],
+        pressure: 0.0,
     };
     model.time.steps = 40;
 
@@ -268,14 +270,17 @@ fn document_round_trip_and_defaults() {
     model.boundaries.left = Boundary {
         kind: BoundaryKind::Inlet,
         velocity: [0.5, 0.0],
+        pressure: 0.0,
     };
     model.boundaries.right = Boundary {
         kind: BoundaryKind::Outlet,
         velocity: [0.0, 0.0],
+        pressure: 0.0,
     };
     model.boundaries.top = Boundary {
         kind: BoundaryKind::Wall,
         velocity: [1.0, 0.0],
+        pressure: 0.0,
     };
     model.initial = Some(cfd_model::InitialField {
         velocity: [0.1, -0.05],
@@ -373,10 +378,12 @@ fn channel_with_circle_obstacle_has_finite_positive_drag() {
     model.boundaries.left = Boundary {
         kind: BoundaryKind::Inlet,
         velocity: [1.0, 0.0],
+        pressure: 0.0,
     };
     model.boundaries.right = Boundary {
         kind: BoundaryKind::Outlet,
         velocity: [0.0, 0.0],
+        pressure: 0.0,
     };
     model.boundaries.top = Boundary::wall();
     model.boundaries.bottom = Boundary::wall();
@@ -726,6 +733,140 @@ fn scalar_front_sharpens_with_central_and_quick() {
         gradient(&fields[2]) > 1.5 * upwind_gradient,
         "QUICK gradient {} should exceed 1.5x upwind {upwind_gradient}",
         gradient(&fields[2])
+    );
+}
+
+#[test]
+fn slip_boundary_blocks_normal_flow_and_keeps_tangential_faces_free() {
+    let mut model = Model::new();
+    model.mesh.nx = 8;
+    model.mesh.ny = 6;
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+    let boundaries = cfd_model::Boundaries {
+        left: Boundary {
+            kind: BoundaryKind::Slip,
+            velocity: [5.0, 7.0],
+            pressure: 0.0,
+        },
+        right: Boundary {
+            kind: BoundaryKind::Outlet,
+            velocity: [0.0, 0.0],
+            pressure: 0.0,
+        },
+        top: Boundary {
+            kind: BoundaryKind::Slip,
+            velocity: [3.0, 4.0],
+            pressure: 0.0,
+        },
+        ..Default::default()
+    };
+
+    let mut u = vec![9.0; mesh.u_count()];
+    let mut v = vec![9.0; mesh.v_count()];
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+
+    for j in 0..mesh.ny {
+        assert_eq!(u[mesh.u_index(0, j)], 0.0, "slip left normal velocity");
+        assert_eq!(
+            u[mesh.u_index(mesh.nx, j)],
+            u[mesh.u_index(mesh.nx - 1, j)],
+            "outlet copies the interior face"
+        );
+    }
+    for i in 0..mesh.nx {
+        assert_eq!(v[mesh.v_index(i, mesh.ny)], 0.0, "slip top normal velocity");
+    }
+    assert_eq!(u[mesh.u_index(4, 2)], 9.0, "interior x face untouched");
+    assert_eq!(v[mesh.v_index(3, 3)], 9.0, "interior y face untouched");
+    assert!(
+        BoundaryKind::from_str("slip").expect("slip") == BoundaryKind::Slip,
+        "`slip` must parse"
+    );
+    assert!(BoundaryKind::from_str("freeSlip").expect("freeSlip") == BoundaryKind::Slip);
+}
+
+#[test]
+fn outlet_pressure_sets_the_reference_pressure() {
+    let mut model = Model::new();
+    model.mesh.nx = 8;
+    model.mesh.ny = 8;
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 2.5,
+    };
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+    let divergence = vec![0.0; mesh.pressure_count()];
+    let mut pressure = vec![0.0; mesh.pressure_count()];
+    let stats = solve_pressure(
+        &mesh,
+        &model.boundaries,
+        &mut pressure,
+        &divergence,
+        1.0,
+        0.01,
+        &PressureSettings {
+            iterations: 2000,
+            tolerance: 1e-10,
+        },
+    )
+    .expect("pressure solve");
+    assert!(stats.converged, "pressure residual {}", stats.residual);
+    for j in 0..mesh.ny {
+        let value = pressure[mesh.pressure_index(mesh.nx - 1, j)];
+        assert!(
+            (value - 2.5).abs() < 1e-6,
+            "outlet pressure at row {j} is {value}, expected 2.5"
+        );
+    }
+    assert!((pressure[mesh.pressure_index(3, 3)] - 2.5).abs() < 1e-4);
+}
+
+#[test]
+fn slip_channel_has_no_wall_shear_report() {
+    let mut model = mesh_model(24, 12);
+    model.mesh.length_x = 2.0;
+    model.time.steps = 40;
+    model.time.pressure_iterations = 60;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top = Boundary {
+        kind: BoundaryKind::Slip,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.bottom = Boundary {
+        kind: BoundaryKind::Slip,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+
+    let solution = solve(&model).expect("slip channel");
+    assert_finite(&solution.u, "u");
+    assert_finite(&solution.v, "v");
+    assert!(
+        solution.report.wall_shear.is_empty(),
+        "slip sides must not report wall shear: {:?}",
+        solution.report.wall_shear
+    );
+    let mesh = &solution.mesh;
+    let mut vertical_variation = 0.0_f64;
+    for j in 1..mesh.ny - 1 {
+        let (middle, _) = mesh.cell_velocity(&solution.u, &solution.v, mesh.nx / 2, j);
+        let (bottom, _) = mesh.cell_velocity(&solution.u, &solution.v, mesh.nx / 2, 0);
+        vertical_variation = vertical_variation.max((middle - bottom).abs());
+    }
+    assert!(
+        vertical_variation < 0.2,
+        "slip channel profile varies by {vertical_variation} m/s across y"
     );
 }
 

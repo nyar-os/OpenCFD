@@ -1,4 +1,4 @@
-use crate::model::{Boundaries, BoundaryKind, MeshConfig, Obstacle};
+use crate::model::{Boundaries, Boundary, BoundaryKind, MeshConfig, Obstacle};
 use crate::CfdError;
 
 /// A structured, staggered (MAC) mesh over a rectangle.
@@ -174,40 +174,23 @@ impl Mesh {
     ///
     /// `u` is normal to the left and right sides and `v` is normal to the
     /// bottom and top sides. Walls and inlets prescribe the stored velocity;
-    /// outlets copy the adjacent interior face, a first-order zero-gradient
-    /// condition. Tangential wall velocities live half a cell inside the
-    /// domain and are imposed through ghost values in the momentum step, so
-    /// they remain part of the projection and keep the discrete divergence
-    /// consistent at boundary cells. Every face touching a solid cell is set to
-    /// zero afterwards, which makes the obstacle a no-slip, no-flux boundary.
+    /// slip walls impose zero normal velocity; outlets copy the adjacent
+    /// interior face, a first-order zero-gradient condition. Tangential wall
+    /// velocities live half a cell inside the domain and are imposed through
+    /// ghost values in the momentum step, so they remain part of the projection
+    /// and keep the discrete divergence consistent at boundary cells. Every
+    /// face touching a solid cell is set to zero afterwards, which makes the
+    /// obstacle a no-slip, no-flux boundary.
     pub fn apply_velocity_boundaries(&self, boundaries: &Boundaries, u: &mut [f64], v: &mut [f64]) {
         for j in 0..self.ny {
-            let left = if boundaries.left.kind == BoundaryKind::Outlet {
-                u[self.u_index(1, j)]
-            } else {
-                boundaries.left.velocity[0]
-            };
-            u[self.u_index(0, j)] = left;
-            let right = if boundaries.right.kind == BoundaryKind::Outlet {
-                u[self.u_index(self.nx - 1, j)]
-            } else {
-                boundaries.right.velocity[0]
-            };
-            u[self.u_index(self.nx, j)] = right;
+            u[self.u_index(0, j)] = normal_velocity(&boundaries.left, u[self.u_index(1, j)], 0);
+            u[self.u_index(self.nx, j)] =
+                normal_velocity(&boundaries.right, u[self.u_index(self.nx - 1, j)], 0);
         }
         for i in 0..self.nx {
-            let bottom = if boundaries.bottom.kind == BoundaryKind::Outlet {
-                v[self.v_index(i, 1)]
-            } else {
-                boundaries.bottom.velocity[1]
-            };
-            v[self.v_index(i, 0)] = bottom;
-            let top = if boundaries.top.kind == BoundaryKind::Outlet {
-                v[self.v_index(i, self.ny - 1)]
-            } else {
-                boundaries.top.velocity[1]
-            };
-            v[self.v_index(i, self.ny)] = top;
+            v[self.v_index(i, 0)] = normal_velocity(&boundaries.bottom, v[self.v_index(i, 1)], 1);
+            v[self.v_index(i, self.ny)] =
+                normal_velocity(&boundaries.top, v[self.v_index(i, self.ny - 1)], 1);
         }
         self.zero_solid_faces(u, v);
     }
@@ -246,5 +229,17 @@ impl Mesh {
             }
         }
         divergence
+    }
+}
+
+/// Normal velocity stored on one domain boundary face.
+///
+/// Outlets continue the adjacent interior value (zero gradient), slip walls
+/// block penetration, and walls and inlets prescribe the document velocity.
+fn normal_velocity(boundary: &Boundary, interior: f64, component: usize) -> f64 {
+    match boundary.kind {
+        BoundaryKind::Outlet => interior,
+        BoundaryKind::Slip => 0.0,
+        BoundaryKind::Wall | BoundaryKind::Inlet => boundary.velocity[component],
     }
 }

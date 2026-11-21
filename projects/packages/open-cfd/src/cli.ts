@@ -29,7 +29,7 @@ usage:
   open-cfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
-  open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]
+  open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   open-cfd obstacle list <file>
@@ -48,7 +48,7 @@ exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
 `;
 
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom'];
-const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet'];
+const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet', 'slip'];
 const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
 
 interface ParsedArguments {
@@ -155,7 +155,7 @@ function parseSide(raw: string): Side {
 
 function parseBoundaryKind(raw: string): BoundaryKind {
     if (!BOUNDARY_KINDS.includes(raw as BoundaryKind)) {
-        throw cliError('cli/invalid-boundary-kind', `unknown boundary kind \`${raw}\`; use wall, inlet or outlet`);
+        throw cliError('cli/invalid-boundary-kind', `unknown boundary kind \`${raw}\`; use wall, inlet, outlet or slip`);
     }
     return raw as BoundaryKind;
 }
@@ -307,11 +307,17 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
         }
         case 'boundary': {
             expectSet(rest, 'boundary');
-            const parsed = parseArguments(rest.slice(1), ['--side', '--kind', '--u', '--v']);
+            const parsed = parseArguments(rest.slice(1), [
+                '--side',
+                '--kind',
+                '--u',
+                '--v',
+                '--pressure',
+            ]);
             const file = positional(
                 parsed,
                 0,
-                'boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]',
+                'boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]',
             );
             const side = parseSide(requiredOption(parsed, '--side'));
             const kind = parseBoundaryKind(requiredOption(parsed, '--kind'));
@@ -321,10 +327,11 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 kind,
                 u: optionalNumber(parsed, '--u'),
                 v: optionalNumber(parsed, '--v'),
+                pressure: optionalNumber(parsed, '--pressure'),
             });
             const boundary = summary.boundaries[side];
             console.log(
-                `${side} boundary set to ${boundary.kind}, velocity=[${boundary.velocity[0]}, ${boundary.velocity[1]}] m/s`,
+                `${side} boundary set to ${boundary.kind}, velocity=[${boundary.velocity[0]}, ${boundary.velocity[1]}] m/s, pressure=${boundary.pressure} Pa`,
             );
             return 0;
         }

@@ -62,6 +62,50 @@ fn assert_report_close(actual: &serde_json::Value, expected: &serde_json::Value)
 }
 
 #[test]
+fn session_slip_and_outlet_pressure_round_trip() {
+    let directory = temporary_dir("slip");
+    let path = directory.join("slip.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .boundary_set(Side::Right, BoundaryKind::Outlet, None, None, Some(1.5))
+        .expect("outlet");
+    assert_eq!(summary.boundaries.right.kind, BoundaryKind::Outlet);
+    assert_eq!(summary.boundaries.right.pressure, 1.5);
+    let summary = session
+        .boundary_set(Side::Top, BoundaryKind::Slip, None, None, None)
+        .expect("slip");
+    assert_eq!(summary.boundaries.top.kind, BoundaryKind::Slip);
+
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.boundaries.right.kind, BoundaryKind::Outlet);
+    assert_eq!(stored.boundaries.right.pressure, 1.5);
+    assert_eq!(stored.boundaries.top.kind, BoundaryKind::Slip);
+
+    let cli_path = directory.join("cli-slip.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "boundary",
+        "set",
+        &cli,
+        "--side",
+        "right",
+        "--kind",
+        "outlet",
+        "--pressure",
+        "1.5",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd boundary set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(cli_stored.boundaries.right.pressure, 1.5);
+}
+
+#[test]
 fn session_create_edit_solve_export_matches_cli() {
     let directory = temporary_dir("session");
     let session_path = directory.join("session.ocfd");
@@ -74,7 +118,7 @@ fn session_create_edit_solve_export_matches_cli() {
     session.fluid_set(1.0, 0.01).expect("fluid set");
     session.time_set(0.01, 5, 20, Some(1e-3)).expect("time set");
     let summary = session
-        .boundary_set(Side::Top, BoundaryKind::Wall, Some(1.0), Some(0.0))
+        .boundary_set(Side::Top, BoundaryKind::Wall, Some(1.0), Some(0.0), None)
         .expect("boundary set");
     assert_eq!(summary.boundaries.top.velocity, [1.0, 0.0]);
     let summary = session.validate().expect("validate");

@@ -43,7 +43,7 @@ export interface TimeSettings {
 }
 
 /** Boundary kind of one side. */
-export type BoundaryKind = 'wall' | 'inlet' | 'outlet';
+export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'slip';
 
 /** Domain side name. */
 export type Side = 'left' | 'right' | 'top' | 'bottom';
@@ -52,6 +52,8 @@ export type Side = 'left' | 'right' | 'top' | 'bottom';
 export interface Boundary {
     readonly kind: BoundaryKind;
     readonly velocity: readonly [number, number];
+    /** Gauge pressure prescribed on an outlet side in Pa; ignored otherwise. */
+    readonly pressure: number;
 }
 
 /** Boundary conditions of the four sides. */
@@ -352,6 +354,8 @@ export interface BoundarySetRequest {
     readonly u?: number;
     /** Prescribed y velocity; omitted keeps the current value. */
     readonly v?: number;
+    /** Outlet reference pressure in Pa; omitted keeps the current value. */
+    readonly pressure?: number;
 }
 
 /** Arguments of `CfdCase.setConvection()`. */

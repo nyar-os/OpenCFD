@@ -206,7 +206,10 @@ fn boundary_set(ctx: CallContext) -> Result<JsValue> {
     let kind = text(&ctx, 2)?.parse::<BoundaryKind>().map_err(fail)?;
     let u = optional_number(&ctx, 3)?;
     let v = optional_number(&ctx, 4)?;
-    let summary = with_session(handle, |session| session.boundary_set(side, kind, u, v))?;
+    let pressure = optional_number(&ctx, 5)?;
+    let summary = with_session(handle, |session| {
+        session.boundary_set(side, kind, u, v, pressure)
+    })?;
     respond(&ctx, &json!(summary))
 }
 

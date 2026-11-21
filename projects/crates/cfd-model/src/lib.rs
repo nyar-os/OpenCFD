@@ -65,6 +65,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "convectionSchemes": "supported",
     "probes": "supported",
     "wallShear": "supported",
+    "slipBoundary": "supported",
+    "pressureOutlet": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

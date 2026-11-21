@@ -21,7 +21,7 @@ export interface NativeBinding {
     mesh_set(handle: number, nx: number, ny: number, lengthX: number, lengthY: number): string;
     fluid_set(handle: number, density: number, viscosity: number): string;
     time_set(handle: number, dt: number, steps: number, pressureIterations: number, tolerance?: number): string;
-    boundary_set(handle: number, side: string, kind: string, u?: number, v?: number): string;
+    boundary_set(handle: number, side: string, kind: string, u?: number, v?: number, pressure?: number): string;
     obstacle_add(handle: number, requestJson: string): string;
     obstacle_list(handle: number): string;
     probe_add(handle: number, requestJson: string): string;

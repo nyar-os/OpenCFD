@@ -307,13 +307,15 @@ impl OpenCfd {
         })
     }
 
-    /// Sets one side's boundary kind and optional velocity components.
+    /// Sets one side's boundary kind, optional velocity components and outlet
+    /// reference pressure.
     pub fn boundary_set(
         &mut self,
         side: Side,
         kind: BoundaryKind,
         u: Option<f64>,
         v: Option<f64>,
+        pressure: Option<f64>,
     ) -> Result<CaseSummary, CfdError> {
         self.edit(|model| {
             let boundary = model.boundaries.get_mut(side);
@@ -323,6 +325,9 @@ impl OpenCfd {
             }
             if let Some(v) = v {
                 boundary.velocity[1] = v;
+            }
+            if let Some(pressure) = pressure {
+                boundary.pressure = pressure;
             }
         })
     }

@@ -640,7 +640,7 @@ pub fn solve_pressure(
                 let centre = pressure[index];
                 let west = if i == 0 {
                     if boundaries.left.kind == BoundaryKind::Outlet {
-                        0.0
+                        boundaries.left.pressure
                     } else {
                         centre
                     }
@@ -651,7 +651,7 @@ pub fn solve_pressure(
                 };
                 let east = if i + 1 == mesh.nx {
                     if boundaries.right.kind == BoundaryKind::Outlet {
-                        0.0
+                        boundaries.right.pressure
                     } else {
                         centre
                     }
@@ -662,7 +662,7 @@ pub fn solve_pressure(
                 };
                 let south = if j == 0 {
                     if boundaries.bottom.kind == BoundaryKind::Outlet {
-                        0.0
+                        boundaries.bottom.pressure
                     } else {
                         centre
                     }
@@ -673,7 +673,7 @@ pub fn solve_pressure(
                 };
                 let north = if j + 1 == mesh.ny {
                     if boundaries.top.kind == BoundaryKind::Outlet {
-                        0.0
+                        boundaries.top.pressure
                     } else {
                         centre
                     }
@@ -748,7 +748,7 @@ fn pressure_residual(
             let centre = pressure[index];
             let west = if i == 0 {
                 if boundaries.left.kind == BoundaryKind::Outlet {
-                    0.0
+                    boundaries.left.pressure
                 } else {
                     centre
                 }
@@ -759,7 +759,7 @@ fn pressure_residual(
             };
             let east = if i + 1 == mesh.nx {
                 if boundaries.right.kind == BoundaryKind::Outlet {
-                    0.0
+                    boundaries.right.pressure
                 } else {
                     centre
                 }
@@ -770,7 +770,7 @@ fn pressure_residual(
             };
             let south = if j == 0 {
                 if boundaries.bottom.kind == BoundaryKind::Outlet {
-                    0.0
+                    boundaries.bottom.pressure
                 } else {
                     centre
                 }
@@ -781,7 +781,7 @@ fn pressure_residual(
             };
             let north = if j + 1 == mesh.ny {
                 if boundaries.top.kind == BoundaryKind::Outlet {
-                    0.0
+                    boundaries.top.pressure
                 } else {
                     centre
                 }
@@ -837,19 +837,23 @@ fn momentum_step(
             let convection = centre * du_dx + v_face * dv_dy;
 
             let below = if j == 0 {
-                if boundaries.bottom.kind == BoundaryKind::Outlet {
-                    u[mesh.u_index(i, 1)]
-                } else {
-                    2.0 * boundaries.bottom.velocity[0] - centre
+                match boundaries.bottom.kind {
+                    BoundaryKind::Outlet => u[mesh.u_index(i, 1)],
+                    BoundaryKind::Slip => centre,
+                    BoundaryKind::Wall | BoundaryKind::Inlet => {
+                        2.0 * boundaries.bottom.velocity[0] - centre
+                    }
                 }
             } else {
                 u[mesh.u_index(i, j - 1)]
             };
             let above = if j + 1 == mesh.ny {
-                if boundaries.top.kind == BoundaryKind::Outlet {
-                    u[mesh.u_index(i, mesh.ny - 2)]
-                } else {
-                    2.0 * boundaries.top.velocity[0] - centre
+                match boundaries.top.kind {
+                    BoundaryKind::Outlet => u[mesh.u_index(i, mesh.ny - 2)],
+                    BoundaryKind::Slip => centre,
+                    BoundaryKind::Wall | BoundaryKind::Inlet => {
+                        2.0 * boundaries.top.velocity[0] - centre
+                    }
                 }
             } else {
                 u[mesh.u_index(i, j + 1)]
@@ -885,19 +889,23 @@ fn momentum_step(
             let convection = u_face * du_dx + centre * dv_dy;
 
             let left = if i == 0 {
-                if boundaries.left.kind == BoundaryKind::Outlet {
-                    v[mesh.v_index(1, j)]
-                } else {
-                    2.0 * boundaries.left.velocity[1] - centre
+                match boundaries.left.kind {
+                    BoundaryKind::Outlet => v[mesh.v_index(1, j)],
+                    BoundaryKind::Slip => centre,
+                    BoundaryKind::Wall | BoundaryKind::Inlet => {
+                        2.0 * boundaries.left.velocity[1] - centre
+                    }
                 }
             } else {
                 v[mesh.v_index(i - 1, j)]
             };
             let right = if i + 1 == mesh.nx {
-                if boundaries.right.kind == BoundaryKind::Outlet {
-                    v[mesh.v_index(mesh.nx - 2, j)]
-                } else {
-                    2.0 * boundaries.right.velocity[1] - centre
+                match boundaries.right.kind {
+                    BoundaryKind::Outlet => v[mesh.v_index(mesh.nx - 2, j)],
+                    BoundaryKind::Slip => centre,
+                    BoundaryKind::Wall | BoundaryKind::Inlet => {
+                        2.0 * boundaries.right.velocity[1] - centre
+                    }
                 }
             } else {
                 v[mesh.v_index(i + 1, j)]
@@ -2447,18 +2455,22 @@ mod tests {
         model.boundaries.top = Boundary {
             kind: BoundaryKind::Wall,
             velocity: [1.0, 0.0],
+            pressure: 0.0,
         };
         model.boundaries.bottom = Boundary {
             kind: BoundaryKind::Wall,
             velocity: [0.0, 0.0],
+            pressure: 0.0,
         };
         model.boundaries.left = Boundary {
             kind: BoundaryKind::Wall,
             velocity: [0.0, 0.0],
+            pressure: 0.0,
         };
         model.boundaries.right = Boundary {
             kind: BoundaryKind::Inlet,
             velocity: [0.0, 0.0],
+            pressure: 0.0,
         };
 
         // Tangential profiles u = y and v = x have unit slope, so the wall
