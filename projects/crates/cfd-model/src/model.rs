@@ -258,6 +258,11 @@ pub enum BoundaryKind {
     Inlet,
     /// Zero-gradient velocity and a prescribed reference pressure.
     Outlet,
+    /// Convective outlet: the boundary face relaxes towards the interior value
+    /// at the local outflow speed, so vortices leave the domain without a
+    /// reflective zero-gradient artefact. The pressure is prescribed like an
+    /// [`BoundaryKind::Outlet`] side.
+    Convective,
     /// Free-slip wall: zero normal velocity and zero tangential gradient.
     Slip,
     /// Periodic side: the opposite side of the same axis copies this boundary
@@ -272,9 +277,19 @@ impl BoundaryKind {
             Self::Wall => "wall",
             Self::Inlet => "inlet",
             Self::Outlet => "outlet",
+            Self::Convective => "convective",
             Self::Slip => "slip",
             Self::Periodic => "periodic",
         }
+    }
+
+    /// Whether the side is an outlet that prescribes a Dirichlet pressure.
+    ///
+    /// Both the zero-gradient [`BoundaryKind::Outlet`] and the
+    /// [`BoundaryKind::Convective`] outlet own the pressure gauge, so the
+    /// pressure solve and mass-flux diagnostics treat them alike.
+    pub fn is_outlet(self) -> bool {
+        matches!(self, Self::Outlet | Self::Convective)
     }
 }
 
@@ -286,12 +301,13 @@ impl FromStr for BoundaryKind {
             "wall" => Ok(Self::Wall),
             "inlet" => Ok(Self::Inlet),
             "outlet" => Ok(Self::Outlet),
+            "convective" | "convectiveOutlet" | "convective-outlet" => Ok(Self::Convective),
             "slip" | "freeSlip" | "free-slip" | "free_slip" => Ok(Self::Slip),
             "periodic" => Ok(Self::Periodic),
             other => Err(CfdError::new(
                 "cli/invalid-boundary-kind",
                 format!(
-                    "unknown boundary kind `{other}`; only wall, inlet, outlet, slip or periodic is supported"
+                    "unknown boundary kind `{other}`; only wall, inlet, outlet, convective, slip or periodic is supported"
                 ),
             )),
         }
@@ -354,12 +370,12 @@ pub struct Boundary {
     #[serde(default)]
     pub kind: BoundaryKind,
     /// Prescribed velocity `[u, v]` (m/s). Used by walls and inlets; ignored by
-    /// outlets, which use zero-gradient velocity, and by slip walls, which
-    /// always carry zero normal velocity.
+    /// outlets and convective outlets, which use zero-gradient velocity, and by
+    /// slip walls, which always carry zero normal velocity.
     #[serde(default)]
     pub velocity: [f64; 2],
-    /// Gauge pressure prescribed on an outlet side (Pa). Ignored by other
-    /// boundary kinds.
+    /// Gauge pressure prescribed on an outlet or convective-outlet side (Pa).
+    /// Ignored by other boundary kinds.
     #[serde(default)]
     pub pressure: f64,
 }

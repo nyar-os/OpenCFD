@@ -581,6 +581,14 @@ pub fn solve_with_checkpoint(
             &mut v,
         );
         mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
+        mesh.apply_convective_outlets(
+            &model.boundaries,
+            &u_previous,
+            &v_previous,
+            &mut u,
+            &mut v,
+            dt,
+        );
 
         if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
             transport_thermal(
@@ -823,7 +831,7 @@ pub fn solve_pressure(
                 let west = if i == 0 {
                     if periodic_x {
                         pressure[mesh.pressure_index(mesh.nx - 1, j)]
-                    } else if boundaries.left.kind == BoundaryKind::Outlet {
+                    } else if boundaries.left.kind.is_outlet() {
                         boundaries.left.pressure
                     } else {
                         centre
@@ -836,7 +844,7 @@ pub fn solve_pressure(
                 let east = if i + 1 == mesh.nx {
                     if periodic_x {
                         pressure[mesh.pressure_index(0, j)]
-                    } else if boundaries.right.kind == BoundaryKind::Outlet {
+                    } else if boundaries.right.kind.is_outlet() {
                         boundaries.right.pressure
                     } else {
                         centre
@@ -849,7 +857,7 @@ pub fn solve_pressure(
                 let south = if j == 0 {
                     if periodic_y {
                         pressure[mesh.pressure_index(i, mesh.ny - 1)]
-                    } else if boundaries.bottom.kind == BoundaryKind::Outlet {
+                    } else if boundaries.bottom.kind.is_outlet() {
                         boundaries.bottom.pressure
                     } else {
                         centre
@@ -862,7 +870,7 @@ pub fn solve_pressure(
                 let north = if j + 1 == mesh.ny {
                     if periodic_y {
                         pressure[mesh.pressure_index(i, 0)]
-                    } else if boundaries.top.kind == BoundaryKind::Outlet {
+                    } else if boundaries.top.kind.is_outlet() {
                         boundaries.top.pressure
                     } else {
                         centre
@@ -915,10 +923,10 @@ pub fn solve_pressure(
 }
 
 fn has_dirichlet_pressure(boundaries: &Boundaries) -> bool {
-    boundaries.left.kind == BoundaryKind::Outlet
-        || boundaries.right.kind == BoundaryKind::Outlet
-        || boundaries.top.kind == BoundaryKind::Outlet
-        || boundaries.bottom.kind == BoundaryKind::Outlet
+    boundaries.left.kind.is_outlet()
+        || boundaries.right.kind.is_outlet()
+        || boundaries.top.kind.is_outlet()
+        || boundaries.bottom.kind.is_outlet()
 }
 
 fn pressure_residual(
@@ -941,7 +949,7 @@ fn pressure_residual(
             let west = if i == 0 {
                 if periodic_x {
                     pressure[mesh.pressure_index(mesh.nx - 1, j)]
-                } else if boundaries.left.kind == BoundaryKind::Outlet {
+                } else if boundaries.left.kind.is_outlet() {
                     boundaries.left.pressure
                 } else {
                     centre
@@ -954,7 +962,7 @@ fn pressure_residual(
             let east = if i + 1 == mesh.nx {
                 if periodic_x {
                     pressure[mesh.pressure_index(0, j)]
-                } else if boundaries.right.kind == BoundaryKind::Outlet {
+                } else if boundaries.right.kind.is_outlet() {
                     boundaries.right.pressure
                 } else {
                     centre
@@ -967,7 +975,7 @@ fn pressure_residual(
             let south = if j == 0 {
                 if periodic_y {
                     pressure[mesh.pressure_index(i, mesh.ny - 1)]
-                } else if boundaries.bottom.kind == BoundaryKind::Outlet {
+                } else if boundaries.bottom.kind.is_outlet() {
                     boundaries.bottom.pressure
                 } else {
                     centre
@@ -980,7 +988,7 @@ fn pressure_residual(
             let north = if j + 1 == mesh.ny {
                 if periodic_y {
                     pressure[mesh.pressure_index(i, 0)]
-                } else if boundaries.top.kind == BoundaryKind::Outlet {
+                } else if boundaries.top.kind.is_outlet() {
                     boundaries.top.pressure
                 } else {
                     centre
@@ -1084,7 +1092,9 @@ fn momentum_derivative(
                 u[mesh.u_index(i, if j == 0 { mesh.ny - 1 } else { j - 1 })]
             } else if j == 0 {
                 match boundaries.bottom.kind {
-                    BoundaryKind::Outlet | BoundaryKind::Periodic => u[mesh.u_index(i, 1)],
+                    BoundaryKind::Outlet | BoundaryKind::Convective | BoundaryKind::Periodic => {
+                        u[mesh.u_index(i, 1)]
+                    }
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.bottom.velocity[0] - centre
@@ -1097,7 +1107,7 @@ fn momentum_derivative(
                 u[mesh.u_index(i, if j + 1 == mesh.ny { 0 } else { j + 1 })]
             } else if j + 1 == mesh.ny {
                 match boundaries.top.kind {
-                    BoundaryKind::Outlet | BoundaryKind::Periodic => {
+                    BoundaryKind::Outlet | BoundaryKind::Convective | BoundaryKind::Periodic => {
                         u[mesh.u_index(i, mesh.ny - 2)]
                     }
                     BoundaryKind::Slip => centre,
@@ -1180,7 +1190,9 @@ fn momentum_derivative(
                 v[mesh.v_index(if i == 0 { mesh.nx - 1 } else { i - 1 }, j)]
             } else if i == 0 {
                 match boundaries.left.kind {
-                    BoundaryKind::Outlet | BoundaryKind::Periodic => v[mesh.v_index(1, j)],
+                    BoundaryKind::Outlet | BoundaryKind::Convective | BoundaryKind::Periodic => {
+                        v[mesh.v_index(1, j)]
+                    }
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.left.velocity[1] - centre
@@ -1193,7 +1205,7 @@ fn momentum_derivative(
                 v[mesh.v_index(if i + 1 == mesh.nx { 0 } else { i + 1 }, j)]
             } else if i + 1 == mesh.nx {
                 match boundaries.right.kind {
-                    BoundaryKind::Outlet | BoundaryKind::Periodic => {
+                    BoundaryKind::Outlet | BoundaryKind::Convective | BoundaryKind::Periodic => {
                         v[mesh.v_index(mesh.nx - 2, j)]
                     }
                     BoundaryKind::Slip => centre,

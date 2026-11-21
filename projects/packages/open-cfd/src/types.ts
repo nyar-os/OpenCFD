@@ -62,7 +62,7 @@ export interface TimeSettings {
 }
 
 /** Boundary kind of one side. */
-export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'slip' | 'periodic';
+export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'convective' | 'slip' | 'periodic';
 
 /** Normal-velocity shape of an inlet side. */
 export type InletProfile = 'uniform' | 'parabolic' | 'powerLaw';
@@ -84,7 +84,7 @@ export type Side = 'left' | 'right' | 'top' | 'bottom';
 export interface Boundary {
     readonly kind: BoundaryKind;
     readonly velocity: readonly [number, number];
-    /** Gauge pressure prescribed on an outlet side in Pa; ignored otherwise. */
+    /** Gauge pressure prescribed on an outlet or convective-outlet side in Pa; ignored otherwise. */
     readonly pressure: number;
 }
 

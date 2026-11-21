@@ -1020,6 +1020,12 @@ fn slip_boundary_blocks_normal_flow_and_keeps_tangential_faces_free() {
         "`slip` must parse"
     );
     assert!(BoundaryKind::from_str("freeSlip").expect("freeSlip") == BoundaryKind::Slip);
+    assert!(
+        BoundaryKind::from_str("convective").expect("convective") == BoundaryKind::Convective,
+        "`convective` must parse"
+    );
+    assert!(BoundaryKind::Convective.is_outlet());
+    assert!(!BoundaryKind::Wall.is_outlet());
 }
 
 #[test]
@@ -1057,6 +1063,150 @@ fn outlet_pressure_sets_the_reference_pressure() {
         );
     }
     assert!((pressure[mesh.pressure_index(3, 3)] - 2.5).abs() < 1e-4);
+}
+
+#[test]
+fn convective_outlet_prescribes_the_reference_pressure() {
+    let mut model = mesh_model(8, 8);
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Convective,
+        velocity: [0.0, 0.0],
+        pressure: 2.5,
+    };
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+    let divergence = vec![0.0; mesh.pressure_count()];
+    let mut pressure = vec![0.0; mesh.pressure_count()];
+    let stats = solve_pressure(
+        &mesh,
+        &model.boundaries,
+        &mut pressure,
+        &divergence,
+        1.0,
+        0.01,
+        &PressureSettings {
+            iterations: 2000,
+            tolerance: 1e-10,
+        },
+    )
+    .expect("pressure solve");
+    assert!(stats.converged, "pressure residual {}", stats.residual);
+    for j in 0..mesh.ny {
+        let value = pressure[mesh.pressure_index(mesh.nx - 1, j)];
+        assert!(
+            (value - 2.5).abs() < 1e-6,
+            "convective outlet pressure at row {j} is {value}, expected 2.5"
+        );
+    }
+}
+
+#[test]
+fn convective_outlet_blends_the_previous_face_towards_the_interior() {
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 4,
+        ny: 4,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let mut boundaries = Boundaries::default();
+    boundaries.right.kind = BoundaryKind::Convective;
+    boundaries.top.kind = BoundaryKind::Slip;
+    boundaries.bottom.kind = BoundaryKind::Slip;
+
+    let mut previous_u = vec![0.0; mesh.u_count()];
+    let previous_v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        previous_u[mesh.u_index(mesh.nx - 1, j)] = 2.0;
+    }
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        u[mesh.u_index(mesh.nx - 1, j)] = 1.0;
+        u[mesh.u_index(mesh.nx, j)] = 1.0;
+    }
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    for j in 0..mesh.ny {
+        assert_eq!(u[mesh.u_index(mesh.nx, j)], 1.0);
+    }
+
+    let dt = 0.1;
+    mesh.apply_convective_outlets(&boundaries, &previous_u, &previous_v, &mut u, &mut v, dt);
+    let beta = (2.0 / mesh.dx) * dt;
+    let expected = beta / (1.0 + beta);
+    for j in 0..mesh.ny {
+        let value = u[mesh.u_index(mesh.nx, j)];
+        assert!(
+            (value - expected).abs() < 1e-12,
+            "row {j}: blended face {value}, expected {expected}"
+        );
+    }
+
+    // An inflow basis has no outward advection, so the face keeps the
+    // zero-gradient interior value.
+    for j in 0..mesh.ny {
+        previous_u[mesh.u_index(mesh.nx - 1, j)] = -1.0;
+    }
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    mesh.apply_convective_outlets(&boundaries, &previous_u, &previous_v, &mut u, &mut v, dt);
+    for j in 0..mesh.ny {
+        assert_eq!(u[mesh.u_index(mesh.nx, j)], u[mesh.u_index(mesh.nx - 1, j)]);
+    }
+}
+
+#[test]
+fn convective_outlet_channel_stays_finite_and_follows_the_interior() {
+    let mut model = mesh_model(24, 12);
+    model.mesh.length_x = 2.0;
+    model.fluid.viscosity = 0.01;
+    model.time.dt = 0.005;
+    model.time.steps = 60;
+    model.time.pressure_iterations = 80;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Convective,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top.kind = BoundaryKind::Slip;
+    model.boundaries.bottom.kind = BoundaryKind::Slip;
+
+    let solution = solve(&model).expect("convective outlet solve");
+    assert_finite(&solution.u, "u");
+    assert_finite(&solution.v, "v");
+    let mesh = &solution.mesh;
+    // The convective condition re-imposes the outlet face after the projection,
+    // so only the last cell column carries a small compensated divergence.
+    let divergence = mesh.divergence(&solution.u, &solution.v);
+    let mut interior = 0.0;
+    let mut count = 0_usize;
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx - 1 {
+            let value = divergence[mesh.pressure_index(i, j)];
+            interior += value * value;
+            count += 1;
+        }
+    }
+    let interior_rms = (interior / count as f64).sqrt();
+    assert!(interior_rms < 5e-3, "interior divergence {interior_rms}");
+    assert!(
+        solution.report.divergence_l2 < 0.5,
+        "total divergence {}",
+        solution.report.divergence_l2
+    );
+    for j in 0..mesh.ny {
+        let face = solution.u[mesh.u_index(mesh.nx, j)];
+        let interior = solution.u[mesh.u_index(mesh.nx - 1, j)];
+        assert!(
+            (face - interior).abs() < 0.25,
+            "row {j}: boundary {face} is not close to interior {interior}"
+        );
+    }
+    assert!(solution.report.mass_balance.outflow > 0.0);
+    assert!(solution.report.mass_balance.inflow > 0.0);
 }
 
 #[test]

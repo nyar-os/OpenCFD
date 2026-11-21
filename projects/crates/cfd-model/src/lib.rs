@@ -22,8 +22,8 @@
 //! * CSV and legacy VTK field export at cell centres or mesh nodes;
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
-//! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet and
-//!   pressure-outlet sides.
+//! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet,
+//!   pressure-outlet and convective-outlet sides.
 //!
 //! Compressibility, three-dimensional grids, adaptive meshing and external
 //! format import are **not** implemented. See
@@ -87,6 +87,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "wallShear": "supported",
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
+    "convectiveOutlet": "supported",
     "periodic": "supported",
     "pressureDriven": "supported",
     "inletProfiles": "supported",

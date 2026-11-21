@@ -237,6 +237,91 @@ impl Mesh {
         self.zero_solid_faces(u, v);
     }
 
+    /// Applies the first-order convective outlet condition on every
+    /// `convective` side.
+    ///
+    /// The boundary face is relaxed as `φ_b = (φ_bⁿ + β·φ_i)/(1 + β)` with
+    /// `β = max(uₙⁿ, 0)·dt/h`, where `φ_bⁿ` is the previous boundary value,
+    /// `φ_i` the new adjacent interior face and `uₙⁿ` the previous interior
+    /// normal velocity. The result is a bounded convex blend: at rest it equals
+    /// the zero-gradient value, and outgoing flow advects the interior value
+    /// outwards. A side with inflow (`uₙⁿ ≤ 0`) falls back to zero gradient.
+    pub fn apply_convective_outlets(
+        &self,
+        boundaries: &Boundaries,
+        previous_u: &[f64],
+        previous_v: &[f64],
+        u: &mut [f64],
+        v: &mut [f64],
+        dt: f64,
+    ) {
+        if !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        let blend = |previous: f64, interior: f64, rate: f64| {
+            if rate <= 0.0 {
+                return interior;
+            }
+            let beta = rate * dt;
+            (previous + beta * interior) / (1.0 + beta)
+        };
+        for j in 0..self.ny {
+            if boundaries.left.kind == BoundaryKind::Convective
+                && !boundaries.is_periodic(Side::Left)
+            {
+                let face = self.u_index(0, j);
+                let interior = self.u_index(1, j);
+                if self.u_face_open(0, j) {
+                    u[face] = blend(
+                        previous_u[face],
+                        u[interior],
+                        previous_u[interior] / self.dx,
+                    );
+                }
+            }
+            if boundaries.right.kind == BoundaryKind::Convective
+                && !boundaries.is_periodic(Side::Right)
+            {
+                let face = self.u_index(self.nx, j);
+                let interior = self.u_index(self.nx - 1, j);
+                if self.u_face_open(self.nx, j) {
+                    u[face] = blend(
+                        previous_u[face],
+                        u[interior],
+                        previous_u[interior] / self.dx,
+                    );
+                }
+            }
+        }
+        for i in 0..self.nx {
+            if boundaries.bottom.kind == BoundaryKind::Convective
+                && !boundaries.is_periodic(Side::Bottom)
+            {
+                let face = self.v_index(i, 0);
+                let interior = self.v_index(i, 1);
+                if self.v_face_open(i, 0) {
+                    v[face] = blend(
+                        previous_v[face],
+                        v[interior],
+                        previous_v[interior] / self.dy,
+                    );
+                }
+            }
+            if boundaries.top.kind == BoundaryKind::Convective && !boundaries.is_periodic(Side::Top)
+            {
+                let face = self.v_index(i, self.ny);
+                let interior = self.v_index(i, self.ny - 1);
+                if self.v_face_open(i, self.ny) {
+                    v[face] = blend(
+                        previous_v[face],
+                        v[interior],
+                        previous_v[interior] / self.dy,
+                    );
+                }
+            }
+        }
+    }
+
     /// Sets every face adjacent to a solid cell to zero velocity.
     pub fn zero_solid_faces(&self, u: &mut [f64], v: &mut [f64]) {
         for j in 0..self.ny {
@@ -279,10 +364,12 @@ impl Mesh {
 /// Outlets continue the adjacent interior value (zero gradient), slip walls
 /// block penetration, and walls prescribe the document velocity. Inlets scale
 /// the prescribed normal velocity by `scale`, the configured profile factor at
-/// the face position measured from the low corner of the side.
+/// the face position measured from the low corner of the side. A convective
+/// outlet starts from the same zero-gradient value and is relaxed towards the
+/// interior by [`Mesh::apply_convective_outlets`] after every step.
 fn normal_velocity(boundary: &Boundary, interior: f64, component: usize, scale: f64) -> f64 {
     match boundary.kind {
-        BoundaryKind::Outlet | BoundaryKind::Periodic => interior,
+        BoundaryKind::Outlet | BoundaryKind::Convective | BoundaryKind::Periodic => interior,
         BoundaryKind::Slip => 0.0,
         BoundaryKind::Wall => boundary.velocity[component],
         BoundaryKind::Inlet => boundary.velocity[component] * scale,
