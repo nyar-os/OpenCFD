@@ -4,10 +4,10 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_csv, export_svg, export_vtk, solve, solve_pressure, solve_with, stream_function,
-    transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme, ExportField, Mesh,
-    Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution, SolveOptions,
-    CAPABILITIES_JSON, VERSION,
+    export_csv, export_streamlines, export_svg, export_vtk, solve, solve_pressure, solve_with,
+    stream_function, transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme,
+    ExportField, Mesh, Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution,
+    SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -721,6 +721,19 @@ fn solve_reports_derived_fields_and_svg_export() {
     let svg = fs::read_to_string(&svg_path).expect("read svg");
     assert!(svg.contains("OpenCFD vorticity field (1/s)"));
     assert!(svg.contains("range "));
+
+    let stream_path = export_streamlines(&solution, &directory).expect("streamlines");
+    assert_eq!(
+        stream_path.file_name().and_then(|name| name.to_str()),
+        Some("solution-streamlines.svg")
+    );
+    let streamlines = fs::read_to_string(&stream_path).expect("read streamlines");
+    assert!(streamlines.contains("OpenCFD streamlines"));
+    assert!(
+        streamlines.matches("<polyline").count() > 0,
+        "streamline SVG has no polylines"
+    );
+    assert!(streamlines.contains("lines, maximum face speed"));
 }
 
 #[test]

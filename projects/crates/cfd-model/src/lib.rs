@@ -31,7 +31,9 @@ mod session;
 mod solver;
 
 pub use crate::error::CfdError;
-pub use crate::export::{export_csv, export_svg, export_vtk, write_atomic, ExportField};
+pub use crate::export::{
+    export_csv, export_streamlines, export_svg, export_vtk, write_atomic, ExportField,
+};
 pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
@@ -81,6 +83,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "csv": "supported",
     "vtk": "supported",
     "svg": "supported",
+    "streamlines": "supported",
     "inp": "unsupported",
     "openfoam": "unsupported"
   }

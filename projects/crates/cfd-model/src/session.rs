@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use crate::export::{export_csv, export_svg, export_vtk, ExportField};
+use crate::export::{export_csv, export_streamlines, export_svg, export_vtk, ExportField};
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, MeshConfig, Model, Obstacle,
     Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
@@ -30,6 +30,8 @@ pub enum ExportFormat {
     Vtk,
     /// Self-contained SVG preview of one cell-centred field.
     Svg,
+    /// Self-contained SVG of traced streamlines.
+    Streamlines,
 }
 
 impl ExportFormat {
@@ -39,6 +41,7 @@ impl ExportFormat {
             Self::Csv => "csv",
             Self::Vtk => "vtk",
             Self::Svg => "svg",
+            Self::Streamlines => "streamlines",
         }
     }
 }
@@ -51,15 +54,18 @@ impl FromStr for ExportFormat {
             "csv" => Ok(Self::Csv),
             "vtk" => Ok(Self::Vtk),
             "svg" => Ok(Self::Svg),
+            "streamlines" | "streamline" => Ok(Self::Streamlines),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk or svg are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg or streamlines are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
-                format!("unknown export format `{other}`; only csv, vtk or svg are supported"),
+                format!(
+                    "unknown export format `{other}`; only csv, vtk, svg or streamlines are supported"
+                ),
             )),
         }
     }
@@ -502,6 +508,7 @@ impl OpenCfd {
             ExportFormat::Csv => export_csv(&solution, out)?,
             ExportFormat::Vtk => export_vtk(&solution, out)?,
             ExportFormat::Svg => export_svg(&solution, out, field)?,
+            ExportFormat::Streamlines => export_streamlines(&solution, out)?,
         };
         Ok(ExportReport {
             format: format.as_str().to_string(),

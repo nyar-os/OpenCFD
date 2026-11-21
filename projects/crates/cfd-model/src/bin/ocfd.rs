@@ -36,7 +36,7 @@ Usage:
        [--reference-temperature <K>]
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -655,7 +655,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
@@ -669,6 +669,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         ExportFormat::Csv => println!("exported CSV: {}", report.path),
         ExportFormat::Vtk => println!("exported legacy ASCII VTK: {}", report.path),
         ExportFormat::Svg => println!("exported SVG ({}): {}", field.as_str(), report.path),
+        ExportFormat::Streamlines => println!("exported streamlines SVG: {}", report.path),
     }
     Ok(0)
 }

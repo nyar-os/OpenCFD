@@ -206,9 +206,17 @@ fn session_create_edit_solve_export_matches_cli() {
     let svg = session
         .export_field(ExportFormat::Svg, &svg_path, ExportField::Vorticity)
         .expect("svg export");
+    let stream_path = directory.join("streamlines.svg");
+    let streams = session
+        .export(ExportFormat::Streamlines, &stream_path)
+        .expect("streamline export");
     assert!(PathBuf::from(&csv.path).is_file());
     assert!(PathBuf::from(&vtk.path).is_file());
     assert!(PathBuf::from(&svg.path).is_file());
+    assert!(PathBuf::from(&streams.path).is_file());
+    let stream_text = fs::read_to_string(&stream_path).expect("read streamlines");
+    assert!(stream_text.contains("OpenCFD streamlines"));
+    assert!(stream_text.contains("<polyline"));
     let svg_text = fs::read_to_string(&svg_path).expect("read svg");
     assert!(svg_text.contains("OpenCFD vorticity field (1/s)"));
     let vtk_text = fs::read_to_string(&vtk_path).expect("read vtk");
@@ -323,6 +331,24 @@ fn session_create_edit_solve_export_matches_cli() {
     );
     let cli_svg = fs::read_to_string(&cli_svg_path).expect("CLI svg");
     assert!(cli_svg.contains("OpenCFD streamFunction field (m²/s)"));
+
+    let cli_stream_path = directory.join("cli-streamlines.svg");
+    let output = run_cli(&[
+        "export",
+        &text(&cli_path),
+        "--format",
+        "streamlines",
+        "--out",
+        &text(&cli_stream_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd streamlines export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stream = fs::read_to_string(&cli_stream_path).expect("CLI streamlines");
+    assert!(cli_stream.contains("OpenCFD streamlines"));
+    assert!(cli_stream.contains("<polyline"));
 
     let output = run_cli(&["probe", "list", &text(&cli_path)]);
     assert!(output.status.success());

@@ -41,7 +41,7 @@ usage:
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -175,8 +175,8 @@ function parseExportFormat(raw: string): ExportFormat {
     if (raw === 'inp' || raw === 'openfoam') {
         throw new NotImplementedError(`${raw} export`);
     }
-    if (raw !== 'csv' && raw !== 'vtk' && raw !== 'svg') {
-        throw cliError('cli/unknown-format', `unknown export format \`${raw}\`; use csv, vtk or svg`);
+    if (raw !== 'csv' && raw !== 'vtk' && raw !== 'svg' && raw !== 'streamlines') {
+        throw cliError('cli/unknown-format', `unknown export format \`${raw}\`; use csv, vtk, svg or streamlines`);
     }
     return raw;
 }
@@ -528,7 +528,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];
@@ -540,6 +540,8 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log(`exported CSV: ${report.path}`);
             } else if (format === 'vtk') {
                 console.log(`exported legacy ASCII VTK: ${report.path}`);
+            } else if (format === 'streamlines') {
+                console.log(`exported streamlines SVG: ${report.path}`);
             } else {
                 console.log(`exported SVG (${field ?? 'pressure'}): ${report.path}`);
             }

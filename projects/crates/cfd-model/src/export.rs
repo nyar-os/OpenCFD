@@ -279,6 +279,211 @@ pub fn export_vtk(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError>
     Ok(target)
 }
 
+/// Writes a self-contained SVG of streamlines traced through the velocity field.
+///
+/// Lines are seeded on a regular grid, integrated with a second-order midpoint
+/// rule and traced both upstream and downstream. Integration stops at a solid
+/// cell, outside the domain, at a stagnation point or after a fixed step cap,
+/// so closed vortices cannot loop forever. When `path` ends in `.svg` it is
+/// used as the output file; otherwise it is treated as a directory and
+/// `solution-streamlines.svg` is created inside it.
+pub fn export_streamlines(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "svg", "solution-streamlines.svg");
+    let lines = trace_streamlines(solution);
+    let text = render_streamlines(solution, &lines);
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
+const STREAMLINE_SEEDS: usize = 6;
+const MAX_STREAMLINE_STEPS: usize = 600;
+
+/// Traces deterministic streamlines seeded on a regular grid.
+fn trace_streamlines(solution: &Solution) -> Vec<Vec<(f64, f64)>> {
+    let mesh = &solution.mesh;
+    let step = 0.5 * mesh.dx.min(mesh.dy);
+    let mut lines = Vec::new();
+    for sy in 0..STREAMLINE_SEEDS {
+        for sx in 0..STREAMLINE_SEEDS {
+            let x = (sx as f64 + 0.5) / STREAMLINE_SEEDS as f64 * mesh.length_x;
+            let y = (sy as f64 + 0.5) / STREAMLINE_SEEDS as f64 * mesh.length_y;
+            if !is_fluid_point(mesh, x, y) {
+                continue;
+            }
+            let downstream = trace_line(solution, x, y, 1.0, step);
+            let upstream = trace_line(solution, x, y, -1.0, step);
+            let mut line: Vec<(f64, f64)> = upstream.into_iter().rev().collect();
+            line.extend(downstream.into_iter().skip(1));
+            if line.len() >= 4 {
+                lines.push(line);
+            }
+        }
+    }
+    lines
+}
+
+fn trace_line(
+    solution: &Solution,
+    start_x: f64,
+    start_y: f64,
+    direction: f64,
+    step: f64,
+) -> Vec<(f64, f64)> {
+    let mesh = &solution.mesh;
+    let mut points = vec![(start_x, start_y)];
+    let (mut x, mut y) = (start_x, start_y);
+    for _ in 0..MAX_STREAMLINE_STEPS {
+        let Some((ux, uy)) = sample_velocity(solution, x, y) else {
+            break;
+        };
+        let speed = ux.hypot(uy);
+        if speed < 1e-10 {
+            break;
+        }
+        let k1x = direction * ux / speed;
+        let k1y = direction * uy / speed;
+        let mid_x = x + 0.5 * step * k1x;
+        let mid_y = y + 0.5 * step * k1y;
+        let Some((mx, my)) = sample_velocity(solution, mid_x, mid_y) else {
+            break;
+        };
+        let mid_speed = mx.hypot(my);
+        if mid_speed < 1e-10 {
+            break;
+        }
+        let next_x = x + step * direction * mx / mid_speed;
+        let next_y = y + step * direction * my / mid_speed;
+        if next_x < 0.0
+            || next_y < 0.0
+            || next_x > mesh.length_x
+            || next_y > mesh.length_y
+            || !is_fluid_point(mesh, next_x, next_y)
+        {
+            break;
+        }
+        points.push((next_x, next_y));
+        x = next_x;
+        y = next_y;
+    }
+    points
+}
+
+fn is_fluid_point(mesh: &crate::mesh::Mesh, x: f64, y: f64) -> bool {
+    if x < 0.0 || y < 0.0 || x > mesh.length_x || y > mesh.length_y {
+        return false;
+    }
+    let i = ((x / mesh.dx).floor() as isize).clamp(0, mesh.nx as isize - 1) as usize;
+    let j = ((y / mesh.dy).floor() as isize).clamp(0, mesh.ny as isize - 1) as usize;
+    !mesh.is_solid(i, j)
+}
+
+/// Bilinear velocity at an arbitrary point, or `None` inside a solid cell.
+fn sample_velocity(solution: &Solution, x: f64, y: f64) -> Option<(f64, f64)> {
+    let mesh = &solution.mesh;
+    if !is_fluid_point(mesh, x, y) {
+        return None;
+    }
+    let fx = (x / mesh.dx - 0.5).clamp(0.0, (mesh.nx - 1) as f64);
+    let fy = (y / mesh.dy - 0.5).clamp(0.0, (mesh.ny - 1) as f64);
+    let i0 = fx.floor() as usize;
+    let j0 = fy.floor() as usize;
+    let i1 = (i0 + 1).min(mesh.nx - 1);
+    let j1 = (j0 + 1).min(mesh.ny - 1);
+    let tx = fx - i0 as f64;
+    let ty = fy - j0 as f64;
+    let value = |i: usize, j: usize, component_x: bool| {
+        let index = mesh.pressure_index(i, j);
+        if mesh.solid[index] {
+            return 0.0;
+        }
+        let (ux, uy) = mesh.cell_velocity(&solution.u, &solution.v, i, j);
+        if component_x {
+            ux
+        } else {
+            uy
+        }
+    };
+    let interpolate = |component_x: bool| {
+        let lower = (1.0 - tx) * value(i0, j0, component_x) + tx * value(i1, j0, component_x);
+        let upper = (1.0 - tx) * value(i0, j1, component_x) + tx * value(i1, j1, component_x);
+        (1.0 - ty) * lower + ty * upper
+    };
+    Some((interpolate(true), interpolate(false)))
+}
+
+fn render_streamlines(solution: &Solution, lines: &[Vec<(f64, f64)>]) -> String {
+    let mesh = &solution.mesh;
+    let cell_size = 18.0;
+    let margin = 24.0;
+    let plot_width = mesh.nx as f64 * cell_size;
+    let plot_height = mesh.ny as f64 * cell_size;
+    let width = plot_width + 2.0 * margin;
+    let height = plot_height + 2.0 * margin + 52.0;
+    let max_speed = solution
+        .u
+        .iter()
+        .chain(solution.v.iter())
+        .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
+
+    let mut svg = String::new();
+    let _ = writeln!(
+        svg,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.0}\" height=\"{height:.0}\" viewBox=\"0 0 {width:.0} {height:.0}\">"
+    );
+    svg.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>\n");
+    let _ = writeln!(
+        svg,
+        "<text x=\"{margin:.0}\" y=\"{title_y:.0}\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"18\" font-weight=\"600\">OpenCFD streamlines</text>",
+        title_y = margin + 4.0,
+    );
+    let _ = writeln!(
+        svg,
+        "<text x=\"{margin:.0}\" y=\"{range_y:.0}\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"12\" fill=\"#444\">{count} lines, maximum face speed {max_speed:.6} m/s</text>",
+        range_y = margin + 28.0,
+        count = lines.len(),
+    );
+
+    let top = margin + 52.0;
+    for (index, value) in mesh.solid.iter().enumerate() {
+        if !*value {
+            continue;
+        }
+        let i = index % mesh.nx;
+        let j = index / mesh.nx;
+        let _ = writeln!(
+            svg,
+            "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{cell_size:.2}\" height=\"{cell_size:.2}\" fill=\"#d9d9d9\"/>",
+            x = margin + i as f64 * cell_size,
+            y = top + (mesh.ny - 1 - j) as f64 * cell_size,
+        );
+    }
+
+    let to_pixel = |x: f64, y: f64| {
+        (
+            margin + x / mesh.length_x * plot_width,
+            top + (1.0 - y / mesh.length_y) * plot_height,
+        )
+    };
+    for line in lines {
+        let mut points = String::new();
+        for (x, y) in line {
+            let (px, py) = to_pixel(*x, *y);
+            let _ = write!(points, "{px:.2},{py:.2} ");
+        }
+        let _ = writeln!(
+            svg,
+            "<polyline points=\"{}\" fill=\"none\" stroke=\"#1d4ed8\" stroke-width=\"1.1\" stroke-linecap=\"round\" opacity=\"0.85\"/>",
+            points.trim_end()
+        );
+    }
+    let _ = writeln!(
+        svg,
+        "<rect x=\"{margin:.2}\" y=\"{top:.2}\" width=\"{plot_width:.2}\" height=\"{plot_height:.2}\" fill=\"none\" stroke=\"#222\" stroke-width=\"1\"/>"
+    );
+    svg.push_str("</svg>\n");
+    svg
+}
+
 /// Samples the staggered solution as a quad mesh over the pressure cells.
 ///
 /// Point `j * nx + i` is the centre of cell `(i, j)`, matching
