@@ -14,7 +14,8 @@ parabolic/power-law inlet profiles), uniform pressure gradients for
 pressure-driven flow, obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
-streamlines, residual history CSV or force history CSV. `solve` can resume from
+streamlines, residual history CSV or force history CSV. CSV and VTK can sample
+cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
 (`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
@@ -49,7 +50,7 @@ ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -89,6 +90,8 @@ rename. Confirm the path before running them.
   are excluded from the boundary mass balance.
   `contours` writes nine filled value bands plus marching-squares iso-lines and
   accepts the same `--field` names as `svg`, including `speed`.
+  `--layout node` samples the `(nx+1)×(ny+1)` mesh vertices (each value is the
+  mean of its adjacent fluid cells); `--layout cell` is the default.
 - Momentum time integration is `euler` (default) or `rk2`; both are explicit and
   share the same CFL and diffusion stability guards. Set `time.adaptive` with
   `time.targetCfl` in `(0, 1]` (or `--cfl <n>` / `--cfl off`) to clamp every

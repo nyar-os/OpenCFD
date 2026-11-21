@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, InletProfile, Model,
-    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
+    BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
+    InletProfile, Model, OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -291,6 +291,19 @@ fn session_create_edit_solve_export_matches_cli() {
     let csv = session
         .export(ExportFormat::Csv, &directory.join("csv"))
         .expect("csv export");
+    assert_eq!(csv.layout, "cell");
+    let node_csv_path = directory.join("nodes.csv");
+    let node_csv = session
+        .export_field_with_layout(
+            ExportFormat::Csv,
+            &node_csv_path,
+            ExportField::Pressure,
+            ExportLayout::Node,
+        )
+        .expect("node csv export");
+    assert_eq!(node_csv.layout, "node");
+    let node_text = fs::read_to_string(&node_csv_path).expect("read node csv");
+    assert_eq!(node_text.lines().count(), 13 * 11 + 1);
     let vtk_path = directory.join("result.vtk");
     let vtk = session
         .export(ExportFormat::Vtk, &vtk_path)

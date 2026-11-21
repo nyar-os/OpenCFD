@@ -253,9 +253,17 @@ export type ExportField =
     | 'streamFunction'
     | 'speed';
 
+/**
+ * Sampling layout of a CSV or VTK field export. `node` averages the adjacent
+ * fluid cells onto the `(nx + 1) × (ny + 1)` mesh vertices.
+ */
+export type ExportLayout = 'cell' | 'node';
+
 /** Result of one export. */
 export interface ExportReport {
     readonly format: ExportFormat;
+    /** Sampling layout of a CSV or VTK export; other formats report `cell`. */
+    readonly layout: ExportLayout;
     readonly path: string;
 }
 

@@ -67,6 +67,47 @@ impl FromStr for ExportField {
     }
 }
 
+/// Sampling layout of a CSV or VTK field export.
+///
+/// `Cell` writes one point per pressure cell centre, so the point index is the
+/// mesh's pressure index. `Node` writes one point per mesh vertex, i.e. the
+/// `(nx + 1) × (ny + 1)` corners of the cells, with every value averaged from
+/// the adjacent fluid cells. Solid cells contribute nothing, so a vertex that
+/// only touches solids reports zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportLayout {
+    /// Cell-centred values in pressure-cell order.
+    #[default]
+    Cell,
+    /// Node (vertex) values averaged from the adjacent cell centres.
+    Node,
+}
+
+impl ExportLayout {
+    /// Returns the lowercase identifier used by the CLI and the SDK.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cell => "cell",
+            Self::Node => "node",
+        }
+    }
+}
+
+impl FromStr for ExportLayout {
+    type Err = CfdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "cell" | "cells" | "cell-centred" | "cellCentered" => Ok(Self::Cell),
+            "node" | "nodes" | "vertex" | "vertices" => Ok(Self::Node),
+            other => Err(CfdError::new(
+                "export/invalid-layout",
+                format!("unknown export layout `{other}`; only cell or node is supported"),
+            )),
+        }
+    }
+}
+
 /// Fixed nine-stop blue-to-red palette used by every SVG preview.
 const PALETTE: [&str; 9] = [
     "#08306b", "#2171b5", "#4292c6", "#6baed6", "#c7e9c0", "#fee391", "#fe9929", "#e31a1c",
@@ -571,10 +612,32 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CfdError> {
 /// When `path` ends in `.csv` it is used as the output file; otherwise it is
 /// treated as a directory and `solution.csv` is created inside it.
 pub fn export_csv(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
-    let target = with_extension_or_file(path, "csv", "solution.csv");
-    let mesh = field_mesh(solution);
+    export_csv_with_layout(solution, path, ExportLayout::Cell)
+}
+
+/// Writes cell-centred or node-centred CSV rows.
+///
+/// The `Cell` layout writes `nx × ny` rows in pressure-cell order with the
+/// header `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction`.
+/// The `Node` layout writes `(nx + 1) × (ny + 1)` rows in vertex order
+/// (`j * (nx + 1) + i`) with the same header; every value is the mean of the
+/// adjacent fluid cell centres. Omitted values (for example `temperature`
+/// without scalar transport) are written as zero. A directory receives
+/// `solution.csv` for the cell layout and `solution-nodes.csv` for the node
+/// layout.
+pub fn export_csv_with_layout(
+    solution: &Solution,
+    path: &Path,
+    layout: ExportLayout,
+) -> Result<PathBuf, CfdError> {
+    let default_name = match layout {
+        ExportLayout::Cell => "solution.csv",
+        ExportLayout::Node => "solution-nodes.csv",
+    };
+    let target = with_extension_or_file(path, "csv", default_name);
+    let mesh = field_mesh(solution, layout);
     let text = mesh
-        .to_csv(&solution_fields(solution))
+        .to_csv(&solution_fields(solution, layout))
         .map_err(mesh_error)?;
     write_atomic(&target, &text)?;
     Ok(target)
@@ -589,10 +652,32 @@ pub fn export_csv(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError>
 /// file; otherwise it is treated as a directory and `solution.vtk` is created
 /// inside it.
 pub fn export_vtk(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
-    let target = with_extension_or_file(path, "vtk", "solution.vtk");
-    let mesh = field_mesh(solution);
+    export_vtk_with_layout(solution, path, ExportLayout::Cell)
+}
+
+/// Writes a legacy ASCII VTK `UNSTRUCTURED_GRID` over the cells or the nodes.
+///
+/// The `Cell` layout keeps the historical sampling: points are cell centres and
+/// every quad joins four neighbouring centres. The `Node` layout samples the
+/// `(nx + 1) × (ny + 1)` mesh vertices and joins them into `nx × ny` quads, so
+/// the VTK grid covers the full rectangle with one point per vertex. Both
+/// layouts carry the same point data: `pressure`, `velocity`, `magnitude`,
+/// `temperature`, `vorticity` and `streamFunction`. A directory receives
+/// `solution.vtk` for the cell layout and `solution-nodes.vtk` for the node
+/// layout.
+pub fn export_vtk_with_layout(
+    solution: &Solution,
+    path: &Path,
+    layout: ExportLayout,
+) -> Result<PathBuf, CfdError> {
+    let default_name = match layout {
+        ExportLayout::Cell => "solution.vtk",
+        ExportLayout::Node => "solution-nodes.vtk",
+    };
+    let target = with_extension_or_file(path, "vtk", default_name);
+    let mesh = field_mesh(solution, layout);
     let text = mesh
-        .to_legacy_vtk(&solution_fields(solution))
+        .to_legacy_vtk(&solution_fields(solution, layout))
         .map_err(mesh_error)?;
     write_atomic(&target, &text)?;
     Ok(target)
@@ -853,62 +938,175 @@ fn render_streamlines(solution: &Solution, lines: &[Vec<(f64, f64)>]) -> String 
     svg
 }
 
-/// Samples the staggered solution as a quad mesh over the pressure cells.
+/// Samples the staggered solution as a quad mesh over the cells or the nodes.
 ///
-/// Point `j * nx + i` is the centre of cell `(i, j)`, matching
+/// `Cell`: point `j * nx + i` is the centre of cell `(i, j)`, matching
 /// [`crate::mesh::Mesh::pressure_index`], so the unstructured grid preserves
 /// the structured i/j layout without moving any value.
-fn field_mesh(solution: &Solution) -> FieldMesh {
+///
+/// `Node`: point `j * (nx + 1) + i` is the vertex at `(i·dx, j·dy)` and the
+/// `nx × ny` quads join the four vertices of every cell, so the grid covers the
+/// full rectangle.
+fn field_mesh(solution: &Solution, layout: ExportLayout) -> FieldMesh {
     let mesh = &solution.mesh;
-    let mut points = Vec::with_capacity(mesh.pressure_count());
-    for j in 0..mesh.ny {
-        for i in 0..mesh.nx {
-            let (x, y) = mesh.cell_center(i, j);
-            points.push([x, y, 0.0]);
-        }
-    }
+    match layout {
+        ExportLayout::Cell => {
+            let mut points = Vec::with_capacity(mesh.pressure_count());
+            for j in 0..mesh.ny {
+                for i in 0..mesh.nx {
+                    let (x, y) = mesh.cell_center(i, j);
+                    points.push([x, y, 0.0]);
+                }
+            }
 
-    let columns = mesh.nx.saturating_sub(1);
-    let rows = mesh.ny.saturating_sub(1);
-    let mut cells = Vec::with_capacity(columns * rows);
-    for j in 0..rows {
-        for i in 0..columns {
-            cells.push(Cell::new(
-                CellKind::Quad,
-                vec![
-                    mesh.pressure_index(i, j),
-                    mesh.pressure_index(i + 1, j),
-                    mesh.pressure_index(i + 1, j + 1),
-                    mesh.pressure_index(i, j + 1),
-                ],
-            ));
+            let columns = mesh.nx.saturating_sub(1);
+            let rows = mesh.ny.saturating_sub(1);
+            let mut cells = Vec::with_capacity(columns * rows);
+            for j in 0..rows {
+                for i in 0..columns {
+                    cells.push(Cell::new(
+                        CellKind::Quad,
+                        vec![
+                            mesh.pressure_index(i, j),
+                            mesh.pressure_index(i + 1, j),
+                            mesh.pressure_index(i + 1, j + 1),
+                            mesh.pressure_index(i, j + 1),
+                        ],
+                    ));
+                }
+            }
+            FieldMesh::new(points, cells)
+        }
+        ExportLayout::Node => {
+            let columns = mesh.nx + 1;
+            let mut points = Vec::with_capacity(columns * (mesh.ny + 1));
+            for j in 0..=mesh.ny {
+                for i in 0..=mesh.nx {
+                    points.push([i as f64 * mesh.dx, j as f64 * mesh.dy, 0.0]);
+                }
+            }
+
+            let mut cells = Vec::with_capacity(mesh.nx * mesh.ny);
+            for j in 0..mesh.ny {
+                for i in 0..mesh.nx {
+                    let bottom_left = node_index(mesh, i, j);
+                    cells.push(Cell::new(
+                        CellKind::Quad,
+                        vec![
+                            bottom_left,
+                            bottom_left + 1,
+                            bottom_left + 1 + columns,
+                            bottom_left + columns,
+                        ],
+                    ));
+                }
+            }
+            FieldMesh::new(points, cells)
         }
     }
-    FieldMesh::new(points, cells)
 }
 
-/// Field values in the same i/j row-major order as the sampled points.
-fn solution_fields(solution: &Solution) -> Vec<Field> {
+/// Index of mesh vertex `(i, j)`, row-major over `nx + 1` columns.
+fn node_index(mesh: &crate::mesh::Mesh, i: usize, j: usize) -> usize {
+    j * (mesh.nx + 1) + i
+}
+
+/// Field values in the same row-major order as the sampled points.
+fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
     let mesh = &solution.mesh;
-    let mut velocity = Vec::with_capacity(mesh.pressure_count() * 3);
-    let mut magnitude = Vec::with_capacity(mesh.pressure_count());
-    let mut temperature = Vec::with_capacity(mesh.pressure_count());
-    for j in 0..mesh.ny {
-        for i in 0..mesh.nx {
-            let (ux, uy) = mesh.cell_velocity(&solution.u, &solution.v, i, j);
-            velocity.extend_from_slice(&[ux, uy, 0.0]);
-            magnitude.push((ux * ux + uy * uy).sqrt());
-            temperature.push(temperature_at(solution, i, j));
+    let count = match layout {
+        ExportLayout::Cell => mesh.pressure_count(),
+        ExportLayout::Node => (mesh.nx + 1) * (mesh.ny + 1),
+    };
+    let mut velocity = Vec::with_capacity(count * 3);
+    let mut magnitude = Vec::with_capacity(count);
+    let mut temperature = Vec::with_capacity(count);
+    let mut pressure = Vec::with_capacity(count);
+    let mut vorticity = Vec::with_capacity(count);
+    let mut stream_function = Vec::with_capacity(count);
+    match layout {
+        ExportLayout::Cell => {
+            for j in 0..mesh.ny {
+                for i in 0..mesh.nx {
+                    let (ux, uy) = mesh.cell_velocity(&solution.u, &solution.v, i, j);
+                    velocity.extend_from_slice(&[ux, uy, 0.0]);
+                    magnitude.push((ux * ux + uy * uy).sqrt());
+                    temperature.push(temperature_at(solution, i, j));
+                    let index = mesh.pressure_index(i, j);
+                    pressure.push(solution.p[index]);
+                    vorticity.push(solution.vorticity[index]);
+                    stream_function.push(solution.stream_function[index]);
+                }
+            }
+        }
+        ExportLayout::Node => {
+            for j in 0..=mesh.ny {
+                for i in 0..=mesh.nx {
+                    let ux = node_average(mesh, i, j, |ci, cj| {
+                        mesh.cell_velocity(&solution.u, &solution.v, ci, cj).0
+                    });
+                    let uy = node_average(mesh, i, j, |ci, cj| {
+                        mesh.cell_velocity(&solution.u, &solution.v, ci, cj).1
+                    });
+                    velocity.extend_from_slice(&[ux, uy, 0.0]);
+                    magnitude.push(ux.hypot(uy));
+                    temperature.push(node_average(mesh, i, j, |ci, cj| {
+                        temperature_at(solution, ci, cj)
+                    }));
+                    pressure.push(node_average(mesh, i, j, |ci, cj| {
+                        solution.p[mesh.pressure_index(ci, cj)]
+                    }));
+                    vorticity.push(node_average(mesh, i, j, |ci, cj| {
+                        solution.vorticity[mesh.pressure_index(ci, cj)]
+                    }));
+                    stream_function.push(node_average(mesh, i, j, |ci, cj| {
+                        solution.stream_function[mesh.pressure_index(ci, cj)]
+                    }));
+                }
+            }
         }
     }
     vec![
-        Field::scalar("pressure", solution.p.clone()),
+        Field::scalar("pressure", pressure),
         Field::vector("velocity", velocity),
         Field::scalar("magnitude", magnitude),
         Field::scalar("temperature", temperature),
-        Field::scalar("vorticity", solution.vorticity.clone()),
-        Field::scalar("streamFunction", solution.stream_function.clone()),
+        Field::scalar("vorticity", vorticity),
+        Field::scalar("streamFunction", stream_function),
     ]
+}
+
+/// Mean of `value` over the fluid cells adjacent to vertex `(i, j)`.
+///
+/// A vertex owns up to four surrounding cells. Solid cells are skipped, so a
+/// vertex on a solid surface averages only its fluid neighbours and a vertex
+/// surrounded by solids reports zero.
+fn node_average(
+    mesh: &crate::mesh::Mesh,
+    i: usize,
+    j: usize,
+    value: impl Fn(usize, usize) -> f64,
+) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0_usize;
+    let i_start = i.saturating_sub(1);
+    let i_end = (i + 1).min(mesh.nx);
+    let j_start = j.saturating_sub(1);
+    let j_end = (j + 1).min(mesh.ny);
+    for cj in j_start..j_end {
+        for ci in i_start..i_end {
+            if mesh.is_solid(ci, cj) {
+                continue;
+            }
+            sum += value(ci, cj);
+            count += 1;
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
 }
 
 fn mesh_error(error: science_mesh::MeshError) -> CfdError {

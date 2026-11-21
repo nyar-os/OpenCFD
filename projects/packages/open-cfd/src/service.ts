@@ -16,6 +16,7 @@ import type {
     ConvectionSetRequest,
     ExportField,
     ExportFormat,
+    ExportLayout,
     ExportReport,
     FluidSetRequest,
     MeshSetRequest,
@@ -288,11 +289,10 @@ export function exportCase(
     format: ExportFormat,
     target: string,
     field?: ExportField,
+    layout?: ExportLayout,
 ): ExportReport {
     return decode<ExportReport>(() =>
-        field === undefined
-            ? binding('export').export(handle, format, target)
-            : binding('export').export(handle, format, target, field),
+        binding('export').export(handle, format, target, field, layout),
     );
 }
 

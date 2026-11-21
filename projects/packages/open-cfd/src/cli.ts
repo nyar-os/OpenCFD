@@ -18,6 +18,7 @@ import type {
     ConvectionScheme,
     ExportField,
     ExportFormat,
+    ExportLayout,
     InletProfile,
     Obstacle,
     Side,
@@ -47,7 +48,7 @@ usage:
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -231,6 +232,18 @@ function parseExportField(raw: string): ExportField {
         );
     }
     return raw as ExportField;
+}
+
+const EXPORT_LAYOUTS: readonly ExportLayout[] = ['cell', 'node'];
+
+function parseExportLayout(raw: string): ExportLayout {
+    if (!EXPORT_LAYOUTS.includes(raw as ExportLayout)) {
+        throw cliError(
+            'cli/unknown-format',
+            `unknown export layout \`${raw}\`; use cell or node`,
+        );
+    }
+    return raw as ExportLayout;
 }
 
 function parseObstacle(parsed: ParsedArguments): Obstacle {
@@ -668,22 +681,25 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'export': {
-            const parsed = parseArguments(rest, ['--format', '--out', '--field']);
+            const parsed = parseArguments(rest, ['--format', '--out', '--field', '--layout']);
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];
             const field = rawField === undefined ? undefined : parseExportField(rawField);
+            const rawLayout = parsed.options['--layout'];
+            const layout = rawLayout === undefined ? undefined : parseExportLayout(rawLayout);
             const out = requiredOption(parsed, '--out');
             const document = await session.open(file);
-            const report = document.export(format, out, field);
+            const report = document.export(format, out, field, layout);
+            const layoutLabel = report.layout === 'node' ? ' (nodes)' : '';
             if (format === 'csv') {
-                console.log(`exported CSV: ${report.path}`);
+                console.log(`exported CSV${layoutLabel}: ${report.path}`);
             } else if (format === 'vtk') {
-                console.log(`exported legacy ASCII VTK: ${report.path}`);
+                console.log(`exported legacy ASCII VTK${layoutLabel}: ${report.path}`);
             } else if (format === 'streamlines') {
                 console.log(`exported streamlines SVG: ${report.path}`);
             } else if (format === 'contours') {

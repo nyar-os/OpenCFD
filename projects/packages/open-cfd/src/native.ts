@@ -43,7 +43,7 @@ export interface NativeBinding {
         restart?: string,
         checkpoint?: string,
     ): string;
-    export(handle: number, format: string, out: string, field?: string): string;
+    export(handle: number, format: string, out: string, field?: string, layout?: string): string;
     close(handle: number): boolean;
 }
 

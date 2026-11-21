@@ -16,6 +16,7 @@ import type {
     ConvectionSetRequest,
     ExportField,
     ExportFormat,
+    ExportLayout,
     ExportReport,
     FluidSetRequest,
     MeshSetRequest,
@@ -177,10 +178,19 @@ export class CfdCase {
         return service.solve(this.handle, options);
     }
 
-    /** Solves and exports the field as CSV, VTK or an SVG preview. */
-    export(format: ExportFormat, target: string, field?: ExportField): ExportReport {
+    /**
+     * Solves and exports the field as CSV, VTK or an SVG preview.
+     *
+     * `layout` selects cell centres (default) or mesh nodes for CSV and VTK.
+     */
+    export(
+        format: ExportFormat,
+        target: string,
+        field?: ExportField,
+        layout?: ExportLayout,
+    ): ExportReport {
         this.assertOpen();
-        return service.exportCase(this.handle, format, target, field);
+        return service.exportCase(this.handle, format, target, field, layout);
     }
 
     /** Writes the document, optionally to a new path. */

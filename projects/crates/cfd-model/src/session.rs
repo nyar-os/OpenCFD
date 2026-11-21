@@ -15,8 +15,8 @@ use serde::Serialize;
 
 use crate::checkpoint::Checkpoint;
 use crate::export::{
-    export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
-    export_vtk, ExportField,
+    export_contours, export_csv_with_layout, export_forces, export_residuals, export_streamlines,
+    export_svg, export_vtk_with_layout, ExportField, ExportLayout,
 };
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
@@ -191,6 +191,8 @@ pub struct SaveReport {
 pub struct ExportReport {
     /// Format that was written.
     pub format: String,
+    /// Sampling layout of a CSV or VTK field (`cell` or `node`).
+    pub layout: String,
     /// File that received the export.
     pub path: String,
 }
@@ -601,10 +603,25 @@ impl OpenCfd {
         out: &Path,
         field: ExportField,
     ) -> Result<ExportReport, CfdError> {
+        self.export_field_with_layout(format, out, field, ExportLayout::Cell)
+    }
+
+    /// Solves and exports one field with an explicit CSV/VTK sampling layout.
+    ///
+    /// `layout` selects cell centres or mesh nodes for `Csv` and `Vtk` and is
+    /// reported back; SVG, contour, streamline and history exports always use
+    /// cell-centred data.
+    pub fn export_field_with_layout(
+        &self,
+        format: ExportFormat,
+        out: &Path,
+        field: ExportField,
+        layout: ExportLayout,
+    ) -> Result<ExportReport, CfdError> {
         let solution = solve(&self.model)?;
         let written = match format {
-            ExportFormat::Csv => export_csv(&solution, out)?,
-            ExportFormat::Vtk => export_vtk(&solution, out)?,
+            ExportFormat::Csv => export_csv_with_layout(&solution, out, layout)?,
+            ExportFormat::Vtk => export_vtk_with_layout(&solution, out, layout)?,
             ExportFormat::Svg => export_svg(&solution, out, field)?,
             ExportFormat::Contours => export_contours(&solution, out, field)?,
             ExportFormat::Streamlines => export_streamlines(&solution, out)?,
@@ -613,6 +630,7 @@ impl OpenCfd {
         };
         Ok(ExportReport {
             format: format.as_str().to_string(),
+            layout: layout.as_str().to_string(),
             path: written.display().to_string(),
         })
     }

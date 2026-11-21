@@ -5,8 +5,8 @@ use std::process;
 
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
-    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal, SolveOptions,
-    ThermalConfig, TimeScheme, TurbulenceModel,
+    ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal,
+    SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel,
 };
 
 const USAGE: &str = "\
@@ -40,7 +40,7 @@ Usage:
        [--reference-temperature <K>]
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -822,23 +822,31 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
 }
 
 fn export(args: &[String]) -> Result<i32, CfdError> {
-    let parsed = parse(args, &["--format", "--out", "--field"], &[])?;
+    let parsed = parse(args, &["--format", "--out", "--field", "--layout"], &[])?;
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
         Some(value) => value.parse::<ExportField>()?,
         None => ExportField::Pressure,
     };
+    let layout = match parsed.options.get("--layout") {
+        Some(value) => value.parse::<ExportLayout>()?,
+        None => ExportLayout::Cell,
+    };
     let out = required(&parsed, "--out")?;
     let session = open_session(file)?;
-    let report = session.export_field(format, Path::new(out), field)?;
+    let report = session.export_field_with_layout(format, Path::new(out), field, layout)?;
+    let layout_label = match layout {
+        ExportLayout::Cell => "",
+        ExportLayout::Node => " (nodes)",
+    };
     match format {
-        ExportFormat::Csv => println!("exported CSV: {}", report.path),
-        ExportFormat::Vtk => println!("exported legacy ASCII VTK: {}", report.path),
+        ExportFormat::Csv => println!("exported CSV{layout_label}: {}", report.path),
+        ExportFormat::Vtk => println!("exported legacy ASCII VTK{layout_label}: {}", report.path),
         ExportFormat::Svg => println!("exported SVG ({}): {}", field.as_str(), report.path),
         ExportFormat::Contours => {
             println!("exported contour SVG ({}): {}", field.as_str(), report.path)

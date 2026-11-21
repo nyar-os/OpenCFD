@@ -4,11 +4,12 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
-    export_vtk, solve, solve_pressure, solve_with, solve_with_checkpoint, stream_function,
-    transport_scalar, vorticity, Boundaries, Boundary, BoundaryKind, Checkpoint, ConvectionScheme,
-    ExportField, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings,
-    Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
+    export_contours, export_csv, export_csv_with_layout, export_forces, export_residuals,
+    export_streamlines, export_svg, export_vtk, export_vtk_with_layout, solve, solve_pressure,
+    solve_with, solve_with_checkpoint, stream_function, transport_scalar, vorticity, Boundaries,
+    Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportLayout, InitialField,
+    InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings, Probe, Reference,
+    ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -292,6 +293,43 @@ fn csv_and_vtk_exports_have_expected_shape() {
         "VECTORS velocity double",
     ] {
         assert!(vtk.contains(expected), "VTK is missing `{expected}`");
+    }
+
+    let node_csv_path =
+        export_csv_with_layout(&solution, &directory, ExportLayout::Node).expect("node csv");
+    assert_eq!(
+        node_csv_path.file_name().and_then(|name| name.to_str()),
+        Some("solution-nodes.csv")
+    );
+    let node_csv = fs::read_to_string(&node_csv_path).expect("read node csv");
+    let node_lines: Vec<&str> = node_csv.lines().collect();
+    assert_eq!(node_lines[0], lines[0]);
+    assert_eq!(node_lines.len(), (12 + 1) * (10 + 1) + 1);
+    let first: Vec<&str> = node_lines[1].split(',').collect();
+    assert_eq!(first[0].parse::<f64>().expect("corner x"), 0.0);
+    assert_eq!(first[1].parse::<f64>().expect("corner y"), 0.0);
+    let corner_pressure = first[3].parse::<f64>().expect("corner pressure");
+    assert!((corner_pressure - solution.p[0]).abs() < 1e-12);
+
+    let node_vtk_path =
+        export_vtk_with_layout(&solution, &directory, ExportLayout::Node).expect("node vtk");
+    assert_eq!(
+        node_vtk_path.file_name().and_then(|name| name.to_str()),
+        Some("solution-nodes.vtk")
+    );
+    let node_vtk = fs::read_to_string(&node_vtk_path).expect("read node vtk");
+    for expected in [
+        "POINTS 143 double",
+        "CELLS 120 600\n",
+        "CELL_TYPES 120\n9\n",
+        "POINT_DATA 143",
+        "SCALARS pressure double 1",
+        "VECTORS velocity double",
+    ] {
+        assert!(
+            node_vtk.contains(expected),
+            "node VTK is missing `{expected}`"
+        );
     }
 }
 

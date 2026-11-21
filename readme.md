@@ -53,7 +53,7 @@ await cfd.dispose();
 - `setTimeScheme` selects `euler` (default) or `rk2` for the explicit momentum step.
 - `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory` (with per-sample `continuity`), `terminationReason`, `timeScheme`, `massBalance`, `forces` (with `cm` and resolved reference quantities), `probes`, `wallShear`, and the vorticity and stream-function extremes.
 - Errors are always `OpenCFDError`; `code` is the contract (for example `mesh/invalid`, `obstacle/invalid`, `solver/unstable`). A missing native addon reports `capability/not-implemented`.
-- `export(format, target, field?)` writes CSV, legacy ASCII VTK, an SVG preview, contour SVG, a streamline SVG, a residual history CSV or a force history CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals` and `forces`. A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
+- `export(format, target, field?, layout?)` writes CSV, legacy ASCII VTK, an SVG preview, contour SVG, a streamline SVG, a residual history CSV or a force history CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals` and `forces`. `layout` selects cell-centred or node-sampled data for CSV and VTK (`cell` by default). A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
 
 Build the native addon and SDK:
 
@@ -146,8 +146,8 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] ...` | Configure energy-equation boundaries, volumetric source and reference temperature; requires scalar transport |
 | `ocfd validate <file>` | Structural validation; on failure prints a JSON error and returns exit code `1` |
 | `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]` | Solve and print an `open-cfd-report` JSON on stdout and a convergence/mass-balance summary on stderr; `--tolerance` enables steady-state early stopping, `--check-every` controls the sampling interval, `--restart` resumes from a checkpoint and `--checkpoint` writes the final state |
-| `ocfd export <file> --format csv --out <dir\|file.csv>` | After solving, write cell-centred `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` |
-| `ocfd export <file> --format vtk --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data |
+| `ocfd export <file> --format csv [--layout cell\|node] --out <dir\|file.csv>` | After solving, write `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` rows at cell centres or mesh nodes |
+| `ocfd export <file> --format vtk [--layout cell\|node] --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data over cell centres or mesh nodes |
 | `ocfd export <file> --format svg [--field pressure\|temperature\|vorticity\|streamFunction\|speed] --out <dir\|file.svg>` | After solving, write a self-contained SVG preview of one cell-centred field |
 | `ocfd export <file> --format contours [--field pressure\|temperature\|vorticity\|streamFunction\|speed] --out <dir\|file.svg>` | After solving, write a filled-contour and iso-line SVG with a discrete colour legend |
 | `ocfd export <file> --format streamlines --out <dir\|file.svg>` | After solving, trace streamlines and write a self-contained SVG |
@@ -158,7 +158,9 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 
 Exit codes: `0` success, `1` input, validation or IO error, `2` capability not implemented.
 
-An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
+An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution-nodes.csv`, `solution.vtk`, `solution-nodes.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
+
+`--layout node` samples the `(nx + 1) × (ny + 1)` mesh vertices instead of the `nx × ny` cell centres: every vertex value is the mean of its adjacent fluid cells, solid cells contribute nothing, and the VTK grid covers the full rectangle with `nx × ny` quads. CSV and VTK reports include the `layout` that was written.
 
 ### Restart checkpoints
 
@@ -284,7 +286,7 @@ Boundary semantics:
 | Thermal side/obstacle conditions, heat sources and obstacle Nusselt numbers (`heat`) | ✅ Supported (no buoyancy) |
 | Boussinesq buoyancy (`buoyancy`) | ❌ Not implemented (avoids an unvalidated unstable path) |
 | `.ocfd` JSON read and write | ✅ Supported |
-| CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported |
+| CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported (CSV/VTK at cell centres or nodes) |
 | Residual/continuity and obstacle force history CSV export (`history`) | ✅ Supported |
 | Restart checkpoints read/write (`restart`) | ✅ Supported |
 | Compressible flow (`compressible`) | ❌ Not implemented |
@@ -325,7 +327,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 1. **Still cavity**: four stationary walls and zero initial velocity; after 40 steps the velocity and divergence stay near zero, the boundary mass balance is exactly zero, and there is no NaN or Inf.
 2. **Lid-driven cavity**: 24×24, 300 steps, Re=100; `u > 0` on the upper centreline, mean `u > 0` in the upper quarter, maximum speed at most 1.05, `divergenceL2 < 1e-2` and every report field present. The measured maximum speed is about 0.84 and `divergenceL2` about 1.4e-5.
 3. **Pressure Poisson residual**: 300 SOR sweeps on a fixed divergence field leave a residual below 1% of the first residual, and 300 sweeps beat 50.
-4. **Export formats**: the CSV row count is `nx*ny+1` with the header `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction`; the VTK contains `DATASET UNSTRUCTURED_GRID`, `POINTS`, `POINT_DATA`, `SCALARS pressure`, `SCALARS temperature`, `SCALARS magnitude`, `SCALARS vorticity`, `SCALARS streamFunction` and `VECTORS velocity`; an SVG preview names the selected field and its unit; the streamline SVG names itself and contains traced polylines.
+4. **Export formats**: the cell-centred CSV row count is `nx*ny+1` and the node CSV row count is `(nx+1)*(ny+1)+1`, both with the header `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction`; the VTK contains `DATASET UNSTRUCTURED_GRID`, `POINTS`, `POINT_DATA`, `SCALARS pressure`, `SCALARS temperature`, `SCALARS magnitude`, `SCALARS vorticity`, `SCALARS streamFunction` and `VECTORS velocity`, with points at cell centres or mesh vertices and one quad per interior cell or per cell; an SVG preview names the selected field and its unit; the streamline SVG names itself and contains traced polylines.
 5. **Document round trip**: `.ocfd` save and load are identical, camelCase fields are correct, default fields deserialize and a wrong `format` is rejected.
 6. **Solid mask**: all four faces of a solid cell carry zero velocity, divergence stays zero and an obstacle force report is present.
 7. **Flow past a cylinder**: a 48×24 channel at Re≈100 with a circular obstacle yields a finite positive `Cd`, a finite `Cl` and no NaN anywhere.

@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
-    BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, InletProfile, Obstacle,
-    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
+    BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
+    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -375,7 +375,8 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
 
 /// Solves and exports one session document as CSV, VTK, SVG or contours.
 ///
-/// `field` affects SVG and contour output and defaults to `pressure`.
+/// `field` affects SVG and contour output and defaults to `pressure`. `layout`
+/// selects cell-centred or node-sampled CSV/VTK data and defaults to `cell`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;
@@ -385,8 +386,12 @@ fn export(ctx: CallContext) -> Result<JsValue> {
         Some(value) => value.parse::<ExportField>().map_err(fail)?,
         None => ExportField::Pressure,
     };
+    let layout = match optional_text(&ctx, 4)? {
+        Some(value) => value.parse::<ExportLayout>().map_err(fail)?,
+        None => ExportLayout::Cell,
+    };
     let report = with_session(handle, |session| {
-        session.export_field(format, Path::new(&out), field)
+        session.export_field_with_layout(format, Path::new(&out), field, layout)
     })?;
     respond(&ctx, &json!(report))
 }
