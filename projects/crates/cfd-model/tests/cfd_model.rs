@@ -4,12 +4,12 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_contours, export_csv, export_csv_with_layout, export_forces, export_residuals,
-    export_streamlines, export_svg, export_vtk, export_vtk_with_layout, solve, solve_pressure,
-    solve_with, solve_with_checkpoint, stream_function, transport_scalar, vorticity, Boundaries,
-    Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportLayout, InitialField,
-    InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings, Probe, Reference,
-    ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
+    export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
+    export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout, solve,
+    solve_pressure, solve_with, solve_with_checkpoint, stream_function, transport_scalar,
+    vorticity, Boundaries, Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField,
+    ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings,
+    Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -1361,6 +1361,26 @@ fn history_exports_have_stable_csv_shapes() {
         assert_eq!(line.split(',').count(), 9);
         assert!(line.starts_with("cyl,circle,"));
     }
+
+    let coefficient_path = export_coefficients(&solution, &directory).expect("coefficients");
+    assert_eq!(
+        coefficient_path.file_name().and_then(|name| name.to_str()),
+        Some("coefficients.csv")
+    );
+    let coefficients = fs::read_to_string(&coefficient_path).expect("read coefficients");
+    let coefficient_lines: Vec<&str> = coefficients.lines().collect();
+    assert_eq!(
+        coefficient_lines[0],
+        "obstacle,kind,cd,cl,cm,fx,fy,mz,referenceVelocity,referenceArea,referenceLength"
+    );
+    assert_eq!(coefficient_lines.len(), 1 + solution.report.forces.len());
+    let first: Vec<&str> = coefficient_lines[1].split(',').collect();
+    assert_eq!(first.len(), 11);
+    assert_eq!(first[0], "cyl");
+    assert_eq!(first[1], "circle");
+    let force = &solution.report.forces[0];
+    assert!((first[2].parse::<f64>().expect("cd") - force.cd).abs() < 1e-12);
+    assert!((first[3].parse::<f64>().expect("cl") - force.cl).abs() < 1e-12);
 }
 
 #[test]

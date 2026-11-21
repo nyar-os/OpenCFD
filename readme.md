@@ -53,7 +53,7 @@ await cfd.dispose();
 - `setTimeScheme` selects `euler` (default) or `rk2` for the explicit momentum step.
 - `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory` (with per-sample `continuity`), `terminationReason`, `timeScheme`, `massBalance`, `forces` (with `cm` and resolved reference quantities), `probes`, `wallShear`, and the vorticity and stream-function extremes.
 - Errors are always `OpenCFDError`; `code` is the contract (for example `mesh/invalid`, `obstacle/invalid`, `solver/unstable`). A missing native addon reports `capability/not-implemented`.
-- `export(format, target, field?, layout?)` writes CSV, legacy ASCII VTK, an SVG preview, contour SVG, a streamline SVG, a residual history CSV or a force history CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals` and `forces`. `layout` selects cell-centred or node-sampled data for CSV and VTK (`cell` by default). A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
+- `export(format, target, field?, layout?)` writes CSV, legacy ASCII VTK, an SVG preview, contour SVG, a streamline SVG, a residual history CSV, a force history CSV or a drag/lift/moment summary CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals`, `forces` and `coefficients`. `layout` selects cell-centred or node-sampled data for CSV and VTK (`cell` by default). A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
 
 Build the native addon and SDK:
 
@@ -153,12 +153,13 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd export <file> --format streamlines --out <dir\|file.svg>` | After solving, trace streamlines and write a self-contained SVG |
 | `ocfd export <file> --format residuals --out <dir\|file.csv>` | After solving, write the sampled `step,residual,continuity` history |
 | `ocfd export <file> --format forces --out <dir\|file.csv>` | After solving, write every sampled obstacle force and coefficient |
+| `ocfd export <file> --format coefficients --out <dir\|file.csv>` | After solving, write one final drag/lift/moment summary row per obstacle |
 | `ocfd capabilities` | Print the machine-readable capability matrix |
 | `ocfd --help` | Print usage |
 
 Exit codes: `0` success, `1` input, validation or IO error, `2` capability not implemented.
 
-An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution-nodes.csv`, `solution.vtk`, `solution-nodes.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
+An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution-nodes.csv`, `solution.vtk`, `solution-nodes.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv`, `forces.csv` or `coefficients.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
 
 `--layout node` samples the `(nx + 1) × (ny + 1)` mesh vertices instead of the `nx × ny` cell centres: every vertex value is the mean of its adjacent fluid cells, solid cells contribute nothing, and the VTK grid covers the full rectangle with `nx × ny` quads. CSV and VTK reports include the `layout` that was written.
 
@@ -288,6 +289,7 @@ Boundary semantics:
 | `.ocfd` JSON read and write | ✅ Supported |
 | CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported (CSV/VTK at cell centres or nodes) |
 | Residual/continuity and obstacle force history CSV export (`history`) | ✅ Supported |
+| Final per-obstacle drag/lift/moment summary CSV export (`coefficients`) | ✅ Supported |
 | Restart checkpoints read/write (`restart`) | ✅ Supported |
 | Compressible flow (`compressible`) | ❌ Not implemented |
 | Three-dimensional flow (`threeD`) | ❌ Not implemented |
@@ -343,7 +345,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 17. **Mass balance and continuity**: a closed cavity reports exactly zero inflow, outflow and net mass flow; a channel reports positive inflow and outflow with a relative imbalance below 25%; every residual sample carries a finite non-negative continuity value and the last sample ends at the reported step.
 18. **Streamlines**: exporting the lid-driven cavity writes `solution-streamlines.svg`, containing the title, the line/speed subtitle and at least one polyline.
 19. **Inlet profiles**: a parabolic inlet reproduces `4s(1−s)` on every boundary face exactly, a power-law inlet with `n=1` reproduces the triangular profile, a uniform profile is constant, and the solved window mass balance equals the discrete parabolic mask integral; a zero exponent is rejected with `boundary/invalid`.
-20. **History exports**: `residuals.csv` has the header `step,residual,continuity` with one bounded row per sample, and `forces.csv` has one 9-column row per sampled obstacle force in document order.
+20. **History exports**: `residuals.csv` has the header `step,residual,continuity` with one bounded row per sample, `forces.csv` has one 9-column row per sampled obstacle force in document order, and `coefficients.csv` has one 11-column summary row per obstacle (`obstacle,kind,cd,cl,cm,fx,fy,mz,referenceVelocity,referenceArea,referenceLength`).
 21. **Time schemes**: Euler and RK2 both stay finite on a lid-driven cavity at the same physical time and report their scheme; against a fine RK2 reference the RK2 coarse solution has less than half the Euler temporal error.
 22. **Termination reason**: a loose tolerance stops with `terminationReason = steadyState`; a strict short run reports `maxSteps`.
 23. **Contours**: exporting `speed` writes `solution-speed-contours.svg` with the field/unit title, filled-band polygon elements, marching-squares iso-lines and the legend text; a named `.svg` target is used verbatim and temperature contours without a scalar field fail with `export/no-field`.

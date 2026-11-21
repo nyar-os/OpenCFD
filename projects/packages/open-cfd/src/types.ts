@@ -243,7 +243,8 @@ export type ExportFormat =
     | 'contours'
     | 'streamlines'
     | 'residuals'
-    | 'forces';
+    | 'forces'
+    | 'coefficients';
 
 /** Cell-centred field an SVG or contour export can visualise. */
 export type ExportField =

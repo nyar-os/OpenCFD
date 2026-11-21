@@ -42,9 +42,9 @@ mod solver;
 pub use crate::checkpoint::{Checkpoint, CheckpointMesh, CHECKPOINT_FORMAT, CHECKPOINT_VERSION};
 pub use crate::error::CfdError;
 pub use crate::export::{
-    export_contours, export_csv, export_csv_with_layout, export_forces, export_residuals,
-    export_streamlines, export_svg, export_vtk, export_vtk_with_layout, write_atomic, ExportField,
-    ExportLayout,
+    export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
+    export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout,
+    write_atomic, ExportField, ExportLayout,
 };
 pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
@@ -104,6 +104,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "svg": "supported",
     "streamlines": "supported",
     "history": "supported",
+    "coefficients": "supported",
     "contours": "supported",
     "restart": "supported",
     "inp": "unsupported",

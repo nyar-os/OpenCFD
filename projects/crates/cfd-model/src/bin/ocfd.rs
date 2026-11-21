@@ -40,7 +40,7 @@ Usage:
        [--reference-temperature <K>]
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -826,7 +826,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
@@ -854,6 +854,9 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         ExportFormat::Streamlines => println!("exported streamlines SVG: {}", report.path),
         ExportFormat::Residuals => println!("exported residual history CSV: {}", report.path),
         ExportFormat::Forces => println!("exported force history CSV: {}", report.path),
+        ExportFormat::Coefficients => {
+            println!("exported coefficient summary CSV: {}", report.path)
+        }
     }
     Ok(0)
 }

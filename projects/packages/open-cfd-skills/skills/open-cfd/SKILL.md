@@ -14,7 +14,8 @@ parabolic/power-law inlet profiles), uniform pressure gradients for
 pressure-driven flow, obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
-streamlines, residual history CSV or force history CSV. CSV and VTK can sample
+streamlines, residual history CSV, force history CSV or a final drag/lift/moment
+summary CSV. CSV and VTK can sample
 cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
@@ -50,7 +51,7 @@ ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -84,7 +85,8 @@ rename. Confirm the path before running them.
 - Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
 - Heat transfer uses the implemented passive scalar and thermal configuration;
   there is no coupled buoyancy.
-- `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals` and `forces` are
+- `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces` and
+  `coefficients` are
   the only export targets. `inp` and `openfoam` reject with
   `capability/not-implemented`. Periodic sides must come in opposite pairs and
   are excluded from the boundary mass balance.

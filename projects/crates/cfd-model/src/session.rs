@@ -15,8 +15,8 @@ use serde::Serialize;
 
 use crate::checkpoint::Checkpoint;
 use crate::export::{
-    export_contours, export_csv_with_layout, export_forces, export_residuals, export_streamlines,
-    export_svg, export_vtk_with_layout, ExportField, ExportLayout,
+    export_coefficients, export_contours, export_csv_with_layout, export_forces, export_residuals,
+    export_streamlines, export_svg, export_vtk_with_layout, ExportField, ExportLayout,
 };
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
@@ -45,6 +45,8 @@ pub enum ExportFormat {
     Residuals,
     /// Sampled obstacle force-history CSV rows.
     Forces,
+    /// Final per-obstacle drag, lift and moment summary CSV rows.
+    Coefficients,
 }
 
 impl ExportFormat {
@@ -58,6 +60,7 @@ impl ExportFormat {
             Self::Streamlines => "streamlines",
             Self::Residuals => "residuals",
             Self::Forces => "forces",
+            Self::Coefficients => "coefficients",
         }
     }
 }
@@ -74,16 +77,17 @@ impl FromStr for ExportFormat {
             "streamlines" | "streamline" => Ok(Self::Streamlines),
             "residuals" | "residual" => Ok(Self::Residuals),
             "forces" | "force" => Ok(Self::Forces),
+            "coefficients" | "coefficient" | "cdcl" => Ok(Self::Coefficients),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals or forces are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces or coefficients are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals or forces are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces or coefficients are supported"
                 ),
             )),
         }
@@ -627,6 +631,7 @@ impl OpenCfd {
             ExportFormat::Streamlines => export_streamlines(&solution, out)?,
             ExportFormat::Residuals => export_residuals(&solution, out)?,
             ExportFormat::Forces => export_forces(&solution, out)?,
+            ExportFormat::Coefficients => export_coefficients(&solution, out)?,
         };
         Ok(ExportReport {
             format: format.as_str().to_string(),

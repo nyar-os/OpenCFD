@@ -733,6 +733,40 @@ pub fn export_forces(solution: &Solution, path: &Path) -> Result<PathBuf, CfdErr
     Ok(target)
 }
 
+/// Writes one final drag, lift and moment row per obstacle.
+///
+/// The header is
+/// `obstacle,kind,cd,cl,cm,fx,fy,mz,referenceVelocity,referenceArea,referenceLength`;
+/// each obstacle contributes exactly one row taken from the final solve state,
+/// in document order. Unlike [`export_forces`] this is a summary, not a time
+/// history. When `path` ends in `.csv` it is used as the output file; otherwise
+/// it is treated as a directory and `coefficients.csv` is created inside it.
+pub fn export_coefficients(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "csv", "coefficients.csv");
+    let mut text = String::from(
+        "obstacle,kind,cd,cl,cm,fx,fy,mz,referenceVelocity,referenceArea,referenceLength\n",
+    );
+    for force in &solution.report.forces {
+        let _ = writeln!(
+            text,
+            "{},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e}",
+            force.id,
+            force.kind,
+            force.cd,
+            force.cl,
+            force.cm,
+            force.fx,
+            force.fy,
+            force.mz,
+            force.reference_velocity,
+            force.reference_area,
+            force.reference_length
+        );
+    }
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
 /// Writes a self-contained SVG of streamlines traced through the velocity field.
 ///
 /// Lines are seeded on a regular grid, integrated with a second-order midpoint

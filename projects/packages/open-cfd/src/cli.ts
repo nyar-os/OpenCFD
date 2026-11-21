@@ -48,7 +48,7 @@ usage:
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -206,11 +206,12 @@ function parseExportFormat(raw: string): ExportFormat {
         raw !== 'contours' &&
         raw !== 'streamlines' &&
         raw !== 'residuals' &&
-        raw !== 'forces'
+        raw !== 'forces' &&
+        raw !== 'coefficients'
     ) {
         throw cliError(
             'cli/unknown-format',
-            `unknown export format \`${raw}\`; use csv, vtk, svg, contours, streamlines, residuals or forces`,
+            `unknown export format \`${raw}\`; use csv, vtk, svg, contours, streamlines, residuals, forces or coefficients`,
         );
     }
     return raw;
@@ -685,7 +686,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];
@@ -708,6 +709,8 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log(`exported residual history CSV: ${report.path}`);
             } else if (format === 'forces') {
                 console.log(`exported force history CSV: ${report.path}`);
+            } else if (format === 'coefficients') {
+                console.log(`exported coefficient summary CSV: ${report.path}`);
             } else {
                 console.log(`exported SVG (${field ?? 'pressure'}): ${report.path}`);
             }

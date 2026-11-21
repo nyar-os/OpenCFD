@@ -342,6 +342,16 @@ fn session_create_edit_solve_export_matches_cli() {
     assert!(fs::read_to_string(&force_path)
         .expect("read forces")
         .starts_with("obstacle,kind,step,fx,fy,mz,cd,cl,cm\n"));
+    let coefficient_path = directory.join("coefficients.csv");
+    let coefficient = session
+        .export(ExportFormat::Coefficients, &coefficient_path)
+        .expect("coefficient export");
+    assert_eq!(coefficient.format, "coefficients");
+    assert!(fs::read_to_string(&coefficient_path)
+        .expect("read coefficients")
+        .starts_with(
+            "obstacle,kind,cd,cl,cm,fx,fy,mz,referenceVelocity,referenceArea,referenceLength\n"
+        ));
     let stream_text = fs::read_to_string(&stream_path).expect("read streamlines");
     assert!(stream_text.contains("OpenCFD streamlines"));
     assert!(stream_text.contains("<polyline"));
