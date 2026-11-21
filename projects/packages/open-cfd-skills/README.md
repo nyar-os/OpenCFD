@@ -8,11 +8,12 @@ runtime library and contains no meshing, solver or export algorithms.
 `skills/open-cfd/SKILL.md` records the routing and evidence rules for create,
 edit, validate, solve and export against the implemented session core. The CLI
 and SDK behind it create and reopen a `.ocfd` case, set mesh, fluid, time,
-boundary, obstacle, scalar, turbulence and thermal parameters, validate the
-case, solve it and export CSV, VTK or SVG. Turbulence is limited to the constant
-and mixing-length eddy-viscosity models; compressible flow, three-dimensional
-flow, coupled heat transfer, adaptive meshing and external format import are not
-implemented and report `capability/not-implemented`.
+boundary, obstacle, porous region, scalar, turbulence, wall function and thermal
+parameters, validate the case, solve it and export CSV, VTK or SVG. Turbulence is
+limited to the constant and mixing-length eddy-viscosity models; compressible
+flow, three-dimensional flow, coupled heat transfer, adaptive meshing and
+external format import are not implemented and report
+`capability/not-implemented`.
 
 ## Layout
 

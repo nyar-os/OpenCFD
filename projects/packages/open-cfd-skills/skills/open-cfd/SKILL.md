@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets and periodic sides), pressure-driven flow, obstacle, passive scalar, buoyancy, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets, convective outlets and periodic sides), pressure-driven flow, obstacle, porous region, passive scalar, buoyancy, turbulence, wall function or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -9,17 +9,20 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 
 The two-dimensional incompressible document core is executable. The CLI and SDK
 create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
-`euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure, periodic sides and
-parabolic/power-law inlet profiles), uniform pressure gradients for
-pressure-driven flow, obstacle, force/moment reference, passive
-scalar, buoyancy, turbulence and thermal settings, validate it, solve it and export CSV,
+`euler`/`rk2` scheme), boundary (including free-slip walls, pressure and
+convective outlets, periodic sides and parabolic/power-law inlet profiles),
+uniform pressure gradients for pressure-driven flow, obstacle, porous region,
+force/moment reference, passive scalar, buoyancy, turbulence, wall function and
+thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV, force history CSV or a final drag/lift/moment
 summary CSV. CSV and VTK can sample
 cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
-(`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
+with `meanYPlus` (`wallShear`), the optional log-law wall function flag
+(`wallFunction`), porous region summaries (`porous`), drag/lift/moment
+coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
 `averageDt`, `minDt`, `maxDt`), the `terminationReason` and whether Boussinesq
 buoyancy was applied (`buoyancy`). Compressible flow, three-dimensional flow,
@@ -36,11 +39,13 @@ ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
 ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
 ocfd time scheme set <file> --scheme euler|rk2
 ocfd time adaptive set <file> --cfl <n|off>
-ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
 ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
+ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
+ocfd porous list <file>
 ocfd probe add <file> --x <m> --y <m> [--id <name>]
 ocfd probe list <file>
 ocfd probe clear <file>
@@ -48,6 +53,8 @@ ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
 ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
 ocfd heat set <file> [thermal options]
+ocfd wall function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
+ocfd wall function clear <file>
 ocfd convection set <file> --scheme upwind|central|quick
 ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
@@ -109,6 +116,17 @@ rename. Confirm the path before running them.
 - `pressure gradient set --dpdx ... --dpdy ...` imposes a uniform pressure
   gradient in Pa/m as the body force `-∇p/ρ`; `0 0` clears it. It is constant in
   space and time and is not a general body-force field.
+- `porous add` installs an isotropic Darcy–Forchheimer sink
+  `−(ν/K)U − (C_F/√K)|U|U` over the rectangle; `K` must be positive and `C_F`
+  non-negative. The sink is explicit, so
+  `(ν/K + C_F·|U|/√K)·dt ≤ 1` or the solve fails with `solver/unstable`.
+  Overlapping regions keep the first in document order, and the report lists
+  `id`, `cells`, `meanSpeed` and `meanDrag`.
+- A `convective` side relaxes its outlet face with the local outflow speed
+  instead of a plain zero gradient, and keeps the same Dirichlet `pressure`.
+- `wall function set` evaluates the reported wall shear from the log law
+  `u⁺ = (1/κ)ln(y⁺) + B` above `minYPlus`; momentum keeps its no-slip ghost and
+  every wall side also reports `meanYPlus`.
 - `solve` stops early on the L2 norm of the velocity change when `--tolerance`
   is given and reports `converged`, `steadyState`, `residual`,
   `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,
@@ -129,8 +147,9 @@ rename. Confirm the path before running them.
   capability matrix.
 - Report the exact command, revision and export path used.
 - Do not invent mesh refinement, turbulence models or boundary types outside the
-  implemented commands; `slip`, outlet `pressure` and paired `periodic` sides are
-  the supported boundary additions.
+  implemented commands; `slip`, outlet `pressure`, `convective` outlets and
+  paired `periodic` sides are the supported boundary additions, and the porous
+  region and wall function sections are the supported source/reporting models.
 
 ## Safety
 
