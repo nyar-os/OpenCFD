@@ -62,6 +62,11 @@ fn still_cavity_stays_at_rest_without_nan() {
         "divergence {}",
         solution.report.divergence_l2
     );
+    let balance = solution.report.mass_balance;
+    assert_eq!(balance.inflow, 0.0);
+    assert_eq!(balance.outflow, 0.0);
+    assert_eq!(balance.net, 0.0);
+    assert_eq!(balance.relative_error, 0.0);
     assert!(solution.report.converged);
     assert_eq!(solution.report.steps, 40);
 }
@@ -412,6 +417,11 @@ fn channel_with_circle_obstacle_has_finite_positive_drag() {
     assert!((force.reference_velocity - 1.0).abs() < 1e-12);
     assert!((force.reference_area - 0.2).abs() < 1e-12);
     assert!((force.reference_length - 0.2).abs() < 1e-12);
+
+    let balance = solution.report.mass_balance;
+    assert!(balance.inflow.is_finite() && balance.outflow.is_finite());
+    assert!(balance.inflow > 0.0 && balance.outflow > 0.0);
+    assert!(balance.relative_error < 0.25, "mass balance {balance:?}");
 }
 
 #[test]
@@ -580,6 +590,10 @@ fn solve_options_stop_on_loose_tolerance_and_report_strict() {
         loose.report.steps
     );
     assert!(!loose.report.residual_history.is_empty());
+    for sample in &loose.report.residual_history {
+        assert!(sample.residual.is_finite() && sample.residual >= 0.0);
+        assert!(sample.continuity.is_finite() && sample.continuity >= 0.0);
+    }
     assert_eq!(
         loose
             .report
@@ -588,6 +602,9 @@ fn solve_options_stop_on_loose_tolerance_and_report_strict() {
             .map(|sample| sample.step),
         Some(loose.report.steps)
     );
+    let value = serde_json::to_value(&loose.report).expect("report json");
+    assert!(value.get("massBalance").is_some());
+    assert!(value.get("residualHistory").is_some());
 
     let strict = solve_with(
         &model,

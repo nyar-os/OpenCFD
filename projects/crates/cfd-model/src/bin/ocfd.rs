@@ -627,6 +627,16 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
     };
     let session = open_session(file)?;
     let report = session.solve_with(&options)?;
+    eprintln!(
+        "solve summary: {} steps, t={} s, steadyState={}, residual={:.6e}, continuity={:.6e}, massBalance={:.6e} kg/s (relative {:.6e})",
+        report.steps,
+        report.time,
+        report.steady_state,
+        report.residual,
+        report.divergence_l2,
+        report.mass_balance.net,
+        report.mass_balance.relative_error
+    );
     let json = serde_json::to_string_pretty(&report).map_err(|error| {
         CfdError::new(
             "document/serialize",

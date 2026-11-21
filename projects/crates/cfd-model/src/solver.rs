@@ -36,6 +36,28 @@ pub struct ResidualSample {
     pub step: usize,
     /// L2 norm of the velocity change at this step.
     pub residual: f64,
+    /// RMS of the discrete divergence after the step (1/s).
+    #[serde(default)]
+    pub continuity: f64,
+}
+
+/// Net mass flow through the domain boundary.
+///
+/// All values are mass flow rates in kg/s. `inflow` and `outflow` are the
+/// magnitudes of the inward and outward fluxes; `net` is `outflow - inflow`.
+/// `relativeError` is `|net| / max(inflow, outflow)` and is zero for a closed
+/// domain or for a balanced channel.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MassBalance {
+    /// Total inward mass flow (kg/s).
+    pub inflow: f64,
+    /// Total outward mass flow (kg/s).
+    pub outflow: f64,
+    /// Signed net outward mass flow `outflow - inflow` (kg/s).
+    pub net: f64,
+    /// `|net| / max(inflow, outflow)`; zero when no flow crosses the boundary.
+    pub relative_error: f64,
 }
 
 /// One sampled force coefficient.
@@ -200,6 +222,9 @@ pub struct Report {
     pub max_pressure: f64,
     /// RMS of the discrete divergence after the final projection (1/s).
     pub divergence_l2: f64,
+    /// Net mass flow through the domain boundary.
+    #[serde(default)]
+    pub mass_balance: MassBalance,
     /// Minimum cell-centred vorticity of fluid cells (1/s).
     #[serde(default)]
     pub vorticity_min: f64,
@@ -488,7 +513,11 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         residual = velocity_residual(&u_previous, &v_previous, &u, &v);
         let sample = step % sample_stride == 0 || step == steps;
         if sample {
-            residual_history.push(ResidualSample { step, residual });
+            residual_history.push(ResidualSample {
+                step,
+                residual,
+                continuity: rms(&mesh.divergence(&u, &v)),
+            });
             append_force_samples(
                 &mesh,
                 model,
@@ -523,6 +552,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
 
     let divergence = mesh.divergence(&u, &v);
     let divergence_l2 = rms(&divergence);
+    let mass_balance = mass_balance(&mesh, model.fluid.density, &u, &v);
     let max_velocity = max_velocity(&u, &v);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
     let vorticity_field = vorticity(&mesh, &u, &v);
@@ -545,6 +575,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         min_pressure,
         max_pressure,
         divergence_l2,
+        mass_balance,
         vorticity_min,
         vorticity_max,
         stream_function_min,
@@ -2371,6 +2402,41 @@ fn max_velocity(u: &[f64], v: &[f64]) -> f64 {
     u.iter()
         .chain(v.iter())
         .fold(0.0_f64, |maximum, value| maximum.max(value.abs()))
+}
+
+/// Integrates the mass flux through the four domain sides.
+///
+/// Solid obstacles are interior and contribute no boundary flux. The outward
+/// normal is `+x` on the right, `-x` on the left, `+y` on the top and `-y` on
+/// the bottom, so the signs below match `outflow - inflow`.
+fn mass_balance(mesh: &Mesh, density: f64, u: &[f64], v: &[f64]) -> MassBalance {
+    let mut inflow = 0.0;
+    let mut outflow = 0.0;
+    let mut accumulate = |flux: f64| {
+        if flux >= 0.0 {
+            outflow += flux;
+        } else {
+            inflow -= flux;
+        }
+    };
+    for j in 0..mesh.ny {
+        accumulate(-u[mesh.u_index(0, j)] * mesh.dy);
+        accumulate(u[mesh.u_index(mesh.nx, j)] * mesh.dy);
+    }
+    for i in 0..mesh.nx {
+        accumulate(-v[mesh.v_index(i, 0)] * mesh.dx);
+        accumulate(v[mesh.v_index(i, mesh.ny)] * mesh.dx);
+    }
+    let inflow = inflow * density;
+    let outflow = outflow * density;
+    let net = outflow - inflow;
+    let scale = inflow.max(outflow);
+    MassBalance {
+        inflow,
+        outflow,
+        net,
+        relative_error: if scale > 0.0 { net.abs() / scale } else { 0.0 },
+    }
 }
 
 fn rms(values: &[f64]) -> f64 {

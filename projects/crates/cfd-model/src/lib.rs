@@ -44,8 +44,9 @@ pub use crate::session::{
 };
 pub use crate::solver::{
     solve, solve_pressure, solve_with, transport_scalar, transport_thermal, ForceSample,
-    ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats, ProbeSample, ProbeSeries,
-    Report, ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
+    MassBalance, ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats, ProbeSample,
+    ProbeSeries, Report, ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT,
+    REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -68,6 +69,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
     "momentCoefficients": "supported",
+    "massBalance": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

@@ -225,6 +225,18 @@ export interface ExportReport {
 export interface ResidualSample {
     readonly step: number;
     readonly residual: number;
+    /** RMS of the discrete divergence after the step in 1/s. */
+    readonly continuity: number;
+}
+
+/** Net mass flow through the domain boundary in kg/s. */
+export interface MassBalance {
+    readonly inflow: number;
+    readonly outflow: number;
+    /** Signed net outward mass flow, `outflow - inflow`. */
+    readonly net: number;
+    /** `|net| / max(inflow, outflow)`; zero when no flow crosses the boundary. */
+    readonly relativeError: number;
 }
 
 /** One sampled obstacle force. */
@@ -317,6 +329,8 @@ export interface SolveReport {
     readonly minPressure: number;
     readonly maxPressure: number;
     readonly divergenceL2: number;
+    /** Net mass flow through the domain boundary. */
+    readonly massBalance: MassBalance;
     /** Minimum vorticity over fluid cells in 1/s. */
     readonly vorticityMin: number;
     /** Maximum vorticity over fluid cells in 1/s. */
