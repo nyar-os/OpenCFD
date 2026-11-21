@@ -35,9 +35,9 @@ pub use crate::export::{export_csv, export_svg, export_vtk, write_atomic, Export
 pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
-    Boundaries, Boundary, BoundaryKind, Buoyancy, Fluid, InitialField, MeshConfig, Model, Obstacle,
-    ScalarConfig, Side, SideThermal, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
-    Units, FORMAT, VERSION,
+    Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
+    MeshConfig, Model, Obstacle, ScalarConfig, Side, SideThermal, ThermalConfig, TimeSettings,
+    Turbulence, TurbulenceModel, Units, FORMAT, VERSION,
 };
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
@@ -62,6 +62,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "convergence": "supported",
     "vorticity": "supported",
     "streamFunction": "supported",
+    "convectionSchemes": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

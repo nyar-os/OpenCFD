@@ -15,8 +15,8 @@ use serde::Serialize;
 
 use crate::export::{export_csv, export_svg, export_vtk, ExportField};
 use crate::model::{
-    Boundaries, BoundaryKind, Fluid, InitialField, MeshConfig, Model, Obstacle, ScalarConfig, Side,
-    ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
+    Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, MeshConfig, Model, Obstacle,
+    ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
 };
 use crate::solver::{solve, solve_with, Report, SolveOptions};
 use crate::{CfdError, CAPABILITIES_JSON};
@@ -96,6 +96,8 @@ pub struct CaseSummary {
     pub mesh: MeshConfig,
     /// Fluid properties.
     pub fluid: Fluid,
+    /// Convective discretisation of the momentum and scalar equations.
+    pub convection: ConvectionScheme,
     /// Time integration settings.
     pub time: TimeSettings,
     /// Boundary conditions.
@@ -125,6 +127,7 @@ impl CaseSummary {
             version: model.version,
             mesh: model.mesh.clone(),
             fluid: model.fluid.clone(),
+            convection: model.convection,
             time: model.time.clone(),
             boundaries: model.boundaries.clone(),
             initial: model.initial.clone(),
@@ -273,6 +276,13 @@ impl OpenCfd {
         self.edit(|model| {
             model.fluid.density = density;
             model.fluid.viscosity = viscosity;
+        })
+    }
+
+    /// Sets the convective discretisation and writes the document back.
+    pub fn convection_set(&mut self, scheme: ConvectionScheme) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.convection = scheme;
         })
     }
 

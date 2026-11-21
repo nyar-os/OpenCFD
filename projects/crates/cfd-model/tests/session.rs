@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cfd_model::{BoundaryKind, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions, Side};
+use cfd_model::{
+    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions, Side,
+};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -76,16 +78,22 @@ fn session_create_edit_solve_export_matches_cli() {
     assert_eq!(summary.boundaries.top.velocity, [1.0, 0.0]);
     let summary = session.validate().expect("validate");
     assert_eq!(summary.time.steps, 5);
+    let summary = session
+        .convection_set(ConvectionScheme::Quick)
+        .expect("convection set");
+    assert_eq!(summary.convection.as_str(), "quick");
 
     let stored = Model::load(&session_path).expect("load saved document");
     assert_eq!(stored.mesh.nx, 12);
     assert_eq!(stored.time.pressure_iterations, 20);
     assert_eq!(stored.boundaries.top.velocity[0], 1.0);
+    assert_eq!(stored.convection.as_str(), "quick");
 
     let report = session.solve().expect("solve");
     assert!(report.max_velocity.is_finite());
     assert!(report.max_velocity > 0.0);
     assert_eq!(report.steps, 5);
+    assert_eq!(report.convection, "quick");
 
     let csv = session
         .export(ExportFormat::Csv, &directory.join("csv"))
@@ -125,6 +133,7 @@ fn session_create_edit_solve_export_matches_cli() {
             "1",
         ],
         vec!["fluid", "set", cli.as_str(), "--rho", "1", "--mu", "0.01"],
+        vec!["convection", "set", cli.as_str(), "--scheme", "quick"],
         vec![
             "time",
             "set",

@@ -104,6 +104,9 @@ export interface ScalarConfig {
 /** Eddy-viscosity turbulence model. */
 export type TurbulenceModel = 'none' | 'constant' | 'mixingLength';
 
+/** Convective discretisation of the momentum and scalar equations. */
+export type ConvectionScheme = 'upwind' | 'central' | 'quick';
+
 /** Eddy-viscosity turbulence settings. */
 export interface Turbulence {
     readonly model: TurbulenceModel;
@@ -161,6 +164,8 @@ export interface CaseSummary {
     readonly version: number;
     readonly mesh: MeshConfig;
     readonly fluid: Fluid;
+    /** Convective discretisation of the momentum and scalar equations. */
+    readonly convection: ConvectionScheme;
     readonly time: TimeSettings;
     readonly boundaries: Boundaries;
     readonly initial?: InitialField;
@@ -262,6 +267,8 @@ export interface SolveReport {
     readonly pressureResidual: number;
     readonly pressureResidualInitial: number;
     readonly forces: readonly ObstacleForce[];
+    /** Convection scheme used by the run. */
+    readonly convection: string;
 }
 
 /** Arguments of `CfdCase.setMesh()`. */
@@ -295,6 +302,11 @@ export interface BoundarySetRequest {
     readonly u?: number;
     /** Prescribed y velocity; omitted keeps the current value. */
     readonly v?: number;
+}
+
+/** Arguments of `CfdCase.setConvection()`. */
+export interface ConvectionSetRequest {
+    readonly scheme: ConvectionScheme;
 }
 
 /** Arguments of `CfdCase.setScalar()`. */

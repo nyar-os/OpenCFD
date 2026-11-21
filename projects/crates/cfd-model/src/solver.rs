@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, Model, ScalarConfig, Side, ThermalConfig, Turbulence, TurbulenceModel,
+    Boundaries, BoundaryKind, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
+    Turbulence, TurbulenceModel,
 };
 use crate::CfdError;
 
@@ -20,6 +21,11 @@ const MAX_HISTORY: usize = 1000;
 /// Default turbulence identifier for reports written before the field existed.
 fn default_turbulence_model_name() -> String {
     TurbulenceModel::None.as_str().to_string()
+}
+
+/// Default convection identifier for reports written before the field existed.
+fn default_convection_name() -> String {
+    ConvectionScheme::Upwind.as_str().to_string()
 }
 
 /// One sampled velocity residual.
@@ -144,6 +150,9 @@ pub struct Report {
     pub pressure_residual_initial: f64,
     /// Per-obstacle forces and coefficients, in document order.
     pub forces: Vec<ObstacleForce>,
+    /// Convection scheme used by the run (`upwind`, `central` or `quick`).
+    #[serde(default = "default_convection_name")]
+    pub convection: String,
     /// Turbulence model identifier (`none`, `constant` or `mixingLength`).
     #[serde(default = "default_turbulence_model_name")]
     pub turbulence_model: String,
@@ -254,7 +263,8 @@ pub struct PressureStats {
 /// Advances an incompressible case and returns the final field.
 ///
 /// The scheme is a first-order Chorin projection on a staggered mesh: explicit
-/// upwind convection plus explicit central diffusion produce a tentative
+/// convection (first-order upwind, second-order central or QUICK according to
+/// `model.convection`) plus explicit central diffusion produce a tentative
 /// velocity, an SOR pressure Poisson solve enforces continuity, and the
 /// pressure gradient corrects the velocity. Solid cells block all adjacent
 /// faces, contribute zero divergence and are excluded from the pressure
@@ -364,6 +374,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 config,
                 model.thermal.as_ref(),
                 model.fluid.density,
+                model.convection,
                 model.time.dt,
                 &u,
                 &v,
@@ -448,6 +459,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         pressure_residual: last_stats.residual,
         pressure_residual_initial: last_stats.initial_residual,
         forces,
+        convection: model.convection.as_str().to_string(),
         turbulence_model: model
             .turbulence
             .as_ref()
@@ -733,11 +745,7 @@ fn momentum_step(
                 continue;
             }
             let centre = u[index];
-            let du_dx = if centre >= 0.0 {
-                (centre - u[mesh.u_index(i - 1, j)]) / dx
-            } else {
-                (u[mesh.u_index(i + 1, j)] - centre) / dx
-            };
+            let du_dx = u_convective_derivative(mesh, u, i, j, centre, model.convection);
             let v_face = 0.25
                 * (v[mesh.v_index(i - 1, j)]
                     + v[mesh.v_index(i - 1, j + 1)]
@@ -785,11 +793,7 @@ fn momentum_step(
                 continue;
             }
             let centre = v[index];
-            let dv_dy = if centre >= 0.0 {
-                (centre - v[mesh.v_index(i, j - 1)]) / dy
-            } else {
-                (v[mesh.v_index(i, j + 1)] - centre) / dy
-            };
+            let dv_dy = v_convective_derivative(mesh, v, i, j, centre, model.convection);
             let u_face = 0.25
                 * (u[mesh.u_index(i, j)]
                     + u[mesh.u_index(i + 1, j)]
@@ -826,6 +830,91 @@ fn momentum_step(
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
             v_star[index] =
                 centre + dt * (-convection + effective * diffusion - pressure_gradient / rho);
+        }
+    }
+}
+
+/// Convective derivative along x at u-face `(i, j)`.
+///
+/// QUICK falls back to first-order upwind when its quadratic stencil would
+/// leave the domain, so the first and last interior faces stay bounded.
+fn u_convective_derivative(
+    mesh: &Mesh,
+    u: &[f64],
+    i: usize,
+    j: usize,
+    velocity: f64,
+    scheme: ConvectionScheme,
+) -> f64 {
+    let dx = mesh.dx;
+    let upwind = |velocity: f64| {
+        if velocity >= 0.0 {
+            (u[mesh.u_index(i, j)] - u[mesh.u_index(i - 1, j)]) / dx
+        } else {
+            (u[mesh.u_index(i + 1, j)] - u[mesh.u_index(i, j)]) / dx
+        }
+    };
+    let value = |k: usize| u[mesh.u_index(k, j)];
+    match scheme {
+        ConvectionScheme::Upwind => upwind(velocity),
+        ConvectionScheme::Central => (value(i + 1) - value(i - 1)) / (2.0 * mesh.dx),
+        ConvectionScheme::Quick => {
+            if velocity >= 0.0 {
+                if i < 2 {
+                    return upwind(velocity);
+                }
+                let east = 0.375 * value(i + 1) + 0.75 * value(i) - 0.125 * value(i - 1);
+                let west = 0.375 * value(i) + 0.75 * value(i - 1) - 0.125 * value(i - 2);
+                (east - west) / dx
+            } else {
+                if i + 2 > mesh.nx {
+                    return upwind(velocity);
+                }
+                let east = 0.375 * value(i) + 0.75 * value(i + 1) - 0.125 * value(i + 2);
+                let west = 0.375 * value(i - 1) + 0.75 * value(i) - 0.125 * value(i + 1);
+                (east - west) / dx
+            }
+        }
+    }
+}
+
+/// Convective derivative along y at v-face `(i, j)`.
+fn v_convective_derivative(
+    mesh: &Mesh,
+    v: &[f64],
+    i: usize,
+    j: usize,
+    velocity: f64,
+    scheme: ConvectionScheme,
+) -> f64 {
+    let dy = mesh.dy;
+    let upwind = |velocity: f64| {
+        if velocity >= 0.0 {
+            (v[mesh.v_index(i, j)] - v[mesh.v_index(i, j - 1)]) / dy
+        } else {
+            (v[mesh.v_index(i, j + 1)] - v[mesh.v_index(i, j)]) / dy
+        }
+    };
+    let value = |k: usize| v[mesh.v_index(i, k)];
+    match scheme {
+        ConvectionScheme::Upwind => upwind(velocity),
+        ConvectionScheme::Central => (value(j + 1) - value(j - 1)) / (2.0 * mesh.dy),
+        ConvectionScheme::Quick => {
+            if velocity >= 0.0 {
+                if j < 2 {
+                    return upwind(velocity);
+                }
+                let north = 0.375 * value(j + 1) + 0.75 * value(j) - 0.125 * value(j - 1);
+                let south = 0.375 * value(j) + 0.75 * value(j - 1) - 0.125 * value(j - 2);
+                (north - south) / dy
+            } else {
+                if j + 2 > mesh.ny {
+                    return upwind(velocity);
+                }
+                let north = 0.375 * value(j) + 0.75 * value(j + 1) - 0.125 * value(j + 2);
+                let south = 0.375 * value(j - 1) + 0.75 * value(j) - 0.125 * value(j + 1);
+                (north - south) / dy
+            }
         }
     }
 }
@@ -1067,15 +1156,18 @@ fn initial_temperature(mesh: &Mesh, config: &ScalarConfig) -> Vec<f64> {
 
 /// Advances the passive scalar by one explicit advection-diffusion step.
 ///
-/// The scheme mirrors the momentum step: first-order upwind advection and
-/// central diffusion on cell centres. Solid faces carry zero flux and solid
-/// cells hold no scalar value. Inlet faces use `config.inlet_value`; walls and
-/// outlets use a zero-gradient ghost. The explicit diffusion number is checked
-/// before updating and `solver/unstable` is returned when it exceeds `0.5`.
+/// The scheme mirrors the momentum step: the selected convection scheme for the
+/// advective flux and central diffusion on cell centres. Solid faces carry zero
+/// flux and solid cells hold no scalar value. Inlet faces use
+/// `config.inlet_value`; walls and outlets use a zero-gradient ghost. The
+/// explicit diffusion number is checked before updating and `solver/unstable`
+/// is returned when it exceeds `0.5`.
+#[allow(clippy::too_many_arguments)]
 pub fn transport_scalar(
     mesh: &Mesh,
     boundaries: &Boundaries,
     config: &ScalarConfig,
+    scheme: ConvectionScheme,
     dt: f64,
     u: &[f64],
     v: &[f64],
@@ -1088,6 +1180,7 @@ pub fn transport_scalar(
         None,
         config.diffusivity,
         0.0,
+        scheme,
         dt,
         u,
         v,
@@ -1110,13 +1203,14 @@ pub fn transport_thermal(
     config: &ScalarConfig,
     thermal: Option<&ThermalConfig>,
     density: f64,
+    scheme: ConvectionScheme,
     dt: f64,
     u: &[f64],
     v: &[f64],
     temperature: &mut [f64],
 ) -> Result<(), CfdError> {
     let Some(thermal) = thermal else {
-        return transport_scalar(mesh, boundaries, config, dt, u, v, temperature);
+        return transport_scalar(mesh, boundaries, config, scheme, dt, u, v, temperature);
     };
     if !density.is_finite() || density <= 0.0 {
         return Err(CfdError::new(
@@ -1152,6 +1246,7 @@ pub fn transport_thermal(
         Some(&context),
         kappa,
         source,
+        scheme,
         dt,
         u,
         v,
@@ -1194,6 +1289,7 @@ fn scalar_step(
     context: Option<&ThermalContext>,
     kappa: f64,
     source: f64,
+    scheme: ConvectionScheme,
     dt: f64,
     u: &[f64],
     v: &[f64],
@@ -1240,6 +1336,7 @@ fn scalar_step(
                 config,
                 context,
                 kappa,
+                scheme,
                 u,
                 temperature,
                 i,
@@ -1252,6 +1349,7 @@ fn scalar_step(
                 config,
                 context,
                 kappa,
+                scheme,
                 u,
                 temperature,
                 i,
@@ -1264,6 +1362,7 @@ fn scalar_step(
                 config,
                 context,
                 kappa,
+                scheme,
                 v,
                 temperature,
                 i,
@@ -1276,6 +1375,7 @@ fn scalar_step(
                 config,
                 context,
                 kappa,
+                scheme,
                 v,
                 temperature,
                 i,
@@ -1313,6 +1413,22 @@ fn side_advect_ghost(
     }
 }
 
+/// Interpolates the advected scalar to one interior face.
+///
+/// `upwind` and `downwind` are the values on the two sides of the face and
+/// `upwind2` is the next cell on the upstream side, used only by QUICK. A
+/// missing upstream neighbour means the interpolation falls back to first-order
+/// upwind near the domain edge.
+fn face_value(scheme: ConvectionScheme, upwind: f64, upwind2: Option<f64>, downwind: f64) -> f64 {
+    match scheme {
+        ConvectionScheme::Upwind => upwind,
+        ConvectionScheme::Central => 0.5 * (upwind + downwind),
+        ConvectionScheme::Quick => upwind2.map_or(upwind, |second| {
+            (6.0 * upwind + 3.0 * downwind - second) / 8.0
+        }),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn scalar_west_flux(
     mesh: &Mesh,
@@ -1320,6 +1436,7 @@ fn scalar_west_flux(
     config: &ScalarConfig,
     context: Option<&ThermalContext>,
     kappa: f64,
+    scheme: ConvectionScheme,
     u: &[f64],
     temperature: &[f64],
     i: usize,
@@ -1350,8 +1467,30 @@ fn scalar_west_flux(
     } else {
         let velocity = u[mesh.u_index(i, j)];
         let west = temperature[index - 1];
-        advect(velocity, if velocity >= 0.0 { west } else { centre })
-            - kappa * (centre - west) / mesh.dx
+        let face = if velocity >= 0.0 {
+            face_value(
+                scheme,
+                west,
+                if i >= 2 && !mesh.solid[index - 2] {
+                    Some(temperature[index - 2])
+                } else {
+                    None
+                },
+                centre,
+            )
+        } else {
+            face_value(
+                scheme,
+                centre,
+                if i + 1 < mesh.nx && !mesh.solid[index + 1] {
+                    Some(temperature[index + 1])
+                } else {
+                    None
+                },
+                west,
+            )
+        };
+        advect(velocity, face) - kappa * (centre - west) / mesh.dx
     }
 }
 
@@ -1362,6 +1501,7 @@ fn scalar_east_flux(
     config: &ScalarConfig,
     context: Option<&ThermalContext>,
     kappa: f64,
+    scheme: ConvectionScheme,
     u: &[f64],
     temperature: &[f64],
     i: usize,
@@ -1398,8 +1538,30 @@ fn scalar_east_flux(
     } else {
         let velocity = u[mesh.u_index(i + 1, j)];
         let east = temperature[index + 1];
-        advect(velocity, if velocity >= 0.0 { centre } else { east })
-            - kappa * (east - centre) / mesh.dx
+        let face = if velocity >= 0.0 {
+            face_value(
+                scheme,
+                centre,
+                if i >= 1 && !mesh.solid[index - 1] {
+                    Some(temperature[index - 1])
+                } else {
+                    None
+                },
+                east,
+            )
+        } else {
+            face_value(
+                scheme,
+                east,
+                if i + 2 < mesh.nx && !mesh.solid[index + 2] {
+                    Some(temperature[index + 2])
+                } else {
+                    None
+                },
+                centre,
+            )
+        };
+        advect(velocity, face) - kappa * (east - centre) / mesh.dx
     }
 }
 
@@ -1410,6 +1572,7 @@ fn scalar_south_flux(
     config: &ScalarConfig,
     context: Option<&ThermalContext>,
     kappa: f64,
+    scheme: ConvectionScheme,
     v: &[f64],
     temperature: &[f64],
     i: usize,
@@ -1440,8 +1603,30 @@ fn scalar_south_flux(
     } else {
         let velocity = v[mesh.v_index(i, j)];
         let south = temperature[index - mesh.nx];
-        advect(velocity, if velocity >= 0.0 { south } else { centre })
-            - kappa * (centre - south) / mesh.dy
+        let face = if velocity >= 0.0 {
+            face_value(
+                scheme,
+                south,
+                if j >= 2 && !mesh.solid[index - 2 * mesh.nx] {
+                    Some(temperature[index - 2 * mesh.nx])
+                } else {
+                    None
+                },
+                centre,
+            )
+        } else {
+            face_value(
+                scheme,
+                centre,
+                if j + 1 < mesh.ny && !mesh.solid[index + mesh.nx] {
+                    Some(temperature[index + mesh.nx])
+                } else {
+                    None
+                },
+                south,
+            )
+        };
+        advect(velocity, face) - kappa * (centre - south) / mesh.dy
     }
 }
 
@@ -1452,6 +1637,7 @@ fn scalar_north_flux(
     config: &ScalarConfig,
     context: Option<&ThermalContext>,
     kappa: f64,
+    scheme: ConvectionScheme,
     v: &[f64],
     temperature: &[f64],
     i: usize,
@@ -1488,8 +1674,30 @@ fn scalar_north_flux(
     } else {
         let velocity = v[mesh.v_index(i, j + 1)];
         let north = temperature[index + mesh.nx];
-        advect(velocity, if velocity >= 0.0 { centre } else { north })
-            - kappa * (north - centre) / mesh.dy
+        let face = if velocity >= 0.0 {
+            face_value(
+                scheme,
+                centre,
+                if j >= 1 && !mesh.solid[index - mesh.nx] {
+                    Some(temperature[index - mesh.nx])
+                } else {
+                    None
+                },
+                north,
+            )
+        } else {
+            face_value(
+                scheme,
+                north,
+                if j + 2 < mesh.ny && !mesh.solid[index + 2 * mesh.nx] {
+                    Some(temperature[index + 2 * mesh.nx])
+                } else {
+                    None
+                },
+                centre,
+            )
+        };
+        advect(velocity, face) - kappa * (north - centre) / mesh.dy
     }
 }
 
@@ -1852,4 +2060,83 @@ fn rms(values: &[f64]) -> f64 {
         return 0.0;
     }
     (values.iter().map(|value| value * value).sum::<f64>() / values.len() as f64).sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::MeshConfig;
+
+    fn mesh() -> Mesh {
+        Mesh::new(&MeshConfig {
+            nx: 10,
+            ny: 6,
+            length_x: 1.0,
+            length_y: 1.0,
+        })
+        .expect("mesh")
+    }
+
+    #[test]
+    fn quick_and_central_are_exact_for_quadratic_profiles() {
+        let mesh = mesh();
+        let mut u = vec![0.0; mesh.u_count()];
+        for j in 0..mesh.ny {
+            for i in 0..=mesh.nx {
+                let (x, _) = mesh.u_position(i, j);
+                u[mesh.u_index(i, j)] = x * x;
+            }
+        }
+        let i = 4;
+        let j = 2;
+        let exact = 2.0 * i as f64 * mesh.dx;
+        let upwind = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Upwind);
+        let central = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Central);
+        let quick = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Quick);
+        let quick_reverse = u_convective_derivative(&mesh, &u, i, j, -1.0, ConvectionScheme::Quick);
+        assert!((central - exact).abs() < 1e-12, "central {central}");
+        assert!((quick - exact).abs() < 1e-12, "QUICK {quick}");
+        assert!(
+            (quick_reverse - exact).abs() < 1e-12,
+            "reverse QUICK {quick_reverse}"
+        );
+        assert!(
+            (upwind - exact).abs() > 0.5 * mesh.dx,
+            "upwind {upwind} should be first-order diffusive"
+        );
+
+        let mut v = vec![0.0; mesh.v_count()];
+        for j in 0..=mesh.ny {
+            for i in 0..mesh.nx {
+                let (_, y) = mesh.v_position(i, j);
+                v[mesh.v_index(i, j)] = y * y;
+            }
+        }
+        let j = 3;
+        let exact = 2.0 * j as f64 * mesh.dy;
+        let central = v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Central);
+        let quick = v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Quick);
+        let quick_reverse = v_convective_derivative(&mesh, &v, 2, j, -1.0, ConvectionScheme::Quick);
+        assert!((central - exact).abs() < 1e-12, "central {central}");
+        assert!((quick - exact).abs() < 1e-12, "QUICK {quick}");
+        assert!(
+            (quick_reverse - exact).abs() < 1e-12,
+            "reverse QUICK {quick_reverse}"
+        );
+    }
+
+    #[test]
+    fn quick_falls_back_to_upwind_next_to_the_boundary() {
+        let mesh = mesh();
+        let mut u = vec![0.0; mesh.u_count()];
+        for j in 0..mesh.ny {
+            for i in 0..=mesh.nx {
+                let (x, _) = mesh.u_position(i, j);
+                u[mesh.u_index(i, j)] = x * x;
+            }
+        }
+        let upwind = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Upwind);
+        let quick = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Quick);
+        assert_eq!(upwind, quick);
+    }
 }

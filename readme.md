@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, vorticity and stream-function post-processing, and steady-state velocity convergence detection. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, vorticity and stream-function post-processing, and steady-state velocity convergence detection. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -39,7 +39,7 @@ await cfd.dispose();
 ```
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
-- Document: `id`, `summary`, `obstacles`, `setMesh`, `setFluid`, `setTime`, `setBoundary`, `addObstacle`, `listObstacles`, `setScalar`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- Document: `id`, `summary`, `obstacles`, `setMesh`, `setFluid`, `setTime`, `setBoundary`, `addObstacle`, `listObstacles`, `setScalar`, `setConvection`, `validate`, `solve(options?)`, `export`, `save`, `close`.
 - `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory`, `forces`, and the vorticity and stream-function extremes.
 - Errors are always `OpenCFDError`; `code` is the contract (for example `mesh/invalid`, `obstacle/invalid`, `solver/unstable`). A missing native addon reports `capability/not-implemented`.
 - `export(format, target, field?)` writes CSV, legacy ASCII VTK or an SVG preview; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`). A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
@@ -98,6 +98,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
   "vorticityMax": 4.2168,
   "streamFunctionMin": -0.05959,
   "streamFunctionMax": 0.02278,
+  "convection": "upwind",
   "converged": true,
   "pressureIterations": 37
 }
@@ -116,6 +117,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]` | Add a circular obstacle |
 | `ocfd obstacle list <file>` | Print the obstacle JSON array in document order |
 | `ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]` | Enable or update passive scalar (temperature) transport; omitted values are unchanged |
+| `ocfd convection set <file> --scheme upwind\|central\|quick` | Select the convective discretisation used by momentum and scalar transport |
 | `ocfd turbulence set <file> --model none\|constant\|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]` | Select the eddy-viscosity model; `none` removes the turbulence section |
 | `ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] ...` | Configure energy-equation boundaries, volumetric source and reference temperature; requires scalar transport |
 | `ocfd validate <file>` | Structural validation; on failure prints a JSON error and returns exit code `1` |
@@ -141,6 +143,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
   "units": "m",
   "mesh": { "nx": 24, "ny": 24, "lengthX": 1.0, "lengthY": 1.0 },
   "fluid": { "density": 1.0, "viscosity": 0.01 },
+  "convection": "upwind",
   "time": {
     "dt": 0.01,
     "steps": 200,
@@ -168,6 +171,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `units` | Only `"m"` is supported. Length m, density kg/m³, dynamic viscosity Pa·s, velocity m/s, time s, pressure Pa |
 | `mesh` | Uniform Cartesian mesh; `nx` and `ny` are cell counts, `lengthX` and `lengthY` are physical sizes |
 | `fluid` | Constant density `density` and constant dynamic viscosity `viscosity` |
+| `convection` | Optional; `upwind` (default), `central` or `quick`, applied to the face-normal advective derivative of momentum and scalar transport |
 | `time` | `dt`, step count `steps`, maximum pressure SOR sweeps per step `pressureIterations`, and relative residual tolerance `tolerance` |
 | `boundaries` | One `kind` and velocity `[u, v]` for each of the four sides |
 | `initial` | Optional; uniform initial velocity `[u, v]`, at rest by default |
@@ -200,6 +204,7 @@ Boundary semantics:
 | `pressureIterations` | SOR sweeps actually performed in the final step |
 | `pressureResidual` / `pressureResidualInitial` | Final and initial pressure-Poisson residuals of the final step |
 | `forces` | Per-obstacle `{id, kind, fx, fy, cd, cl, history}`; `D` is the rectangle height or circle diameter and `U` is the maximum inlet speed (1 when there is no inlet) |
+| `convection` | Convective discretisation actually used: `upwind`, `central` or `quick` |
 
 `tolerance` is a **relative** threshold: the pressure solve counts as converged when its residual falls to `tolerance × max(initial residual, 1e-12)`. The solver option `tolerance` instead applies to the velocity change, measured as an L2 norm (the square root of the sum of squared face-velocity increments), and does not change the document pressure tolerance.
 
@@ -213,6 +218,7 @@ Boundary semantics:
 | Passive scalar (temperature) transport (`scalar`) | ✅ Supported |
 | Steady-state velocity convergence detection and early stopping (`convergence`) | ✅ Supported |
 | Vorticity and stream-function fields with report extremes (`vorticity`, `streamFunction`) | ✅ Supported |
+| Selectable upwind, central or QUICK convection (`convectionSchemes`) | ✅ Supported |
 | Eddy-viscosity turbulence, constant or mixing length (`turbulence`) | ✅ Supported (no energy-equation closure) |
 | Thermal side/obstacle conditions, heat sources and obstacle Nusselt numbers (`heat`) | ✅ Supported (no buoyancy) |
 | Boussinesq buoyancy (`buoyancy`) | ❌ Not implemented (avoids an unvalidated unstable path) |
@@ -227,18 +233,18 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 ## Numerical method
 
 1. **Staggered (MAC) mesh**: pressure lives at the centre of each of the `nx × ny` cells; `u` lives on the `(nx+1) × ny` x-faces and `v` on the `nx × (ny+1)` y-faces. A cell whose centre lies inside an obstacle is marked solid; every face between a solid cell and a fluid cell, or between two solid cells, carries zero velocity.
-2. **Momentum prediction**: first-order upwind convection, central-difference diffusion and explicit Euler produce the tentative velocities `u*` and `v*`. Tangential wall velocities are imposed through half-cell ghost values so boundary cells take part in the projection; solid faces are not sampled as fluid.
+2. **Momentum prediction**: explicit convection plus central-difference diffusion and explicit Euler produce the tentative velocities `u*` and `v*`. The `convection` field selects first-order upwind (default), second-order central or third-order QUICK for the face-normal advective derivative; the transverse velocity gradient stays central, and QUICK falls back to upwind on the first interior face next to a boundary. Tangential wall velocities are imposed through half-cell ghost values so boundary cells take part in the projection; solid faces are not sampled as fluid.
 3. **Pressure Poisson**: pressure follows from `∇²p = (ρ/dt) ∇·u*`. Wall, inlet and solid faces use homogeneous Neumann conditions and outlets use homogeneous Dirichlet; solid cells are not unknowns (their pressure stays 0) and their divergence is forced to zero. SOR solves the system with a relaxation factor derived from the largest mesh side, and the iteration count and relative tolerance come from the document. In a fully closed domain only the fluid cells have their mean pressure removed after the sweeps.
 4. **Velocity correction**: `u = u* − (dt/ρ) ∇p` updates open faces only, then normal boundary conditions and zero solid velocities are reapplied to obtain a divergence-free velocity field.
 5. **Obstacle forces**: on every fluid-solid face, pressure `p × face length` and viscous shear `μ·u_fluid/(half-cell distance) × face length` are accumulated per obstacle `id`; `Cd = 2Fx/(ρU²D)` and `Cl = 2Fy/(ρU²D)`.
-6. **Passive scalar**: the same upwind convection plus central diffusion is advanced explicitly at cell centres; solid faces carry zero flux, solid cells hold no scalar and inlet faces use `inletValue`. A violation returns `solver/unstable`.
+6. **Passive scalar**: the same selectable convection scheme plus central diffusion is advanced explicitly at cell centres; solid faces carry zero flux, solid cells hold no scalar and inlet faces use `inletValue`. A violation returns `solver/unstable`.
 7. **Convergence detection**: each step computes the L2 norm of the velocity change, samples it every `checkEvery` steps and checks it against `tolerance`, stopping early when it passes; history is capped at 1000 entries.
 8. **Stability guards**: before solving, the explicit convective CFL number and the momentum and scalar diffusion numbers are checked; a violation returns `solver/unstable` and never emits NaN or Inf. Every step also checks that all fields are finite.
 9. **Eddy viscosity**: the optional turbulence section either applies a constant `nuT` or evaluates `nuT = l²·|S|` per cell from the resolved strain-rate tensor. Fluid faces use the mean of the adjacent cell values and solid cells carry zero.
 10. **Thermal transport**: when a `thermal` section is present, the scalar equation becomes an energy equation. The transported diffusivity is `k/(ρ·cp)`, sides and obstacle surfaces use fixed temperature or fixed heat flux, and a uniform volumetric source is added. Every obstacle reports `meanHeatFlux`, `wallTemperature` and `Nu = q̅·D/(k·ΔT)`.
 11. **Derived fields**: after the solve, cell-centred vorticity `ω = ∂v/∂x − ∂u/∂y` uses central differences of the averaged face velocities, with one-sided differences on the first and last row or column. The stream function satisfies `∂ψ/∂y = u` and `∂ψ/∂x = −v`, is integrated from the bottom-left corner and has its fluid-cell mean removed, so it is a gauge-fixed value rather than a unique potential in multiply connected domains.
 
-This is a first-order in time and space MVP with visible numerical diffusion. It suits validation and teaching, not high-accuracy engineering results.
+Upwind and explicit Euler are first-order in space and time, so the default configuration has visible numerical diffusion. Selecting `central` or `quick` sharpens fronts and reduces diffusion, at the cost of possible dispersive overshoot and a tighter cell-Péclet stability limit.
 
 ## Validation and tests
 
@@ -259,6 +265,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 9. **Steady-state convergence**: a loose tolerance stops before `steps` and reports `converged: true`; a strict tolerance with few steps reports `converged: false`.
 10. **Derived fields**: a linear shear `u = y` gives vorticity `−1` in every cell and stream-function increments `u·dy`; solid-body rotation `(−y, x)` gives vorticity `2`; the solved stream function has zero fluid-cell mean and the report extremes match the stored field.
 11. **Vorticity SVG**: exporting the vorticity field produces a self-contained SVG naming `vorticity (1/s)` and its numerical range.
+12. **Convection schemes**: central and QUICK differentiate a quadratic velocity profile exactly while upwind carries an `O(dx)` error; QUICK equals upwind on the first interior face where its stencil would leave the domain; a scalar step is at least twice as thick under upwind as under central or QUICK and the sharper fronts have at least 1.5× the maximum gradient; lid-cavity solutions differ between schemes and remain finite and bounded.
 
 `projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation.
 
@@ -282,7 +289,7 @@ cargo build -p cfd-model --offline
 - Single-phase, incompressible, constant-density, constant-viscosity Newtonian flow only; the optional eddy viscosity is algebraic (constant or mixing length), so high-Reynolds-number results remain a laminar approximation.
 - Uniform structured Cartesian meshes only; no body-fitted meshes, adaptive refinement, moving meshes or immersed boundaries. Obstacles are stair-stepped by cell centre.
 - Explicit time stepping is limited by CFL and diffusion numbers; finer meshes and higher viscosity require a smaller `dt`. Violations raise an error instead of reducing the step automatically.
-- First-order upwind plus explicit Euler makes both space and time first-order, with significant numerical diffusion.
+- The default first-order upwind plus explicit Euler makes space and time first-order, with significant numerical diffusion. `central` and `quick` are available, but above a cell Péclet number of about 2 they can oscillate and destabilise the explicit scheme.
 - Passive scalar (temperature) transport is supported, but Boussinesq buoyancy is not; the `buoyancy` field is rejected with `capability/not-implemented`.
 - The stream function is integrated along one path from the bottom-left corner, so in a domain cut by obstacles it is a gauge-fixed diagnostic rather than a unique potential.
 - Boundary handling is first-order: tangential wall velocity uses a half-cell ghost and outlets use zero-gradient velocity with pressure 0.

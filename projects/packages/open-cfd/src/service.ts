@@ -12,6 +12,7 @@ import { nativeBinding } from './native.js';
 import type {
     BoundarySetRequest,
     CaseSummary,
+    ConvectionSetRequest,
     ExportField,
     ExportFormat,
     ExportReport,
@@ -156,6 +157,13 @@ export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummar
             request.initial,
             request.inlet,
         ),
+    );
+}
+
+/** Selects the convective discretisation and writes the document back. */
+export function convectionSet(handle: number, request: ConvectionSetRequest): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('convection.set').convection_set(handle, request.scheme),
     );
 }
 

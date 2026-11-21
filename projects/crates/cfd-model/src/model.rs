@@ -131,6 +131,53 @@ impl Default for TimeSettings {
     }
 }
 
+/// Convective discretisation of the momentum and scalar equations.
+///
+/// `Upwind` is the first-order default and the most diffusive. `Central` is
+/// second-order and can oscillate when the cell Péclet number exceeds 2.
+/// `Quick` is the third-order quadratic upstream interpolation, which is
+/// slightly sharper than upwind while staying less oscillatory than central.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConvectionScheme {
+    /// First-order upwind differencing.
+    #[default]
+    Upwind,
+    /// Second-order central differencing.
+    Central,
+    /// Third-order quadratic upstream interpolation (QUICK).
+    Quick,
+}
+
+impl ConvectionScheme {
+    /// Returns the identifier used in documents, reports and the CLI.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Upwind => "upwind",
+            Self::Central => "central",
+            Self::Quick => "quick",
+        }
+    }
+}
+
+impl FromStr for ConvectionScheme {
+    type Err = CfdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "upwind" => Ok(Self::Upwind),
+            "central" => Ok(Self::Central),
+            "quick" => Ok(Self::Quick),
+            other => Err(CfdError::new(
+                "cli/invalid-convection-scheme",
+                format!(
+                    "unknown convection scheme `{other}`; only upwind, central or quick is supported"
+                ),
+            )),
+        }
+    }
+}
+
 /// Kind of a domain side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -649,6 +696,9 @@ pub struct Model {
     /// Fluid properties.
     #[serde(default)]
     pub fluid: Fluid,
+    /// Convective discretisation of the momentum and scalar equations.
+    #[serde(default)]
+    pub convection: ConvectionScheme,
     /// Time integration settings.
     #[serde(default)]
     pub time: TimeSettings,
@@ -695,6 +745,7 @@ impl Model {
             units: Units::Meter,
             mesh: MeshConfig::default(),
             fluid: Fluid::default(),
+            convection: ConvectionScheme::default(),
             time: TimeSettings::default(),
             boundaries,
             initial: None,

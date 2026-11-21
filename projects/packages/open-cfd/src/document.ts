@@ -12,6 +12,7 @@ import * as service from './service.js';
 import type {
     BoundarySetRequest,
     CaseSummary,
+    ConvectionSetRequest,
     ExportField,
     ExportFormat,
     ExportReport,
@@ -91,6 +92,12 @@ export class CfdCase {
     listObstacles(): readonly Obstacle[] {
         this.assertOpen();
         return service.obstacleList(this.handle);
+    }
+
+    /** Selects the convective discretisation and writes the document back. */
+    setConvection(request: ConvectionSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.convectionSet(this.handle, request));
     }
 
     /** Configures passive scalar transport and writes the document back. */

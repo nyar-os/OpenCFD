@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     export_csv, export_svg, export_vtk, solve, solve_pressure, solve_with, stream_function,
-    transport_scalar, vorticity, Boundary, BoundaryKind, ExportField, Mesh, Model, Obstacle,
-    PressureSettings, ScalarConfig, SolveOptions, CAPABILITIES_JSON, VERSION,
+    transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme, ExportField, Mesh,
+    Model, Obstacle, PressureSettings, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON,
+    VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -315,6 +316,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"buoyancy\": \"unsupported\""));
     assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
 }
 
 #[test]
@@ -411,8 +413,17 @@ fn scalar_diffusion_decays_hot_spot_and_keeps_uniform_field() {
 
     let mut uniform = vec![0.25; mesh.pressure_count()];
     for _ in 0..5 {
-        transport_scalar(&mesh, &model.boundaries, &config, dt, &u, &v, &mut uniform)
-            .expect("uniform scalar step");
+        transport_scalar(
+            &mesh,
+            &model.boundaries,
+            &config,
+            ConvectionScheme::Upwind,
+            dt,
+            &u,
+            &v,
+            &mut uniform,
+        )
+        .expect("uniform scalar step");
     }
     for value in &uniform {
         assert!(
@@ -429,6 +440,7 @@ fn scalar_diffusion_decays_hot_spot_and_keeps_uniform_field() {
             &mesh,
             &model.boundaries,
             &config,
+            ConvectionScheme::Upwind,
             dt,
             &u,
             &v,
@@ -601,4 +613,167 @@ fn solve_reports_derived_fields_and_svg_export() {
     let svg = fs::read_to_string(&svg_path).expect("read svg");
     assert!(svg.contains("OpenCFD vorticity field (1/s)"));
     assert!(svg.contains("range "));
+}
+
+#[test]
+fn scalar_front_sharpens_with_central_and_quick() {
+    let mut model = mesh_model(24, 8);
+    model.mesh.length_x = 2.0;
+    model.mesh.length_y = 1.0;
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+    let config = ScalarConfig {
+        diffusivity: 1e-4,
+        initial: 0.0,
+        inlet_value: 0.0,
+    };
+    let dt = 0.002;
+    let u = vec![0.5; mesh.u_count()];
+    let v = vec![0.0; mesh.v_count()];
+
+    let mut fields = Vec::new();
+    for scheme in [
+        ConvectionScheme::Upwind,
+        ConvectionScheme::Central,
+        ConvectionScheme::Quick,
+    ] {
+        let mut temperature = vec![0.0; mesh.pressure_count()];
+        for j in 0..mesh.ny {
+            for i in 0..4 {
+                temperature[mesh.pressure_index(i, j)] = 1.0;
+            }
+        }
+        for _ in 0..200 {
+            transport_scalar(
+                &mesh,
+                &model.boundaries,
+                &config,
+                scheme,
+                dt,
+                &u,
+                &v,
+                &mut temperature,
+            )
+            .expect("scalar step");
+        }
+        assert_finite(&temperature, scheme.as_str());
+        let maximum = temperature
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let minimum = temperature.iter().copied().fold(f64::INFINITY, f64::min);
+        // Upwind is monotone. Central and QUICK are dispersive and may
+        // overshoot a sharp front, but must stay bounded over the run.
+        let ceiling = if scheme == ConvectionScheme::Upwind {
+            1.0 + 1e-12
+        } else {
+            1.5
+        };
+        assert!(
+            maximum <= ceiling,
+            "{} overshoots to {maximum}",
+            scheme.as_str()
+        );
+        assert!(
+            minimum >= -0.5,
+            "{} undershoots to {minimum}",
+            scheme.as_str()
+        );
+        fields.push(temperature);
+    }
+
+    let row = mesh.ny / 2;
+    let thickness = |field: &[f64]| {
+        (0..mesh.nx)
+            .map(|i| {
+                let value = field[mesh.pressure_index(i, row)];
+                value * (1.0 - value)
+            })
+            .sum::<f64>()
+    };
+    let gradient = |field: &[f64]| {
+        (0..mesh.nx - 1)
+            .map(|i| {
+                (field[mesh.pressure_index(i + 1, row)] - field[mesh.pressure_index(i, row)]).abs()
+            })
+            .fold(0.0_f64, f64::max)
+    };
+
+    // The interface thickness Σ T(1−T) is a robust diffusion measure: a
+    // smeared upwind front spreads the transition over many cells, so its
+    // thickness is several times larger than the central or QUICK fronts.
+    let upwind_thickness = thickness(&fields[0]);
+    let central_thickness = thickness(&fields[1]);
+    let quick_thickness = thickness(&fields[2]);
+    assert!(
+        upwind_thickness > 2.0 * quick_thickness,
+        "upwind thickness {upwind_thickness} should exceed 2x QUICK thickness {quick_thickness}"
+    );
+    assert!(
+        upwind_thickness > 2.0 * central_thickness,
+        "upwind thickness {upwind_thickness} should exceed 2x central thickness {central_thickness}"
+    );
+
+    // A sharper front also means a steeper maximum gradient.
+    let upwind_gradient = gradient(&fields[0]);
+    assert!(
+        gradient(&fields[1]) > 1.5 * upwind_gradient,
+        "central gradient {} should exceed 1.5x upwind {upwind_gradient}",
+        gradient(&fields[1])
+    );
+    assert!(
+        gradient(&fields[2]) > 1.5 * upwind_gradient,
+        "QUICK gradient {} should exceed 1.5x upwind {upwind_gradient}",
+        gradient(&fields[2])
+    );
+}
+
+#[test]
+fn convection_scheme_changes_the_cavity_solution_and_stays_stable() {
+    let mut model = mesh_model(16, 16);
+    model.fluid.viscosity = 0.05;
+    model.time.dt = 0.002;
+    model.time.steps = 120;
+    model.time.pressure_iterations = 80;
+
+    let mut solutions = Vec::new();
+    for scheme in [
+        ConvectionScheme::Upwind,
+        ConvectionScheme::Central,
+        ConvectionScheme::Quick,
+    ] {
+        model.convection = scheme;
+        let solution = solve(&model).expect("solve");
+        assert_finite(&solution.u, "u");
+        assert_finite(&solution.v, "v");
+        assert_eq!(solution.report.convection, scheme.as_str());
+        assert!(
+            solution.report.divergence_l2 < 1e-2,
+            "{} divergence {}",
+            scheme.as_str(),
+            solution.report.divergence_l2
+        );
+        assert!(
+            solution.report.max_velocity > 0.2 && solution.report.max_velocity <= 1.05,
+            "{} max velocity {}",
+            scheme.as_str(),
+            solution.report.max_velocity
+        );
+        solutions.push(solution);
+    }
+
+    let difference = |left: &Solution, right: &Solution| {
+        left.u
+            .iter()
+            .zip(right.u.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max)
+    };
+    assert!(
+        difference(&solutions[0], &solutions[1]) > 1e-4,
+        "central produced an identical velocity field to upwind"
+    );
+    assert!(
+        difference(&solutions[0], &solutions[2]) > 1e-4,
+        "QUICK produced an identical velocity field to upwind"
+    );
 }

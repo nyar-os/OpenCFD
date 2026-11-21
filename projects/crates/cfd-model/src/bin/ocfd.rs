@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use cfd_model::{
-    write_atomic, BoundaryKind, CaseSummary, CfdError, ExportField, ExportFormat, Obstacle,
-    OpenCfd, OpenCfdOptions, Side, SideThermal, SolveOptions, ThermalConfig, TurbulenceModel,
+    write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
+    Obstacle, OpenCfd, OpenCfdOptions, Side, SideThermal, SolveOptions, ThermalConfig,
+    TurbulenceModel,
 };
 
 const USAGE: &str = "\
@@ -21,6 +22,7 @@ Usage:
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  ocfd convection set <file> --scheme upwind|central|quick
   ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
   ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>]
        [--heat-source <W/m3>] [--left-temperature <K>] [--right-temperature <K>]
@@ -73,6 +75,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "boundary" => subcommand(args, "set", "boundary"),
         "obstacle" => obstacle_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
+        "convection" => convection_command(&args[1..]),
         "turbulence" => turbulence_command(&args[1..]),
         "heat" | "thermal" => heat_command(&args[1..]),
         "validate" => validate(&args[1..]),
@@ -335,6 +338,34 @@ fn scalar_set(args: &[String]) -> Result<i32, CfdError> {
         "scalar set: diffusivity={} m2/s, initial={}, inletValue={}",
         scalar.diffusivity, scalar.initial, scalar.inlet_value
     );
+    Ok(0)
+}
+
+fn convection_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => convection_set(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`convection` has no subcommand `{other}`; only set is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`convection` requires a subcommand; only set is supported",
+        )),
+    }
+}
+
+fn convection_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--scheme"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "convection set <file> --scheme upwind|central|quick",
+    )?;
+    let scheme = required(&parsed, "--scheme")?.parse::<ConvectionScheme>()?;
+    let mut session = open_session(file)?;
+    let summary = session.convection_set(scheme)?;
+    println!("convection set: {}", summary.convection.as_str());
     Ok(0)
 }
 

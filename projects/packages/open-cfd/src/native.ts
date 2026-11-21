@@ -25,6 +25,7 @@ export interface NativeBinding {
     obstacle_add(handle: number, requestJson: string): string;
     obstacle_list(handle: number): string;
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
+    convection_set(handle: number, scheme: string): string;
     validate(handle: number): string;
     solve(handle: number, steps?: number, tolerance?: number, checkEvery?: number): string;
     export(handle: number, format: string, out: string, field?: string): string;

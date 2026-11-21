@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
-    BoundaryKind, CfdError, ExportField, ExportFormat, Obstacle, OpenCfd, OpenCfdOptions, Side,
-    SolveOptions,
+    BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, Obstacle, OpenCfd,
+    OpenCfdOptions, Side, SolveOptions,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -253,6 +253,15 @@ fn scalar_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Selects the convective discretisation and returns the summary.
+#[function]
+fn convection_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let scheme = text(&ctx, 1)?.parse::<ConvectionScheme>().map_err(fail)?;
+    let summary = with_session(handle, |session| session.convection_set(scheme))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Solves one session document with optional solve-time overrides.
 #[function]
 fn solve(ctx: CallContext) -> Result<JsValue> {
@@ -313,6 +322,7 @@ register_module![
     obstacle_add,
     obstacle_list,
     scalar_set,
+    convection_set,
     validate,
     solve,
     export,

@@ -42,6 +42,7 @@ export const errorCodes = [
     'cli/invalid-side',
     'cli/invalid-boundary-kind',
     'cli/invalid-obstacle-kind',
+    'cli/invalid-convection-scheme',
 ] as const;
 
 /** Union of {@link errorCodes}. */

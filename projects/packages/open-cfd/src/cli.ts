@@ -13,7 +13,14 @@ import { pathToFileURL } from 'node:url';
 
 import { NotImplementedError, OpenCFDError, type OpenCFDErrorCode } from './errors.js';
 import { OpenCFD } from './open-cfd.js';
-import type { BoundaryKind, ExportField, ExportFormat, Obstacle, Side } from './types.js';
+import type {
+    BoundaryKind,
+    ConvectionScheme,
+    ExportField,
+    ExportFormat,
+    Obstacle,
+    Side,
+} from './types.js';
 
 const USAGE = `open-cfd - OpenCFD two-dimensional incompressible Navier-Stokes solver
 
@@ -27,6 +34,7 @@ usage:
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   open-cfd obstacle list <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  open-cfd convection set <file> --scheme upwind|central|quick
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
   open-cfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
@@ -38,6 +46,7 @@ exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
 
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom'];
 const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet'];
+const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
 
 interface ParsedArguments {
     readonly positionals: readonly string[];
@@ -146,6 +155,16 @@ function parseBoundaryKind(raw: string): BoundaryKind {
         throw cliError('cli/invalid-boundary-kind', `unknown boundary kind \`${raw}\`; use wall, inlet or outlet`);
     }
     return raw as BoundaryKind;
+}
+
+function parseConvectionScheme(raw: string): ConvectionScheme {
+    if (!CONVECTION_SCHEMES.includes(raw as ConvectionScheme)) {
+        throw cliError(
+            'cli/invalid-convection-scheme',
+            `unknown convection scheme \`${raw}\`; use upwind, central or quick`,
+        );
+    }
+    return raw as ConvectionScheme;
 }
 
 function parseExportFormat(raw: string): ExportFormat {
@@ -369,6 +388,20 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             console.log(
                 `scalar set: diffusivity=${scalar?.diffusivity} m2/s, initial=${scalar?.initial}, inletValue=${scalar?.inletValue}`,
             );
+            return 0;
+        }
+        case 'convection': {
+            expectSet(rest, 'convection');
+            const parsed = parseArguments(rest.slice(1), ['--scheme']);
+            const file = positional(
+                parsed,
+                0,
+                'convection set <file> --scheme upwind|central|quick',
+            );
+            const scheme = parseConvectionScheme(requiredOption(parsed, '--scheme'));
+            const document = await session.open(file);
+            const summary = document.setConvection({ scheme });
+            console.log(`convection set: ${summary.convection}`);
             return 0;
         }
         case 'validate': {
