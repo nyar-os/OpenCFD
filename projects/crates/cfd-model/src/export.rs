@@ -8,7 +8,7 @@ use science_mesh::{Cell, CellKind, Field, Mesh as FieldMesh};
 use crate::solver::Solution;
 use crate::CfdError;
 
-/// Cell-centred scalar fields available for SVG previews.
+/// Cell-centred scalar fields available for SVG previews and contours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportField {
     /// Gauge pressure in pascals.
@@ -19,6 +19,8 @@ pub enum ExportField {
     Vorticity,
     /// Stream function `ψ` in m²/s.
     StreamFunction,
+    /// Cell-centred speed `√(u² + v²)` in m/s.
+    Speed,
 }
 
 impl ExportField {
@@ -29,6 +31,7 @@ impl ExportField {
             Self::Temperature => "temperature",
             Self::Vorticity => "vorticity",
             Self::StreamFunction => "streamFunction",
+            Self::Speed => "speed",
         }
     }
 
@@ -39,6 +42,7 @@ impl ExportField {
             Self::Temperature => "K",
             Self::Vorticity => "1/s",
             Self::StreamFunction => "m²/s",
+            Self::Speed => "m/s",
         }
     }
 }
@@ -52,10 +56,11 @@ impl FromStr for ExportField {
             "temperature" => Ok(Self::Temperature),
             "vorticity" => Ok(Self::Vorticity),
             "streamFunction" | "stream-function" | "stream_function" => Ok(Self::StreamFunction),
+            "speed" | "magnitude" => Ok(Self::Speed),
             other => Err(CfdError::new(
                 "export/invalid-field",
                 format!(
-                    "unknown export field `{other}`; only pressure, temperature, vorticity or streamFunction is supported"
+                    "unknown export field `{other}`; only pressure, temperature, vorticity, streamFunction or speed is supported"
                 ),
             )),
         }
@@ -83,45 +88,49 @@ pub fn export_svg(
 ) -> Result<PathBuf, CfdError> {
     let default_name = format!("solution-{}.svg", field.as_str());
     let target = with_extension_or_file(path, "svg", &default_name);
-    let values = match field {
-        ExportField::Pressure => &solution.p,
-        ExportField::Temperature => solution.temperature.as_ref().ok_or_else(|| {
-            CfdError::new(
-                "export/no-field",
-                "the case does not configure scalar (temperature) transport, so temperature cannot be exported as SVG",
-            )
-        })?,
-        ExportField::Vorticity => &solution.vorticity,
-        ExportField::StreamFunction => &solution.stream_function,
-    };
-    let text = render_svg(solution, values, field);
+    let values = field_values(solution, field)?;
+    let text = render_svg(solution, &values, field);
     write_atomic(&target, &text)?;
     Ok(target)
 }
 
+/// Copies one cell-centred field in pressure-cell order.
+///
+/// `speed` is derived from the staggered velocity; solid cells report zero so
+/// every consumer sees the same value as CSV, VTK and the SVG preview.
+fn field_values(solution: &Solution, field: ExportField) -> Result<Vec<f64>, CfdError> {
+    let mesh = &solution.mesh;
+    let values = match field {
+        ExportField::Pressure => solution.p.clone(),
+        ExportField::Temperature => solution.temperature.clone().ok_or_else(|| {
+            CfdError::new(
+                "export/no-field",
+                "the case does not configure scalar (temperature) transport, so temperature cannot be exported",
+            )
+        })?,
+        ExportField::Vorticity => solution.vorticity.clone(),
+        ExportField::StreamFunction => solution.stream_function.clone(),
+        ExportField::Speed => {
+            let mut speed = vec![0.0; mesh.pressure_count()];
+            for j in 0..mesh.ny {
+                for i in 0..mesh.nx {
+                    let index = mesh.pressure_index(i, j);
+                    if mesh.solid[index] {
+                        continue;
+                    }
+                    let (ux, uy) = mesh.cell_velocity(&solution.u, &solution.v, i, j);
+                    speed[index] = ux.hypot(uy);
+                }
+            }
+            speed
+        }
+    };
+    Ok(values)
+}
+
 fn render_svg(solution: &Solution, values: &[f64], field: ExportField) -> String {
     let mesh = &solution.mesh;
-    let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
-    for (index, value) in values.iter().enumerate() {
-        if mesh.solid[index] || !value.is_finite() {
-            continue;
-        }
-        min = min.min(*value);
-        max = max.max(*value);
-    }
-    if !min.is_finite() || !max.is_finite() {
-        min = 0.0;
-        max = 0.0;
-    }
-    if (max - min).abs() < 1e-15 {
-        let pad = if min.abs() > 1e-12 {
-            min.abs() * 0.05
-        } else {
-            1.0
-        };
-        min -= pad;
-        max += pad;
-    }
+    let (min, max) = field_range(mesh, values);
 
     let cell_size = 18.0;
     let margin = 24.0;
@@ -213,6 +222,316 @@ fn palette_color(value: f64, min: f64, max: f64) -> &'static str {
     let last = PALETTE.len() - 1;
     let index = ((normalized * last as f64).round() as usize).min(last);
     PALETTE[index]
+}
+
+/// Range of one field over fluid cells, padded when the field is constant.
+fn field_range(mesh: &crate::mesh::Mesh, values: &[f64]) -> (f64, f64) {
+    let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (index, value) in values.iter().enumerate() {
+        if mesh.solid[index] || !value.is_finite() {
+            continue;
+        }
+        min = min.min(*value);
+        max = max.max(*value);
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return (0.0, 0.0);
+    }
+    if (max - min).abs() < 1e-15 {
+        let pad = if min.abs() > 1e-12 {
+            min.abs() * 0.05
+        } else {
+            1.0
+        };
+        (min - pad, max + pad)
+    } else {
+        (min, max)
+    }
+}
+
+/// Writes a filled-contour and iso-line SVG of one cell-centred field.
+///
+/// The field is sampled at pressure-cell centres. Each interior quad is split
+/// into `PALETTE.len()` value bands by linear interpolation along its edges
+/// (Sutherland–Hodgman clipping in value space), so the filled regions follow
+/// the solution rather than the cell boundaries. Iso-lines at the band edges
+/// are traced with marching squares and drawn over the fill. Solid cells are
+/// dark grey and the file carries a discrete colour legend with the physical
+/// range. When `path` ends in `.svg` it is used as the output file; otherwise it
+/// is treated as a directory and `solution-<field>-contours.svg` is created
+/// inside it.
+pub fn export_contours(
+    solution: &Solution,
+    path: &Path,
+    field: ExportField,
+) -> Result<PathBuf, CfdError> {
+    let default_name = format!("solution-{}-contours.svg", field.as_str());
+    let target = with_extension_or_file(path, "svg", &default_name);
+    let values = field_values(solution, field)?;
+    let text = render_contours(solution, &values, field);
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
+fn render_contours(solution: &Solution, values: &[f64], field: ExportField) -> String {
+    let mesh = &solution.mesh;
+    let (min, max) = field_range(mesh, values);
+    let bands = PALETTE.len();
+    let levels: Vec<f64> = (0..=bands)
+        .map(|band| min + (max - min) * band as f64 / bands as f64)
+        .collect();
+
+    let cell_size = 18.0;
+    let margin = 24.0;
+    let plot_width = mesh.nx as f64 * cell_size;
+    let plot_height = mesh.ny as f64 * cell_size;
+    let legend_height = 96.0;
+    let width = plot_width + 2.0 * margin;
+    let height = plot_height + 2.0 * margin + 52.0 + legend_height;
+    let top = margin + 52.0;
+
+    let mut svg = String::new();
+    let _ = writeln!(
+        svg,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width:.0}\" height=\"{height:.0}\" viewBox=\"0 0 {width:.0} {height:.0}\">"
+    );
+    svg.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>\n");
+    let _ = writeln!(
+        svg,
+        "<text x=\"{margin:.0}\" y=\"{title_y:.0}\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"18\" font-weight=\"600\">OpenCFD {name} contours ({unit})</text>",
+        title_y = margin + 4.0,
+        name = field.as_str(),
+        unit = field.unit(),
+    );
+    let _ = writeln!(
+        svg,
+        "<text x=\"{margin:.0}\" y=\"{range_y:.0}\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"12\" fill=\"#444\">{bands} filled bands, range {min:.6} – {max:.6} {unit}</text>",
+        range_y = margin + 28.0,
+        unit = field.unit(),
+    );
+
+    let to_pixel = |x: f64, y: f64| {
+        (
+            margin + x / mesh.length_x * plot_width,
+            top + (1.0 - y / mesh.length_y) * plot_height,
+        )
+    };
+
+    for (index, solid) in mesh.solid.iter().enumerate() {
+        if !*solid {
+            continue;
+        }
+        let i = index % mesh.nx;
+        let j = index / mesh.nx;
+        let _ = writeln!(
+            svg,
+            "<rect x=\"{x:.2}\" y=\"{y:.2}\" width=\"{cell_size:.2}\" height=\"{cell_size:.2}\" fill=\"#3a3a3a\"/>",
+            x = margin + i as f64 * cell_size,
+            y = top + (mesh.ny - 1 - j) as f64 * cell_size,
+        );
+    }
+
+    for j in 0..mesh.ny.saturating_sub(1) {
+        for i in 0..mesh.nx.saturating_sub(1) {
+            let indices = [
+                mesh.pressure_index(i, j),
+                mesh.pressure_index(i + 1, j),
+                mesh.pressure_index(i + 1, j + 1),
+                mesh.pressure_index(i, j + 1),
+            ];
+            if indices.iter().any(|index| mesh.solid[*index]) {
+                continue;
+            }
+            let corners = [
+                ((i as f64 + 0.5) * mesh.dx, (j as f64 + 0.5) * mesh.dy),
+                ((i as f64 + 1.5) * mesh.dx, (j as f64 + 0.5) * mesh.dy),
+                ((i as f64 + 1.5) * mesh.dx, (j as f64 + 1.5) * mesh.dy),
+                ((i as f64 + 0.5) * mesh.dx, (j as f64 + 1.5) * mesh.dy),
+            ];
+            let quad: Vec<Vertex> = corners
+                .iter()
+                .zip(indices.iter())
+                .map(|((x, y), index)| (*x, *y, values[*index]))
+                .collect();
+            for band in 0..bands {
+                let polygon = band_polygon(&quad, levels[band], levels[band + 1]);
+                if polygon.len() < 3 {
+                    continue;
+                }
+                let mut points = String::new();
+                for (x, y) in polygon {
+                    let (px, py) = to_pixel(x, y);
+                    let _ = write!(points, "{px:.2},{py:.2} ");
+                }
+                let _ = writeln!(
+                    svg,
+                    "<polygon points=\"{}\" fill=\"{color}\" stroke=\"{color}\" stroke-width=\"0.4\"/>",
+                    points.trim_end(),
+                    color = PALETTE[band],
+                );
+            }
+        }
+    }
+
+    for level in levels.iter().skip(1).take(bands - 1) {
+        for ((x0, y0), (x1, y1)) in marching_squares_segments(mesh, values, *level) {
+            let (px0, py0) = to_pixel(x0, y0);
+            let (px1, py1) = to_pixel(x1, y1);
+            let _ = writeln!(
+                svg,
+                "<line x1=\"{px0:.2}\" y1=\"{py0:.2}\" x2=\"{px1:.2}\" y2=\"{py1:.2}\" stroke=\"#202020\" stroke-width=\"0.7\" opacity=\"0.75\"/>"
+            );
+        }
+    }
+
+    let _ = writeln!(
+        svg,
+        "<rect x=\"{margin:.2}\" y=\"{top:.2}\" width=\"{plot_width:.2}\" height=\"{plot_height:.2}\" fill=\"none\" stroke=\"#222\" stroke-width=\"1\"/>"
+    );
+
+    let legend_y = top + plot_height + 30.0;
+    let legend_width = plot_width;
+    let stop_width = legend_width / bands as f64;
+    for (index, color) in PALETTE.iter().enumerate() {
+        let _ = writeln!(
+            svg,
+            "<rect x=\"{x:.2}\" y=\"{legend_y:.2}\" width=\"{stop_width:.2}\" height=\"16\" fill=\"{color}\"/>",
+            x = margin + index as f64 * stop_width,
+        );
+    }
+    let _ = writeln!(
+        svg,
+        "<rect x=\"{margin:.2}\" y=\"{legend_y:.2}\" width=\"{legend_width:.2}\" height=\"16\" fill=\"none\" stroke=\"#222\" stroke-width=\"1\"/>"
+    );
+    let label_y = legend_y + 34.0;
+    let _ = writeln!(
+        svg,
+        "<text x=\"{margin:.2}\" y=\"{label_y:.2}\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"12\" fill=\"#222\">{min:.6} {unit}</text>",
+        unit = field.unit(),
+    );
+    let _ = writeln!(
+        svg,
+        "<text x=\"{right:.2}\" y=\"{label_y:.2}\" text-anchor=\"end\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"12\" fill=\"#222\">{max:.6} {unit}</text>",
+        right = margin + legend_width,
+        unit = field.unit(),
+    );
+    let _ = writeln!(
+        svg,
+        "<text x=\"{middle:.2}\" y=\"{label_y:.2}\" text-anchor=\"middle\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"11\" fill=\"#666\">{iso} iso-lines between bands, solid cells dark grey</text>",
+        middle = margin + 0.5 * legend_width,
+        iso = bands - 1,
+    );
+    svg.push_str("</svg>\n");
+    svg
+}
+
+/// One contour vertex in physical coordinates and field value.
+type Vertex = (f64, f64, f64);
+
+/// Sutherland–Hodgman clip of a value-tagged polygon to `lo <= value <= hi`.
+fn band_polygon(polygon: &[Vertex], low: f64, high: f64) -> Vec<(f64, f64)> {
+    let lower = clip_value(polygon, low, true);
+    clip_value(&lower, high, false)
+        .into_iter()
+        .map(|(x, y, _)| (x, y))
+        .collect()
+}
+
+fn clip_value(polygon: &[Vertex], level: f64, keep_above: bool) -> Vec<Vertex> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+    let inside = |vertex: &Vertex| {
+        if keep_above {
+            vertex.2 >= level
+        } else {
+            vertex.2 <= level
+        }
+    };
+    let mut output = Vec::with_capacity(polygon.len() + 1);
+    for index in 0..polygon.len() {
+        let current = polygon[index];
+        let next = polygon[(index + 1) % polygon.len()];
+        let current_inside = inside(&current);
+        let next_inside = inside(&next);
+        if current_inside {
+            output.push(current);
+        }
+        if current_inside != next_inside {
+            let t = (level - current.2) / (next.2 - current.2);
+            output.push((
+                current.0 + t * (next.0 - current.0),
+                current.1 + t * (next.1 - current.1),
+                level,
+            ));
+        }
+    }
+    output
+}
+
+/// Marching-squares iso-line segments at `level` over the pressure-cell centres.
+///
+/// Corners of every interior quad are its four cell centres; segments are
+/// interpolated linearly along the crossed edges. Ambiguous saddle cells are
+/// resolved with the average corner value, which is deterministic and keeps
+/// neighbouring cells consistent.
+fn marching_squares_segments(
+    mesh: &crate::mesh::Mesh,
+    values: &[f64],
+    level: f64,
+) -> Vec<((f64, f64), (f64, f64))> {
+    let mut segments = Vec::new();
+    for j in 0..mesh.ny.saturating_sub(1) {
+        for i in 0..mesh.nx.saturating_sub(1) {
+            let cells = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
+            if cells.iter().any(|(ci, cj)| mesh.is_solid(*ci, *cj)) {
+                continue;
+            }
+            let corners: Vec<(f64, f64, f64)> = cells
+                .iter()
+                .map(|(ci, cj)| {
+                    let (x, y) = mesh.cell_center(*ci, *cj);
+                    (x, y, values[mesh.pressure_index(*ci, *cj)])
+                })
+                .collect();
+            let mut crossings: Vec<(usize, (f64, f64))> = Vec::new();
+            for (edge, &(a, b)) in [(0usize, 1usize), (1, 2), (2, 3), (3, 0)]
+                .iter()
+                .enumerate()
+            {
+                let (pa, pb) = (corners[a], corners[b]);
+                if (pa.2 < level) != (pb.2 < level) {
+                    let t = (level - pa.2) / (pb.2 - pa.2);
+                    crossings.push((edge, (pa.0 + t * (pb.0 - pa.0), pa.1 + t * (pb.1 - pa.1))));
+                }
+            }
+            match crossings.len() {
+                2 => segments.push((crossings[0].1, crossings[1].1)),
+                4 => {
+                    let centre = corners.iter().map(|corner| corner.2).sum::<f64>() / 4.0;
+                    let pairs: [(usize, usize); 2] = if centre >= level {
+                        // Bottom-right and top-left corners are above the level.
+                        [(0, 1), (2, 3)]
+                    } else {
+                        [(0, 3), (1, 2)]
+                    };
+                    for (first, second) in pairs {
+                        let point = |edge: usize| {
+                            crossings
+                                .iter()
+                                .find(|(crossing, _)| *crossing == edge)
+                                .map(|(_, point)| *point)
+                        };
+                        if let (Some(start), Some(end)) = (point(first), point(second)) {
+                            segments.push((start, end));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    segments
 }
 
 /// Writes text to `path` through a same-directory temporary file published by
@@ -614,5 +933,67 @@ fn with_extension_or_file(path: &Path, extension: &str, default_name: &str) -> P
         path.to_path_buf()
     } else {
         path.join(default_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::MeshConfig;
+
+    fn mesh() -> crate::mesh::Mesh {
+        crate::mesh::Mesh::new(&MeshConfig {
+            nx: 3,
+            ny: 3,
+            length_x: 1.0,
+            length_y: 1.0,
+        })
+        .expect("mesh")
+    }
+
+    #[test]
+    fn marching_squares_places_a_linear_iso_line_between_columns() {
+        let mesh = mesh();
+        let mut values = vec![0.0; mesh.pressure_count()];
+        for j in 0..mesh.ny {
+            for i in 0..mesh.nx {
+                values[mesh.pressure_index(i, j)] = i as f64;
+            }
+        }
+        let segments = marching_squares_segments(&mesh, &values, 0.5);
+        assert_eq!(segments.len(), 2, "one segment per interior quad row");
+        let x = mesh.dx;
+        for ((x0, y0), (x1, y1)) in segments {
+            assert!((x0 - x).abs() < 1e-12, "x0 = {x0}");
+            assert!((x1 - x).abs() < 1e-12, "x1 = {x1}");
+            assert!((y1 - y0 - mesh.dy).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn band_polygon_clips_the_quad_to_the_value_window() {
+        let quad = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 1.0),
+            (1.0, 1.0, 1.0),
+            (0.0, 1.0, 0.0),
+        ];
+        let all = band_polygon(&quad, 0.0, 1.0);
+        assert_eq!(all.len(), 4, "the full window keeps the quad");
+
+        let none = band_polygon(&quad, 1.5, 2.0);
+        assert!(none.is_empty(), "a disjoint window keeps nothing");
+
+        let left_half = band_polygon(&quad, 0.0, 0.5);
+        assert_eq!(left_half.len(), 4, "a half window is a quad");
+        let area: f64 = left_half
+            .iter()
+            .zip(left_half.iter().cycle().skip(1))
+            .take(left_half.len())
+            .map(|((x0, y0), (x1, y1))| x0 * y1 - x1 * y0)
+            .sum::<f64>()
+            .abs()
+            / 2.0;
+        assert!((area - 0.5).abs() < 1e-12, "area = {area}");
     }
 }

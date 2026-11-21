@@ -45,7 +45,7 @@ usage:
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -200,13 +200,14 @@ function parseExportFormat(raw: string): ExportFormat {
         raw !== 'csv' &&
         raw !== 'vtk' &&
         raw !== 'svg' &&
+        raw !== 'contours' &&
         raw !== 'streamlines' &&
         raw !== 'residuals' &&
         raw !== 'forces'
     ) {
         throw cliError(
             'cli/unknown-format',
-            `unknown export format \`${raw}\`; use csv, vtk, svg, streamlines, residuals or forces`,
+            `unknown export format \`${raw}\`; use csv, vtk, svg, contours, streamlines, residuals or forces`,
         );
     }
     return raw;
@@ -217,13 +218,14 @@ const EXPORT_FIELDS: readonly ExportField[] = [
     'temperature',
     'vorticity',
     'streamFunction',
+    'speed',
 ];
 
 function parseExportField(raw: string): ExportField {
     if (!EXPORT_FIELDS.includes(raw as ExportField)) {
         throw cliError(
             'cli/unknown-format',
-            `unknown export field \`${raw}\`; use pressure, temperature, vorticity or streamFunction`,
+            `unknown export field \`${raw}\`; use pressure, temperature, vorticity, streamFunction or speed`,
         );
     }
     return raw as ExportField;
@@ -605,7 +607,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];
@@ -619,6 +621,8 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log(`exported legacy ASCII VTK: ${report.path}`);
             } else if (format === 'streamlines') {
                 console.log(`exported streamlines SVG: ${report.path}`);
+            } else if (format === 'contours') {
+                console.log(`exported contour SVG (${field ?? 'pressure'}): ${report.path}`);
             } else if (format === 'residuals') {
                 console.log(`exported residual history CSV: ${report.path}`);
             } else if (format === 'forces') {

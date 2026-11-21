@@ -303,10 +303,16 @@ fn session_create_edit_solve_export_matches_cli() {
     let streams = session
         .export(ExportFormat::Streamlines, &stream_path)
         .expect("streamline export");
+    let contour_path = directory.join("contours.svg");
+    let contours = session
+        .export_field(ExportFormat::Contours, &contour_path, ExportField::Speed)
+        .expect("contour export");
     assert!(PathBuf::from(&csv.path).is_file());
     assert!(PathBuf::from(&vtk.path).is_file());
     assert!(PathBuf::from(&svg.path).is_file());
     assert!(PathBuf::from(&streams.path).is_file());
+    assert!(PathBuf::from(&contours.path).is_file());
+    assert_eq!(contours.format, "contours");
     let residual_path = directory.join("residuals.csv");
     let residual = session
         .export(ExportFormat::Residuals, &residual_path)
@@ -328,6 +334,9 @@ fn session_create_edit_solve_export_matches_cli() {
     assert!(stream_text.contains("<polyline"));
     let svg_text = fs::read_to_string(&svg_path).expect("read svg");
     assert!(svg_text.contains("OpenCFD vorticity field (1/s)"));
+    let contour_text = fs::read_to_string(&contour_path).expect("read contours");
+    assert!(contour_text.contains("OpenCFD speed contours (m/s)"));
+    assert!(contour_text.contains("<polygon"));
     let vtk_text = fs::read_to_string(&vtk_path).expect("read vtk");
     assert!(vtk_text.contains("DATASET UNSTRUCTURED_GRID"));
     assert!(vtk_text.contains("POINT_DATA 120"));
@@ -458,6 +467,26 @@ fn session_create_edit_solve_export_matches_cli() {
     let cli_stream = fs::read_to_string(&cli_stream_path).expect("CLI streamlines");
     assert!(cli_stream.contains("OpenCFD streamlines"));
     assert!(cli_stream.contains("<polyline"));
+
+    let cli_contour_path = directory.join("cli-contours.svg");
+    let output = run_cli(&[
+        "export",
+        &text(&cli_path),
+        "--format",
+        "contours",
+        "--field",
+        "speed",
+        "--out",
+        &text(&cli_contour_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd contour export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_contour = fs::read_to_string(&cli_contour_path).expect("CLI contours");
+    assert!(cli_contour.contains("OpenCFD speed contours (m/s)"));
+    assert!(cli_contour.contains("<polygon"));
 
     let cli_residual_path = directory.join("cli-residuals.csv");
     let output = run_cli(&[

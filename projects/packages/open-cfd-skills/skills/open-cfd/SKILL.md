@@ -12,14 +12,14 @@ create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
 `euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure and
 parabolic/power-law inlet profiles), obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
-legacy ASCII VTK, SVG field previews, SVG streamlines, residual history CSV or
-force history CSV. The solve report also contains point monitor time series
-(`probes`), wall shear/friction summaries (`wallShear`), drag/lift/moment
-coefficients (`forces`), sampled continuity and boundary mass balance
-(`massBalance`), the selected `timeScheme` and the `terminationReason`. Compressible flow, three-dimensional flow,
-Boussinesq buoyancy, periodic boundaries, contour export, adaptive meshing and
-external format import are not implemented and report
-`capability/not-implemented`.
+legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
+streamlines, residual history CSV or force history CSV. The solve report also
+contains point monitor time series (`probes`), wall shear/friction summaries
+(`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
+boundary mass balance (`massBalance`), the selected `timeScheme` and the
+`terminationReason`. Compressible flow, three-dimensional flow, Boussinesq
+buoyancy, periodic boundaries, adaptive meshing and external format import are
+not implemented and report `capability/not-implemented`.
 
 Only these commands are executable today:
 
@@ -45,7 +45,7 @@ ocfd convection set <file> --scheme upwind|central|quick
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -79,9 +79,11 @@ rename. Confirm the path before running them.
 - Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
 - Heat transfer uses the implemented passive scalar and thermal configuration;
   there is no coupled buoyancy.
-- `csv`, `vtk`, `svg`, `streamlines`, `residuals` and `forces` are the only
-  export targets. `inp` and `openfoam` reject with `capability/not-implemented`;
-  periodic boundaries and contour export are not implemented.
+- `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals` and `forces` are
+  the only export targets. `inp` and `openfoam` reject with
+  `capability/not-implemented`; periodic boundaries are not implemented.
+  `contours` writes nine filled value bands plus marching-squares iso-lines and
+  accepts the same `--field` names as `svg`, including `speed`.
 - Momentum time integration is `euler` (default) or `rk2`; both are explicit and
   share the same CFL and diffusion stability guards.
 - Inlet profiles (`uniform`, `parabolic`, `powerLaw`) shape only the normal

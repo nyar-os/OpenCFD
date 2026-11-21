@@ -14,8 +14,8 @@ use std::str::FromStr;
 use serde::Serialize;
 
 use crate::export::{
-    export_csv, export_forces, export_residuals, export_streamlines, export_svg, export_vtk,
-    ExportField,
+    export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
+    export_vtk, ExportField,
 };
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
@@ -34,6 +34,8 @@ pub enum ExportFormat {
     Vtk,
     /// Self-contained SVG preview of one cell-centred field.
     Svg,
+    /// Self-contained SVG of filled contours and iso-lines.
+    Contours,
     /// Self-contained SVG of traced streamlines.
     Streamlines,
     /// Sampled residual-history CSV rows.
@@ -49,6 +51,7 @@ impl ExportFormat {
             Self::Csv => "csv",
             Self::Vtk => "vtk",
             Self::Svg => "svg",
+            Self::Contours => "contours",
             Self::Streamlines => "streamlines",
             Self::Residuals => "residuals",
             Self::Forces => "forces",
@@ -64,19 +67,20 @@ impl FromStr for ExportFormat {
             "csv" => Ok(Self::Csv),
             "vtk" => Ok(Self::Vtk),
             "svg" => Ok(Self::Svg),
+            "contours" | "contour" => Ok(Self::Contours),
             "streamlines" | "streamline" => Ok(Self::Streamlines),
             "residuals" | "residual" => Ok(Self::Residuals),
             "forces" | "force" => Ok(Self::Forces),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg, streamlines, residuals or forces are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals or forces are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg, streamlines, residuals or forces are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals or forces are supported"
                 ),
             )),
         }
@@ -529,12 +533,13 @@ impl OpenCfd {
         Ok(solve_with(&self.model, options)?.report)
     }
 
-    /// Solves the current document and writes a CSV, VTK or pressure SVG field.
+    /// Solves the current document and writes a CSV, VTK, contour or pressure
+    /// SVG field.
     pub fn export(&self, format: ExportFormat, out: &Path) -> Result<ExportReport, CfdError> {
         self.export_field(format, out, ExportField::Pressure)
     }
 
-    /// Solves and exports one field; `field` only affects SVG output.
+    /// Solves and exports one field; `field` affects SVG and contour output.
     pub fn export_field(
         &self,
         format: ExportFormat,
@@ -546,6 +551,7 @@ impl OpenCfd {
             ExportFormat::Csv => export_csv(&solution, out)?,
             ExportFormat::Vtk => export_vtk(&solution, out)?,
             ExportFormat::Svg => export_svg(&solution, out, field)?,
+            ExportFormat::Contours => export_contours(&solution, out, field)?,
             ExportFormat::Streamlines => export_streamlines(&solution, out)?,
             ExportFormat::Residuals => export_residuals(&solution, out)?,
             ExportFormat::Forces => export_forces(&solution, out)?,

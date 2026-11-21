@@ -343,9 +343,9 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(report))
 }
 
-/// Solves and exports one session document as CSV, VTK or SVG.
+/// Solves and exports one session document as CSV, VTK, SVG or contours.
 ///
-/// `field` only affects SVG output and defaults to `pressure`.
+/// `field` affects SVG and contour output and defaults to `pressure`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;

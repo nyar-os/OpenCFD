@@ -4,9 +4,9 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_csv, export_forces, export_residuals, export_streamlines, export_svg, export_vtk, solve,
-    solve_pressure, solve_with, stream_function, transport_scalar, vorticity, Boundary,
-    BoundaryKind, ConvectionScheme, ExportField, InletProfile, Mesh, Model, Obstacle,
+    export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
+    export_vtk, solve, solve_pressure, solve_with, stream_function, transport_scalar, vorticity,
+    Boundary, BoundaryKind, ConvectionScheme, ExportField, InletProfile, Mesh, Model, Obstacle,
     PressureSettings, Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON,
     VERSION,
 };
@@ -338,8 +338,8 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"momentCoefficients\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"massBalance\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamlines\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"contours\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"periodic\": \"unsupported\""));
-    assert!(CAPABILITIES_JSON.contains("\"contours\": \"unsupported\""));
 }
 
 #[test]
@@ -747,6 +747,41 @@ fn solve_reports_derived_fields_and_svg_export() {
         "streamline SVG has no polylines"
     );
     assert!(streamlines.contains("lines, maximum face speed"));
+}
+
+#[test]
+fn contour_export_fills_bands_and_draws_iso_lines() {
+    let mut model = mesh_model(20, 20);
+    model.time.steps = 80;
+    model.time.pressure_iterations = 60;
+    let solution = solve(&model).expect("solve");
+    let directory = temporary_dir("contours");
+
+    let speed_path = export_contours(&solution, &directory, ExportField::Speed).expect("contours");
+    assert_eq!(
+        speed_path.file_name().and_then(|name| name.to_str()),
+        Some("solution-speed-contours.svg")
+    );
+    let speed = fs::read_to_string(&speed_path).expect("read speed contours");
+    assert!(speed.contains("OpenCFD speed contours (m/s)"));
+    assert!(speed.contains("filled bands, range "));
+    assert!(speed.matches("<polygon").count() > 0, "no filled bands");
+    assert!(speed.matches("<line").count() > 0, "no iso-lines");
+    assert!(speed.contains("iso-lines between bands"));
+
+    let explicit = directory.join("pressure.svg");
+    let pressure_path =
+        export_contours(&solution, &explicit, ExportField::Pressure).expect("named contours");
+    assert_eq!(pressure_path, explicit);
+    let pressure = fs::read_to_string(&pressure_path).expect("read pressure contours");
+    assert!(pressure.contains("OpenCFD pressure contours (Pa)"));
+
+    let mut without_scalar = model.clone();
+    without_scalar.time.steps = 2;
+    let bare = solve(&without_scalar).expect("solve");
+    let error = export_contours(&bare, &directory, ExportField::Temperature)
+        .expect_err("temperature needs a scalar");
+    assert_eq!(error.code, "export/no-field");
 }
 
 #[test]

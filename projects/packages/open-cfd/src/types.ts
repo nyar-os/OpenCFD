@@ -230,10 +230,22 @@ export interface SaveReport {
 }
 
 /** Exchange formats the engine can write. */
-export type ExportFormat = 'csv' | 'vtk' | 'svg' | 'streamlines' | 'residuals' | 'forces';
+export type ExportFormat =
+    | 'csv'
+    | 'vtk'
+    | 'svg'
+    | 'contours'
+    | 'streamlines'
+    | 'residuals'
+    | 'forces';
 
-/** Cell-centred field an SVG export can visualise. */
-export type ExportField = 'pressure' | 'temperature' | 'vorticity' | 'streamFunction';
+/** Cell-centred field an SVG or contour export can visualise. */
+export type ExportField =
+    | 'pressure'
+    | 'temperature'
+    | 'vorticity'
+    | 'streamFunction'
+    | 'speed';
 
 /** Result of one export. */
 export interface ExportReport {

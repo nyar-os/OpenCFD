@@ -14,7 +14,8 @@
 //! * optional eddy-viscosity turbulence (constant or mixing-length);
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
-//! * SVG previews of cell-centred fields and traced streamlines;
+//! * SVG previews of cell-centred fields, traced streamlines and filled
+//!   contours with iso-lines;
 //! * residual/continuity and obstacle force history CSV export;
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
@@ -38,8 +39,8 @@ mod solver;
 
 pub use crate::error::CfdError;
 pub use crate::export::{
-    export_csv, export_forces, export_residuals, export_streamlines, export_svg, export_vtk,
-    write_atomic, ExportField,
+    export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
+    export_vtk, write_atomic, ExportField,
 };
 pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
@@ -95,7 +96,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "svg": "supported",
     "streamlines": "supported",
     "history": "supported",
-    "contours": "unsupported",
+    "contours": "supported",
     "periodic": "unsupported",
     "inp": "unsupported",
     "openfoam": "unsupported"

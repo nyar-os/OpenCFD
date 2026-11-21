@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, and SVG streamline export. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, and filled-contour/iso-line SVG export. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -142,7 +142,8 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]` | Solve and print an `open-cfd-report` JSON on stdout and a convergence/mass-balance summary on stderr; `--tolerance` enables steady-state early stopping and `--check-every` controls the sampling interval |
 | `ocfd export <file> --format csv --out <dir\|file.csv>` | After solving, write cell-centred `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` |
 | `ocfd export <file> --format vtk --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data |
-| `ocfd export <file> --format svg [--field pressure\|temperature\|vorticity\|streamFunction] --out <dir\|file.svg>` | After solving, write a self-contained SVG preview of one cell-centred field |
+| `ocfd export <file> --format svg [--field pressure\|temperature\|vorticity\|streamFunction\|speed] --out <dir\|file.svg>` | After solving, write a self-contained SVG preview of one cell-centred field |
+| `ocfd export <file> --format contours [--field pressure\|temperature\|vorticity\|streamFunction\|speed] --out <dir\|file.svg>` | After solving, write a filled-contour and iso-line SVG with a discrete colour legend |
 | `ocfd export <file> --format streamlines --out <dir\|file.svg>` | After solving, trace streamlines and write a self-contained SVG |
 | `ocfd export <file> --format residuals --out <dir\|file.csv>` | After solving, write the sampled `step,residual,continuity` history |
 | `ocfd export <file> --format forces --out <dir\|file.csv>` | After solving, write every sampled obstacle force and coefficient |
@@ -151,7 +152,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 
 Exit codes: `0` success, `1` input, validation or IO error, `2` capability not implemented.
 
-An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution.vtk`, `solution-<field>.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, both SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
+An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
 
 ## The `.ocfd` document format
 
@@ -265,10 +266,9 @@ Boundary semantics:
 | Thermal side/obstacle conditions, heat sources and obstacle Nusselt numbers (`heat`) | ✅ Supported (no buoyancy) |
 | Boussinesq buoyancy (`buoyancy`) | ❌ Not implemented (avoids an unvalidated unstable path) |
 | `.ocfd` JSON read and write | ✅ Supported |
-| CSV, legacy ASCII VTK, SVG field preview and SVG streamlines export | ✅ Supported |
+| CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported |
 | Residual/continuity and obstacle force history CSV export (`history`) | ✅ Supported |
 | Periodic boundaries (`periodic`) | ❌ Not implemented |
-| Contour or iso-line export (`contours`) | ❌ Not implemented |
 | Compressible flow (`compressible`) | ❌ Not implemented |
 | Three-dimensional flow (`threeD`) | ❌ Not implemented |
 | External format import and export such as Abaqus `.inp` and OpenFOAM | ❌ Not implemented |
@@ -291,6 +291,7 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 12. **Probes and wall shear**: each probe is bound to the nearest pressure cell and records `u`, `v`, speed, pressure and temperature every `checkEvery` sampling step, using the same bounded history as the residuals and forces. Every wall side reports `μ·(u_t,wall − u_t,cell)/(half-cell distance)` averaged over its fluid-adjacent boundary cells, so a linear tangential profile is reproduced exactly; solid cells are skipped, slip walls exert no tangential stress, and inlet/outlet sides are not reported.
 13. **Boundary mass balance**: after the final projection, the outward mass flux `ρ·u·dy` or `ρ·v·dx` is integrated over all four sides. The report splits it into inflow and outflow magnitudes and reports the signed net and `|net| / max(inflow, outflow)` as a conservation check.
 14. **Streamlines**: a self-contained SVG traces streamlines from a regular seed grid with a second-order midpoint rule in both directions, using bilinear cell-centred velocity. Integration stops at solids, domain sides, stagnation or 600 steps, and solid cells are drawn as a grey mask.
+15. **Contours**: a self-contained SVG samples one field at pressure-cell centres, clips every interior quad into nine value bands by linear interpolation along its edges, fills each band with one palette colour and traces the eight band boundaries with marching squares. Ambiguous saddle cells are resolved by the average corner value, solid cells stay dark grey, and the legend carries the discrete bands and the physical range. `speed` is derived as `√(u² + v²)` at cell centres.
 
 Upwind and explicit Euler are first-order in space and time, so the default configuration has visible numerical diffusion. Selecting `central` or `quick` sharpens fronts and reduces diffusion, at the cost of possible dispersive overshoot and a tighter cell-Péclet stability limit.
 
@@ -324,6 +325,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 20. **History exports**: `residuals.csv` has the header `step,residual,continuity` with one bounded row per sample, and `forces.csv` has one 9-column row per sampled obstacle force in document order.
 21. **Time schemes**: Euler and RK2 both stay finite on a lid-driven cavity at the same physical time and report their scheme; against a fine RK2 reference the RK2 coarse solution has less than half the Euler temporal error.
 22. **Termination reason**: a loose tolerance stops with `terminationReason = steadyState`; a strict short run reports `maxSteps`.
+23. **Contours**: exporting `speed` writes `solution-speed-contours.svg` with the field/unit title, filled-band polygon elements, marching-squares iso-lines and the legend text; a named `.svg` target is used verbatim and temperature contours without a scalar field fail with `export/no-field`.
 
 `projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK/SVG/streamline/residual/force export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation. It also round-trips slip walls, outlet pressure, reference quantities, inlet profiles and the time scheme through both the session and CLI paths.
 
@@ -354,7 +356,7 @@ cargo build -p cfd-model --offline
 - Point probes report the nearest cell centre without interpolation, and wall shear uses the molecular viscosity with a first-order half-cell gradient.
 - Boundary handling is first-order: tangential wall velocity uses a half-cell ghost, slip walls use mirrored ghost values, and outlets use zero-gradient velocity with the prescribed Dirichlet pressure. Periodic boundaries are not implemented.
 - Obstacle moments use the geometric centroid as a fixed pivot and a first-order face pressure/shear distribution; the default reference area and length are the characteristic length times unit depth and the characteristic length.
-- Streamlines are a visual diagnostic: they use bilinear cell-centred velocity, a fixed step cap and a fixed seed grid, so they are not time-accurate particle paths. Contour and iso-line export are not implemented.
+- Streamlines and contours are visual diagnostics: streamlines use bilinear cell-centred velocity, a fixed step cap and a fixed seed grid, while contours interpolate linearly between cell centres with a fixed nine-band palette. They are not time-accurate particle paths or adaptive iso-level plots.
 - No restart, parallel execution or external format (Abaqus, OpenFOAM and similar) import or export.
 - No graphical interface; use ParaView to open exported VTK.
 
