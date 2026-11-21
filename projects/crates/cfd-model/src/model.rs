@@ -100,6 +100,26 @@ impl Default for Fluid {
     }
 }
 
+/// Force and moment reference quantities.
+///
+/// The defaults are the maximum inlet speed, the obstacle characteristic length
+/// times unit depth, and the obstacle characteristic length. Supplying a value
+/// replaces only that quantity, so a case can match an experiment or a report
+/// without changing the geometry.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reference {
+    /// Reference speed `U` (m/s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<f64>,
+    /// Reference area `A` (m²) used by the force coefficients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<f64>,
+    /// Reference length `L` (m) used by the moment coefficient.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+}
+
 /// Time integration settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -415,6 +435,14 @@ impl Obstacle {
         match self {
             Self::Rect { y0, y1, .. } => y1 - y0,
             Self::Circle { r, .. } => 2.0 * r,
+        }
+    }
+
+    /// Geometric centroid `(x, y)` (m), used as the moment pivot.
+    pub fn centroid(&self) -> (f64, f64) {
+        match self {
+            Self::Rect { x0, y0, x1, y1, .. } => (0.5 * (x0 + x1), 0.5 * (y0 + y1)),
+            Self::Circle { x, y, .. } => (*x, *y),
         }
     }
 
@@ -775,6 +803,9 @@ pub struct Model {
     /// Fluid properties.
     #[serde(default)]
     pub fluid: Fluid,
+    /// Optional force and moment reference quantities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<Reference>,
     /// Convective discretisation of the momentum and scalar equations.
     #[serde(default)]
     pub convection: ConvectionScheme,
@@ -827,6 +858,7 @@ impl Model {
             units: Units::Meter,
             mesh: MeshConfig::default(),
             fluid: Fluid::default(),
+            reference: None,
             convection: ConvectionScheme::default(),
             time: TimeSettings::default(),
             boundaries,
@@ -937,6 +969,20 @@ impl Model {
                 "fluid/invalid",
                 "viscosity must be a finite non-negative number",
             ));
+        }
+        if let Some(reference) = &self.reference {
+            for (name, value) in [
+                ("velocity", reference.velocity),
+                ("area", reference.area),
+                ("length", reference.length),
+            ] {
+                if value.is_some_and(|value| !finite_positive(value)) {
+                    report.push(Issue::error(
+                        "reference/invalid",
+                        format!("reference.{name} must be a finite positive number"),
+                    ));
+                }
+            }
         }
         if !finite_positive(self.time.dt) {
             report.push(Issue::error(

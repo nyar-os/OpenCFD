@@ -48,10 +48,19 @@ pub struct ForceSample {
     pub fx: f64,
     /// Total force in y (N).
     pub fy: f64,
-    /// Drag coefficient `2 Fx / (rho U² D)`.
+    /// Total moment about the obstacle centroid, positive counter-clockwise
+    /// (N·m).
+    #[serde(default)]
+    pub mz: f64,
+    /// Drag coefficient `2 Fx / (rho U² A)`.
+    #[serde(default)]
     pub cd: f64,
-    /// Lift coefficient `2 Fy / (rho U² D)`.
+    /// Lift coefficient `2 Fy / (rho U² A)`.
+    #[serde(default)]
     pub cl: f64,
+    /// Moment coefficient `2 Mz / (rho U² A L)`, positive counter-clockwise.
+    #[serde(default)]
+    pub cm: f64,
 }
 
 /// Force report of one obstacle.
@@ -66,10 +75,26 @@ pub struct ObstacleForce {
     pub fx: f64,
     /// Total pressure plus viscous force in y (N).
     pub fy: f64,
+    /// Total moment about the obstacle centroid (N·m), positive
+    /// counter-clockwise.
+    #[serde(default)]
+    pub mz: f64,
     /// Drag coefficient.
     pub cd: f64,
     /// Lift coefficient.
     pub cl: f64,
+    /// Moment coefficient, positive counter-clockwise.
+    #[serde(default)]
+    pub cm: f64,
+    /// Reference speed used by the coefficients (m/s).
+    #[serde(default)]
+    pub reference_velocity: f64,
+    /// Reference area used by the force coefficients (m²).
+    #[serde(default)]
+    pub reference_area: f64,
+    /// Reference length used by the moment coefficient (m).
+    #[serde(default)]
+    pub reference_length: f64,
     /// Force history sampled every `checkEvery` steps (bounded).
     pub history: Vec<ForceSample>,
 }
@@ -1805,13 +1830,15 @@ fn append_force_samples(
     samples: &mut [Vec<ForceSample>],
 ) {
     let raw = raw_forces(mesh, model, u, v, p, eddy);
-    for (index, sample) in raw.into_iter().enumerate() {
+    for (index, force) in raw.into_iter().enumerate() {
         samples[index].push(ForceSample {
             step,
-            fx: sample.0,
-            fy: sample.1,
-            cd: sample.2,
-            cl: sample.3,
+            fx: force.fx,
+            fy: force.fy,
+            mz: force.mz,
+            cd: force.cd,
+            cl: force.cl,
+            cm: force.cm,
         });
     }
 }
@@ -1831,7 +1858,7 @@ fn build_forces(
         .iter()
         .enumerate()
         .map(|(index, obstacle)| {
-            let (fx, fy, cd, cl) = raw.get(index).copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let force = raw.get(index).copied().unwrap_or_default();
             let id = if obstacle.id().is_empty() {
                 format!("obstacle-{}", index + 1)
             } else {
@@ -1840,10 +1867,15 @@ fn build_forces(
             ObstacleForce {
                 id,
                 kind: obstacle.kind().to_string(),
-                fx,
-                fy,
-                cd,
-                cl,
+                fx: force.fx,
+                fy: force.fy,
+                mz: force.mz,
+                cd: force.cd,
+                cl: force.cl,
+                cm: force.cm,
+                reference_velocity: force.reference_velocity,
+                reference_area: force.reference_area,
+                reference_length: force.reference_length,
                 history: samples.get(index).cloned().unwrap_or_default(),
             }
         })
@@ -1992,7 +2024,10 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
     report
 }
 
-/// Returns `(fx, fy, cd, cl)` for every obstacle in document order.
+/// Pressure and viscous force plus moment of every obstacle, in document order.
+///
+/// `mz` is taken about the obstacle centroid with counter-clockwise positive,
+/// and the coefficients use the document reference quantities when present.
 fn raw_forces(
     mesh: &Mesh,
     model: &Model,
@@ -2000,9 +2035,16 @@ fn raw_forces(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
-) -> Vec<(f64, f64, f64, f64)> {
-    let mut fx = vec![0.0; model.obstacles.len()];
-    let mut fy = vec![0.0; model.obstacles.len()];
+) -> Vec<ForceValues> {
+    let count = model.obstacles.len();
+    let mut fx = vec![0.0; count];
+    let mut fy = vec![0.0; count];
+    let mut mz = vec![0.0; count];
+    let pivots: Vec<(f64, f64)> = model
+        .obstacles
+        .iter()
+        .map(|obstacle| obstacle.centroid())
+        .collect();
     let mu = model.fluid.viscosity;
 
     for j in 0..mesh.ny {
@@ -2031,7 +2073,10 @@ fn raw_forces(
             let (uc, _) = mesh.cell_velocity(u, v, fluid_i, j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(fluid_i, j)]);
             let shear = (mu + eddy_face) * uc / (0.5 * mesh.dx);
-            fx[owner] += sign * (pressure + shear) * mesh.dy;
+            let force_x = sign * (pressure + shear) * mesh.dy;
+            fx[owner] += force_x;
+            let (_, face_y) = mesh.u_position(i, j);
+            mz[owner] -= (face_y - pivots[owner].1) * force_x;
         }
     }
 
@@ -2061,21 +2106,64 @@ fn raw_forces(
             let (_, vc) = mesh.cell_velocity(u, v, i, fluid_j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(i, fluid_j)]);
             let shear = (mu + eddy_face) * vc / (0.5 * mesh.dy);
-            fy[owner] += sign * (pressure + shear) * mesh.dx;
+            let force_y = sign * (pressure + shear) * mesh.dx;
+            fy[owner] += force_y;
+            let (face_x, _) = mesh.v_position(i, j);
+            mz[owner] += (face_x - pivots[owner].0) * force_y;
         }
     }
 
-    let speed = reference_speed(model);
+    let default_speed = reference_speed(model);
     model
         .obstacles
         .iter()
         .enumerate()
         .map(|(index, obstacle)| {
             let length = obstacle.characteristic_length();
-            let scale = 2.0 / (model.fluid.density * speed * speed * length);
-            (fx[index], fy[index], fx[index] * scale, fy[index] * scale)
+            let speed = model
+                .reference
+                .as_ref()
+                .and_then(|reference| reference.velocity)
+                .unwrap_or(default_speed);
+            let area = model
+                .reference
+                .as_ref()
+                .and_then(|reference| reference.area)
+                .unwrap_or(length);
+            let reference_length = model
+                .reference
+                .as_ref()
+                .and_then(|reference| reference.length)
+                .unwrap_or(length);
+            let force_scale = 2.0 / (model.fluid.density * speed * speed * area);
+            let moment_scale =
+                2.0 / (model.fluid.density * speed * speed * area * reference_length);
+            ForceValues {
+                fx: fx[index],
+                fy: fy[index],
+                mz: mz[index],
+                cd: fx[index] * force_scale,
+                cl: fy[index] * force_scale,
+                cm: mz[index] * moment_scale,
+                reference_velocity: speed,
+                reference_area: area,
+                reference_length,
+            }
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ForceValues {
+    fx: f64,
+    fy: f64,
+    mz: f64,
+    cd: f64,
+    cl: f64,
+    cm: f64,
+    reference_velocity: f64,
+    reference_area: f64,
+    reference_length: f64,
 }
 
 fn compute_nusselt(

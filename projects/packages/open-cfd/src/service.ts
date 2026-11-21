@@ -21,6 +21,7 @@ import type {
     Obstacle,
     OpenCfdCapabilities,
     Probe,
+    ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
     SolveOptions,
@@ -183,6 +184,18 @@ export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummar
 export function convectionSet(handle: number, request: ConvectionSetRequest): CaseSummary {
     return decode<CaseSummary>(() =>
         binding('convection.set').convection_set(handle, request.scheme),
+    );
+}
+
+/** Sets force and moment reference quantities and writes the document back. */
+export function referenceSet(handle: number, request: ReferenceSetRequest): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('reference.set').reference_set(
+            handle,
+            request.velocity,
+            request.area,
+            request.length,
+        ),
     );
 }
 

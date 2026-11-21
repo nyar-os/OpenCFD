@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::export::{export_csv, export_svg, export_vtk, ExportField};
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, MeshConfig, Model, Obstacle,
-    Probe, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
+    Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
 };
 use crate::solver::{solve, solve_with, Report, SolveOptions};
 use crate::{CfdError, CAPABILITIES_JSON};
@@ -96,6 +96,9 @@ pub struct CaseSummary {
     pub mesh: MeshConfig,
     /// Fluid properties.
     pub fluid: Fluid,
+    /// Optional force and moment reference quantities.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<Reference>,
     /// Convective discretisation of the momentum and scalar equations.
     pub convection: ConvectionScheme,
     /// Time integration settings.
@@ -129,6 +132,7 @@ impl CaseSummary {
             version: model.version,
             mesh: model.mesh.clone(),
             fluid: model.fluid.clone(),
+            reference: model.reference.clone(),
             convection: model.convection,
             time: model.time.clone(),
             boundaries: model.boundaries.clone(),
@@ -286,6 +290,30 @@ impl OpenCfd {
     pub fn convection_set(&mut self, scheme: ConvectionScheme) -> Result<CaseSummary, CfdError> {
         self.edit(|model| {
             model.convection = scheme;
+        })
+    }
+
+    /// Sets force and moment reference quantities and writes the document.
+    ///
+    /// Omitted components keep their current values (or stay automatic when no
+    /// reference section exists yet).
+    pub fn reference_set(
+        &mut self,
+        velocity: Option<f64>,
+        area: Option<f64>,
+        length: Option<f64>,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            let reference = model.reference.get_or_insert_with(Reference::default);
+            if let Some(velocity) = velocity {
+                reference.velocity = Some(velocity);
+            }
+            if let Some(area) = area {
+                reference.area = Some(area);
+            }
+            if let Some(length) = length {
+                reference.length = Some(length);
+            }
         })
     }
 

@@ -36,7 +36,7 @@ pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
-    MeshConfig, Model, Obstacle, Probe, ScalarConfig, Side, SideThermal, ThermalConfig,
+    MeshConfig, Model, Obstacle, Probe, Reference, ScalarConfig, Side, SideThermal, ThermalConfig,
     TimeSettings, Turbulence, TurbulenceModel, Units, FORMAT, VERSION,
 };
 pub use crate::session::{
@@ -67,6 +67,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "wallShear": "supported",
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
+    "momentCoefficients": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

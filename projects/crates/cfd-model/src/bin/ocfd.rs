@@ -26,6 +26,7 @@ Usage:
   ocfd probe clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   ocfd convection set <file> --scheme upwind|central|quick
+  ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
   ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>]
        [--heat-source <W/m3>] [--left-temperature <K>] [--right-temperature <K>]
@@ -80,6 +81,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
         "convection" => convection_command(&args[1..]),
+        "reference" => subcommand(args, "set", "reference"),
         "turbulence" => turbulence_command(&args[1..]),
         "heat" | "thermal" => heat_command(&args[1..]),
         "validate" => validate(&args[1..]),
@@ -102,6 +104,7 @@ fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CfdEr
             ("fluid", "set") => fluid_set(&args[2..]),
             ("time", "set") => time_set(&args[2..]),
             ("boundary", "set") => boundary_set(&args[2..]),
+            ("reference", "set") => reference_set(&args[2..]),
             _ => Err(CfdError::new(
                 "cli/unknown-command",
                 format!("unknown command `{group} {action}`"),
@@ -230,6 +233,35 @@ fn print_boundary(summary: &CaseSummary, side: Side) {
         boundary.velocity[1],
         boundary.pressure
     );
+}
+
+fn reference_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--velocity", "--area", "--length"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]",
+    )?;
+    let velocity = number(&parsed, "--velocity")?;
+    let area = number(&parsed, "--area")?;
+    let length = number(&parsed, "--length")?;
+    if velocity.is_none() && area.is_none() && length.is_none() {
+        return Err(CfdError::new(
+            "cli/missing-option",
+            "reference set needs at least one of --velocity, --area or --length",
+        ));
+    }
+    let mut session = open_session(file)?;
+    let summary = session.reference_set(velocity, area, length)?;
+    let reference = summary
+        .reference
+        .as_ref()
+        .expect("reference was just configured");
+    println!(
+        "reference set: velocity={:?} m/s, area={:?} m2, length={:?} m",
+        reference.velocity, reference.area, reference.length
+    );
+    Ok(0)
 }
 
 fn obstacle_command(args: &[String]) -> Result<i32, CfdError> {

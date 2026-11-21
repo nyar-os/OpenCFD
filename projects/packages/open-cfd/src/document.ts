@@ -20,6 +20,7 @@ import type {
     MeshSetRequest,
     Obstacle,
     Probe,
+    ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
     SolveOptions,
@@ -122,6 +123,12 @@ export class CfdCase {
     setConvection(request: ConvectionSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.convectionSet(this.handle, request));
+    }
+
+    /** Sets force and moment reference quantities and writes the document back. */
+    setReference(request: ReferenceSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.referenceSet(this.handle, request));
     }
 
     /** Configures passive scalar transport and writes the document back. */

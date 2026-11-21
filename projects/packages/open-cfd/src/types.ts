@@ -34,6 +34,16 @@ export interface Fluid {
     readonly viscosity: number;
 }
 
+/** Force and moment reference quantities; omitted values stay automatic. */
+export interface Reference {
+    /** Reference speed in m/s; default is the maximum inlet speed. */
+    readonly velocity?: number;
+    /** Reference area in m²; default is the obstacle length times unit depth. */
+    readonly area?: number;
+    /** Reference length in m; default is the obstacle characteristic length. */
+    readonly length?: number;
+}
+
 /** Time integration settings. */
 export interface TimeSettings {
     readonly dt: number;
@@ -174,6 +184,8 @@ export interface CaseSummary {
     readonly version: number;
     readonly mesh: MeshConfig;
     readonly fluid: Fluid;
+    /** Force and moment reference quantities, when configured. */
+    readonly reference?: Reference;
     /** Convective discretisation of the momentum and scalar equations. */
     readonly convection: ConvectionScheme;
     readonly time: TimeSettings;
@@ -220,8 +232,12 @@ export interface ForceSample {
     readonly step: number;
     readonly fx: number;
     readonly fy: number;
+    /** Moment about the obstacle centroid in N·m, positive counter-clockwise. */
+    readonly mz: number;
     readonly cd: number;
     readonly cl: number;
+    /** Moment coefficient, positive counter-clockwise. */
+    readonly cm: number;
 }
 
 /** Force report of one obstacle. */
@@ -230,8 +246,17 @@ export interface ObstacleForce {
     readonly kind: 'rect' | 'circle';
     readonly fx: number;
     readonly fy: number;
+    /** Moment about the obstacle centroid in N·m, positive counter-clockwise. */
+    readonly mz: number;
     readonly cd: number;
     readonly cl: number;
+    readonly cm: number;
+    /** Reference speed used by the coefficients in m/s. */
+    readonly referenceVelocity: number;
+    /** Reference area used by the force coefficients in m². */
+    readonly referenceArea: number;
+    /** Reference length used by the moment coefficient in m. */
+    readonly referenceLength: number;
     readonly history: readonly ForceSample[];
 }
 
@@ -361,6 +386,16 @@ export interface BoundarySetRequest {
 /** Arguments of `CfdCase.setConvection()`. */
 export interface ConvectionSetRequest {
     readonly scheme: ConvectionScheme;
+}
+
+/** Arguments of `CfdCase.setReference()`. */
+export interface ReferenceSetRequest {
+    /** Reference speed in m/s; omitted keeps the current value. */
+    readonly velocity?: number;
+    /** Reference area in m²; omitted keeps the current value. */
+    readonly area?: number;
+    /** Reference length in m; omitted keeps the current value. */
+    readonly length?: number;
 }
 
 /** Arguments of `CfdCase.setScalar()`. */

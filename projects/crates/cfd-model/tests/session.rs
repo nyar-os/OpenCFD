@@ -106,6 +106,47 @@ fn session_slip_and_outlet_pressure_round_trip() {
 }
 
 #[test]
+fn session_reference_quantities_round_trip_through_cli() {
+    let directory = temporary_dir("reference");
+    let path = directory.join("reference.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .reference_set(Some(1.2), Some(0.4), Some(0.2))
+        .expect("reference set");
+    let reference = summary.reference.expect("reference");
+    assert_eq!(reference.velocity, Some(1.2));
+    assert_eq!(reference.area, Some(0.4));
+    assert_eq!(reference.length, Some(0.2));
+
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.reference.expect("stored reference"), reference);
+
+    let cli_path = directory.join("cli-reference.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "reference",
+        "set",
+        &cli,
+        "--velocity",
+        "0.8",
+        "--area",
+        "0.25",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd reference set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    let reference = cli_stored.reference.expect("CLI reference");
+    assert_eq!(reference.velocity, Some(0.8));
+    assert_eq!(reference.area, Some(0.25));
+    assert_eq!(reference.length, None);
+}
+
+#[test]
 fn session_create_edit_solve_export_matches_cli() {
     let directory = temporary_dir("session");
     let session_path = directory.join("session.ocfd");

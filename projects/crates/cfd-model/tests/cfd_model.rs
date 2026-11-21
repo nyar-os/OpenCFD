@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_csv, export_svg, export_vtk, solve, solve_pressure, solve_with, stream_function,
     transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme, ExportField, Mesh,
-    Model, Obstacle, PressureSettings, Probe, ScalarConfig, Solution, SolveOptions,
+    Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution, SolveOptions,
     CAPABILITIES_JSON, VERSION,
 };
 
@@ -402,9 +402,91 @@ fn channel_with_circle_obstacle_has_finite_positive_drag() {
     let force = &solution.report.forces[0];
     assert_eq!(force.id, "cylinder");
     assert!(force.fx.is_finite() && force.cd.is_finite() && force.cl.is_finite());
+    assert!(force.cm.is_finite() && force.mz.is_finite());
     assert!(force.cd > 0.0, "drag coefficient {}", force.cd);
     assert!(force.fx > 0.0, "drag force {}", force.fx);
     assert!(!force.history.is_empty());
+    for sample in &force.history {
+        assert!(sample.cm.is_finite() && sample.mz.is_finite());
+    }
+    assert!((force.reference_velocity - 1.0).abs() < 1e-12);
+    assert!((force.reference_area - 0.2).abs() < 1e-12);
+    assert!((force.reference_length - 0.2).abs() < 1e-12);
+}
+
+#[test]
+fn reference_quantities_scale_force_and_moment_coefficients() {
+    let mut model = Model::new();
+    model.mesh.nx = 24;
+    model.mesh.ny = 12;
+    model.mesh.length_x = 2.0;
+    model.mesh.length_y = 1.0;
+    model.fluid.density = 1.0;
+    model.fluid.viscosity = 0.02;
+    model.time.dt = 0.005;
+    model.time.steps = 120;
+    model.time.pressure_iterations = 80;
+    model.time.tolerance = 1e-3;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top = Boundary::wall();
+    model.boundaries.bottom = Boundary::wall();
+    model.obstacles = vec![Obstacle::Rect {
+        id: "plate".to_string(),
+        x0: 0.7,
+        y0: 0.3,
+        x1: 0.9,
+        y1: 0.6,
+    }];
+
+    let base = solve(&model).expect("base solve");
+    let base_force = &base.report.forces[0];
+    assert!(
+        base_force.cd.abs() > 1e-9,
+        "base drag coefficient {}",
+        base_force.cd
+    );
+    assert!(
+        base_force.cm.abs() > 1e-9,
+        "base moment coefficient is zero"
+    );
+
+    model.reference = Some(Reference {
+        velocity: Some(2.0),
+        area: Some(0.4),
+        length: Some(0.4),
+    });
+    let scaled = solve(&model).expect("scaled solve");
+    let scaled_force = &scaled.report.forces[0];
+    assert!(
+        (scaled_force.reference_velocity - 2.0).abs() < 1e-12,
+        "reference velocity {}",
+        scaled_force.reference_velocity
+    );
+    assert!((scaled_force.reference_area - 0.4).abs() < 1e-12);
+    assert!((scaled_force.reference_length - 0.4).abs() < 1e-12);
+    let drag_ratio = scaled_force.cd / base_force.cd;
+    let expected_drag_ratio = base_force.reference_velocity.powi(2) * base_force.reference_area
+        / (scaled_force.reference_velocity.powi(2) * scaled_force.reference_area);
+    assert!(
+        (drag_ratio - expected_drag_ratio).abs() < 1e-9,
+        "drag ratio {drag_ratio}, expected {expected_drag_ratio}"
+    );
+    let moment_ratio = scaled_force.cm / base_force.cm;
+    let expected_moment_ratio =
+        expected_drag_ratio * base_force.reference_length / scaled_force.reference_length;
+    assert!(
+        (moment_ratio - expected_moment_ratio).abs() < 1e-9,
+        "moment ratio {moment_ratio}, expected {expected_moment_ratio}"
+    );
 }
 
 #[test]

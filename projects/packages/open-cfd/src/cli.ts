@@ -38,6 +38,7 @@ usage:
   open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   open-cfd convection set <file> --scheme upwind|central|quick
+  open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
   open-cfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
@@ -456,6 +457,35 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const document = await session.open(file);
             const summary = document.setConvection({ scheme });
             console.log(`convection set: ${summary.convection}`);
+            return 0;
+        }
+        case 'reference': {
+            expectSet(rest, 'reference');
+            const parsed = parseArguments(rest.slice(1), [
+                '--velocity',
+                '--area',
+                '--length',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]',
+            );
+            const velocity = optionalNumber(parsed, '--velocity');
+            const area = optionalNumber(parsed, '--area');
+            const length = optionalNumber(parsed, '--length');
+            if (velocity === undefined && area === undefined && length === undefined) {
+                throw cliError(
+                    'cli/missing-option',
+                    'reference set needs at least one of --velocity, --area or --length',
+                );
+            }
+            const document = await session.open(file);
+            const summary = document.setReference({ velocity, area, length });
+            const reference = summary.reference;
+            console.log(
+                `reference set: velocity=${reference?.velocity}, area=${reference?.area}, length=${reference?.length}`,
+            );
             return 0;
         }
         case 'validate': {
