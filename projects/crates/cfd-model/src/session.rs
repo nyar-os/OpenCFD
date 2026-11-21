@@ -569,21 +569,28 @@ impl OpenCfd {
 
     /// Configures the eddy-viscosity turbulence model and writes the document.
     ///
-    /// Passing [`TurbulenceModel::None`] removes the turbulence section.
+    /// Passing [`TurbulenceModel::None`] removes the turbulence section. `k` and
+    /// `epsilon` are the initial `k`–`ε` values used by
+    /// [`TurbulenceModel::KEpsilon`]; omitted values keep the model defaults.
     pub fn turbulence_set(
         &mut self,
         model_kind: TurbulenceModel,
         nu_t: f64,
         mixing_length: f64,
+        k: Option<f64>,
+        epsilon: Option<f64>,
     ) -> Result<CaseSummary, CfdError> {
         self.edit(|model| {
             model.turbulence = if model_kind == TurbulenceModel::None {
                 None
             } else {
+                let defaults = Turbulence::default();
                 Some(Turbulence {
                     model: model_kind,
                     nu_t,
                     mixing_length,
+                    k: k.unwrap_or(defaults.k),
+                    epsilon: epsilon.unwrap_or(defaults.epsilon),
                 })
             };
         })

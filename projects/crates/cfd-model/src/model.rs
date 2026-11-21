@@ -920,6 +920,8 @@ pub enum TurbulenceModel {
     Constant,
     /// Algebraic mixing-length model `nuT = l² · |S|`.
     MixingLength,
+    /// Standard two-equation `k`–`ε` model with `nuT = C_mu · k² / ε`.
+    KEpsilon,
 }
 
 impl TurbulenceModel {
@@ -929,6 +931,7 @@ impl TurbulenceModel {
             Self::None => "none",
             Self::Constant => "constant",
             Self::MixingLength => "mixingLength",
+            Self::KEpsilon => "kEpsilon",
         }
     }
 }
@@ -941,9 +944,10 @@ impl FromStr for TurbulenceModel {
             "none" | "off" => Ok(Self::None),
             "constant" => Ok(Self::Constant),
             "mixingLength" | "mixing-length" | "mixing_length" => Ok(Self::MixingLength),
+            "kEpsilon" | "k-epsilon" | "k_epsilon" | "ke" => Ok(Self::KEpsilon),
             other => Err(CfdError::new(
                 "cli/invalid-turbulence-model",
-                format!("unknown turbulence model `{other}`; only none, constant or mixingLength is supported"),
+                format!("unknown turbulence model `{other}`; only none, constant, mixingLength or kEpsilon is supported"),
             )),
         }
     }
@@ -953,7 +957,9 @@ impl FromStr for TurbulenceModel {
 ///
 /// The constant model applies `nu_t` everywhere. The mixing-length model
 /// evaluates `nu_t = l² · |S|` per cell, where `|S|` is the magnitude of the
-/// resolved strain-rate tensor and `l` is `mixingLength`. Both are
+/// resolved strain-rate tensor and `l` is `mixingLength`. The `kEpsilon` model
+/// solves the standard `k` and `ε` transport equations explicitly with
+/// `nu_t = C_mu · k² / ε`, starting from `k` and `epsilon`. All models are
 /// deterministic functions of the current velocity field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -967,6 +973,14 @@ pub struct Turbulence {
     /// Mixing length `l` (m) used by [`TurbulenceModel::MixingLength`].
     #[serde(default = "default_mixing_length")]
     pub mixing_length: f64,
+    /// Initial turbulent kinetic energy `k` (m²/s²) of
+    /// [`TurbulenceModel::KEpsilon`]; must be positive for that model.
+    #[serde(default = "default_turbulent_energy")]
+    pub k: f64,
+    /// Initial dissipation rate `ε` (m²/s³) of
+    /// [`TurbulenceModel::KEpsilon`]; must be positive for that model.
+    #[serde(default = "default_turbulent_dissipation")]
+    pub epsilon: f64,
 }
 
 impl Default for Turbulence {
@@ -975,6 +989,8 @@ impl Default for Turbulence {
             model: TurbulenceModel::None,
             nu_t: 0.0,
             mixing_length: default_mixing_length(),
+            k: default_turbulent_energy(),
+            epsilon: default_turbulent_dissipation(),
         }
     }
 }
@@ -1464,6 +1480,26 @@ impl Model {
                     "turbulence.mixingLength must be a finite positive number",
                 ));
             }
+            if !turbulence.k.is_finite() || turbulence.k < 0.0 {
+                report.push(Issue::error(
+                    "turbulence/invalid",
+                    "turbulence.k must be a finite non-negative number",
+                ));
+            }
+            if !turbulence.epsilon.is_finite() || turbulence.epsilon < 0.0 {
+                report.push(Issue::error(
+                    "turbulence/invalid",
+                    "turbulence.epsilon must be a finite non-negative number",
+                ));
+            }
+            if turbulence.model == TurbulenceModel::KEpsilon
+                && (!finite_positive(turbulence.k) || !finite_positive(turbulence.epsilon))
+            {
+                report.push(Issue::error(
+                    "turbulence/invalid",
+                    "turbulence.k and turbulence.epsilon must be finite positive numbers for the kEpsilon model",
+                ));
+            }
         }
         if let Some(thermal) = &self.thermal {
             if self.scalar.is_none() {
@@ -1628,6 +1664,14 @@ fn default_target_cfl() -> f64 {
 
 fn default_mixing_length() -> f64 {
     0.1
+}
+
+fn default_turbulent_energy() -> f64 {
+    1e-4
+}
+
+fn default_turbulent_dissipation() -> f64 {
+    1e-4
 }
 
 fn default_specific_heat() -> f64 {

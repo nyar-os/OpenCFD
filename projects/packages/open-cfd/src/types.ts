@@ -146,7 +146,7 @@ export interface ScalarConfig {
 }
 
 /** Eddy-viscosity turbulence model. */
-export type TurbulenceModel = 'none' | 'constant' | 'mixingLength';
+export type TurbulenceModel = 'none' | 'constant' | 'mixingLength' | 'kEpsilon';
 
 /** Convective discretisation of the momentum and scalar equations. */
 export type ConvectionScheme = 'upwind' | 'central' | 'quick';
@@ -158,6 +158,10 @@ export interface Turbulence {
     readonly nuT: number;
     /** Mixing length in metres (used by the `mixingLength` model). */
     readonly mixingLength: number;
+    /** Initial turbulent kinetic energy in m²/s² (used by `kEpsilon`). */
+    readonly k: number;
+    /** Initial turbulent dissipation rate in m²/s³ (used by `kEpsilon`). */
+    readonly epsilon: number;
 }
 
 /** Thermal condition of one domain side. */
@@ -312,7 +316,9 @@ export type ExportField =
     | 'temperature'
     | 'vorticity'
     | 'streamFunction'
-    | 'speed';
+    | 'speed'
+    | 'turbulentKineticEnergy'
+    | 'turbulentDissipation';
 
 /**
  * Sampling layout of a CSV or VTK field export. `node` averages the adjacent
@@ -523,6 +529,26 @@ export interface SolveReport {
     readonly convection: string;
     /** Time integration scheme used by the run. */
     readonly timeScheme: TimeScheme;
+    /** Turbulence model used by the run. */
+    readonly turbulenceModel: TurbulenceModel;
+    /** Minimum eddy viscosity over fluid cells in m²/s. */
+    readonly eddyViscosityMin: number;
+    /** Maximum eddy viscosity over fluid cells in m²/s. */
+    readonly eddyViscosityMax: number;
+    /** Mean eddy viscosity over fluid cells in m²/s. */
+    readonly eddyViscosityMean: number;
+    /** Minimum turbulent kinetic energy over fluid cells in m²/s². */
+    readonly turbulentKineticEnergyMin: number;
+    /** Maximum turbulent kinetic energy over fluid cells in m²/s². */
+    readonly turbulentKineticEnergyMax: number;
+    /** Mean turbulent kinetic energy over fluid cells in m²/s². */
+    readonly turbulentKineticEnergyMean: number;
+    /** Minimum turbulent dissipation rate over fluid cells in m²/s³. */
+    readonly turbulentDissipationMin: number;
+    /** Maximum turbulent dissipation rate over fluid cells in m²/s³. */
+    readonly turbulentDissipationMax: number;
+    /** Mean turbulent dissipation rate over fluid cells in m²/s³. */
+    readonly turbulentDissipationMean: number;
     /** Whether Boussinesq buoyancy coupled temperature to momentum. */
     readonly buoyancy: boolean;
     /** Whether a log-law wall function evaluated the reported wall shear. */
@@ -617,9 +643,22 @@ export interface ScalarSetRequest {
     readonly inlet?: number;
 }
 
+/** Arguments of `CfdCase.setTurbulence()`. */
+export interface TurbulenceSetRequest {
+    /** Selected model; `none` removes the turbulence section. */
+    readonly model: TurbulenceModel;
+    /** Eddy viscosity in m²/s for the `constant` model. */
+    readonly nuT?: number;
+    /** Mixing length in metres for the `mixingLength` model. */
+    readonly mixingLength?: number;
+    /** Initial turbulent kinetic energy in m²/s² for `kEpsilon`. */
+    readonly k?: number;
+    /** Initial turbulent dissipation rate in m²/s³ for `kEpsilon`. */
+    readonly epsilon?: number;
+}
+
 /** Arguments of `CfdCase.setBuoyancy()`. */
-export interface BuoyancySetRequest {
-    /** Thermal expansion coefficient in 1/K; `0` removes the buoyancy section. */
+export interface BuoyancySetRequest {    /** Thermal expansion coefficient in 1/K; `0` removes the buoyancy section. */
     readonly beta: number;
     /** Reference temperature in K. */
     readonly tRef: number;

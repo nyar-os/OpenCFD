@@ -2476,3 +2476,61 @@ fn solve_reports_outlet_allocation_and_closed_cavity_has_none() {
         "a fully closed cavity has no outlet allocation"
     );
 }
+
+#[test]
+fn kepsilon_model_transports_positive_k_and_epsilon_fields() {
+    let mut model = mesh_model(16, 16);
+    model.time.steps = 25;
+    model.turbulence = Some(cfd_model::Turbulence {
+        model: cfd_model::TurbulenceModel::KEpsilon,
+        nu_t: 0.0,
+        mixing_length: 0.1,
+        k: 0.01,
+        epsilon: 1e-3,
+    });
+
+    let solution = solve(&model).expect("k-epsilon solve");
+    let k = solution.turbulent_kinetic_energy.as_ref().expect("k field");
+    let epsilon = solution
+        .turbulent_dissipation
+        .as_ref()
+        .expect("epsilon field");
+    assert_finite(k, "k");
+    assert_finite(epsilon, "epsilon");
+    assert_eq!(solution.report.turbulence_model, "kEpsilon");
+    assert!(solution.report.turbulent_kinetic_energy_mean > 0.0);
+    assert!(solution.report.turbulent_dissipation_mean > 0.0);
+    assert!(solution.report.eddy_viscosity_max > 0.0);
+    assert!(k.iter().any(|value| *value > 0.0));
+    assert!(epsilon.iter().any(|value| *value > 0.0));
+
+    let directory = temporary_dir("kepsilon-export");
+    let path = export_csv(&solution, &directory).expect("csv export");
+    let csv = fs::read_to_string(&path).expect("read csv");
+    assert!(csv.contains("turbulentKineticEnergy"));
+    assert!(csv.contains("turbulentDissipation"));
+}
+
+#[test]
+fn kepsilon_rejects_non_positive_initial_values_and_missing_field_export() {
+    let mut model = mesh_model(8, 8);
+    model.turbulence = Some(cfd_model::Turbulence {
+        model: cfd_model::TurbulenceModel::KEpsilon,
+        nu_t: 0.0,
+        mixing_length: 0.1,
+        k: 1e-3,
+        epsilon: 0.0,
+    });
+    assert_eq!(
+        model.validate().expect_err("epsilon must be positive").code,
+        "turbulence/invalid"
+    );
+
+    let mut laminar = mesh_model(8, 8);
+    laminar.time.steps = 2;
+    let solution = solve(&laminar).expect("laminar solve");
+    let directory = temporary_dir("kepsilon-missing");
+    let error = export_svg(&solution, &directory, ExportField::TurbulentKineticEnergy)
+        .expect_err("laminar case has no k field");
+    assert_eq!(error.code, "export/no-field");
+}

@@ -34,6 +34,7 @@ import type {
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
+    TurbulenceSetRequest,
 } from './types.js';
 
 /** Result of creating or opening a case. */
@@ -231,9 +232,22 @@ export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummar
     );
 }
 
-/** Configures Boussinesq buoyancy and writes the document back. */
-export function buoyancySet(handle: number, request: BuoyancySetRequest): CaseSummary {
+/** Configures the eddy-viscosity turbulence model and writes the document back. */
+export function turbulenceSet(handle: number, request: TurbulenceSetRequest): CaseSummary {
     return decode<CaseSummary>(() =>
+        binding('turbulence.set').turbulence_set(
+            handle,
+            request.model,
+            request.nuT ?? 0,
+            request.mixingLength ?? 0.1,
+            request.k,
+            request.epsilon,
+        ),
+    );
+}
+
+/** Configures Boussinesq buoyancy and writes the document back. */
+export function buoyancySet(handle: number, request: BuoyancySetRequest): CaseSummary {    return decode<CaseSummary>(() =>
         binding('buoyancy.set').buoyancy_set(
             handle,
             request.beta,

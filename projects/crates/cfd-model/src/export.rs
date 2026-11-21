@@ -21,6 +21,10 @@ pub enum ExportField {
     StreamFunction,
     /// Cell-centred speed `√(u² + v²)` in m/s.
     Speed,
+    /// Turbulent kinetic energy `k` in m²/s² (`kEpsilon` model).
+    TurbulentKineticEnergy,
+    /// Turbulent dissipation rate `ε` in m²/s³ (`kEpsilon` model).
+    TurbulentDissipation,
 }
 
 impl ExportField {
@@ -32,6 +36,8 @@ impl ExportField {
             Self::Vorticity => "vorticity",
             Self::StreamFunction => "streamFunction",
             Self::Speed => "speed",
+            Self::TurbulentKineticEnergy => "turbulentKineticEnergy",
+            Self::TurbulentDissipation => "turbulentDissipation",
         }
     }
 
@@ -43,6 +49,8 @@ impl ExportField {
             Self::Vorticity => "1/s",
             Self::StreamFunction => "m²/s",
             Self::Speed => "m/s",
+            Self::TurbulentKineticEnergy => "m²/s²",
+            Self::TurbulentDissipation => "m²/s³",
         }
     }
 }
@@ -57,10 +65,16 @@ impl FromStr for ExportField {
             "vorticity" => Ok(Self::Vorticity),
             "streamFunction" | "stream-function" | "stream_function" => Ok(Self::StreamFunction),
             "speed" | "magnitude" => Ok(Self::Speed),
+            "turbulentKineticEnergy" | "turbulent-kinetic-energy" | "tke" | "k" => {
+                Ok(Self::TurbulentKineticEnergy)
+            }
+            "turbulentDissipation" | "turbulent-dissipation" | "epsilon" => {
+                Ok(Self::TurbulentDissipation)
+            }
             other => Err(CfdError::new(
                 "export/invalid-field",
                 format!(
-                    "unknown export field `{other}`; only pressure, temperature, vorticity, streamFunction or speed is supported"
+                    "unknown export field `{other}`; only pressure, temperature, vorticity, streamFunction, speed, turbulentKineticEnergy or turbulentDissipation is supported"
                 ),
             )),
         }
@@ -164,6 +178,22 @@ fn field_values(solution: &Solution, field: ExportField) -> Result<Vec<f64>, Cfd
                 }
             }
             speed
+        }
+        ExportField::TurbulentKineticEnergy => {
+            solution.turbulent_kinetic_energy.clone().ok_or_else(|| {
+                CfdError::new(
+                    "export/no-field",
+                    "the case does not use the kEpsilon turbulence model, so turbulent kinetic energy cannot be exported",
+                )
+            })?
+        }
+        ExportField::TurbulentDissipation => {
+            solution.turbulent_dissipation.clone().ok_or_else(|| {
+                CfdError::new(
+                    "export/no-field",
+                    "the case does not use the kEpsilon turbulence model, so turbulent dissipation cannot be exported",
+                )
+            })?
         }
     };
     Ok(values)
@@ -1058,6 +1088,8 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
     let mut pressure = Vec::with_capacity(count);
     let mut vorticity = Vec::with_capacity(count);
     let mut stream_function = Vec::with_capacity(count);
+    let mut turbulent_kinetic_energy = Vec::with_capacity(count);
+    let mut turbulent_dissipation = Vec::with_capacity(count);
     match layout {
         ExportLayout::Cell => {
             for j in 0..mesh.ny {
@@ -1070,6 +1102,12 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
                     pressure.push(solution.p[index]);
                     vorticity.push(solution.vorticity[index]);
                     stream_function.push(solution.stream_function[index]);
+                    if let Some(field) = &solution.turbulent_kinetic_energy {
+                        turbulent_kinetic_energy.push(field[index]);
+                    }
+                    if let Some(field) = &solution.turbulent_dissipation {
+                        turbulent_dissipation.push(field[index]);
+                    }
                 }
             }
         }
@@ -1096,18 +1134,38 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
                     stream_function.push(node_average(mesh, i, j, |ci, cj| {
                         solution.stream_function[mesh.pressure_index(ci, cj)]
                     }));
+                    if let Some(field) = &solution.turbulent_kinetic_energy {
+                        turbulent_kinetic_energy.push(node_average(mesh, i, j, |ci, cj| {
+                            field[mesh.pressure_index(ci, cj)]
+                        }));
+                    }
+                    if let Some(field) = &solution.turbulent_dissipation {
+                        turbulent_dissipation.push(node_average(mesh, i, j, |ci, cj| {
+                            field[mesh.pressure_index(ci, cj)]
+                        }));
+                    }
                 }
             }
         }
     }
-    vec![
+    let mut fields = vec![
         Field::scalar("pressure", pressure),
         Field::vector("velocity", velocity),
         Field::scalar("magnitude", magnitude),
         Field::scalar("temperature", temperature),
         Field::scalar("vorticity", vorticity),
         Field::scalar("streamFunction", stream_function),
-    ]
+    ];
+    if !turbulent_kinetic_energy.is_empty() {
+        fields.push(Field::scalar(
+            "turbulentKineticEnergy",
+            turbulent_kinetic_energy,
+        ));
+    }
+    if !turbulent_dissipation.is_empty() {
+        fields.push(Field::scalar("turbulentDissipation", turbulent_dissipation));
+    }
+    fields
 }
 
 /// Mean of `value` over the fluid cells adjacent to vertex `(i, j)`.

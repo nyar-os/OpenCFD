@@ -362,6 +362,24 @@ pub struct Report {
     /// Mean eddy viscosity over fluid cells (m²/s).
     #[serde(default)]
     pub eddy_viscosity_mean: f64,
+    /// Minimum turbulent kinetic energy over fluid cells (m²/s²).
+    #[serde(default)]
+    pub turbulent_kinetic_energy_min: f64,
+    /// Maximum turbulent kinetic energy over fluid cells (m²/s²).
+    #[serde(default)]
+    pub turbulent_kinetic_energy_max: f64,
+    /// Mean turbulent kinetic energy over fluid cells (m²/s²).
+    #[serde(default)]
+    pub turbulent_kinetic_energy_mean: f64,
+    /// Minimum turbulent dissipation rate over fluid cells (m²/s³).
+    #[serde(default)]
+    pub turbulent_dissipation_min: f64,
+    /// Maximum turbulent dissipation rate over fluid cells (m²/s³).
+    #[serde(default)]
+    pub turbulent_dissipation_max: f64,
+    /// Mean turbulent dissipation rate over fluid cells (m²/s³).
+    #[serde(default)]
+    pub turbulent_dissipation_mean: f64,
     /// Per-obstacle Nusselt numbers, when a thermal configuration is present.
     #[serde(default)]
     pub nusselt: Vec<ObstacleNusselt>,
@@ -395,6 +413,12 @@ pub struct Solution {
     pub stream_function: Vec<f64>,
     /// Cell-centred eddy viscosity, when a turbulence model is active.
     pub eddy_viscosity: Option<Vec<f64>>,
+    /// Cell-centred turbulent kinetic energy `k` (m²/s²), when the `kEpsilon`
+    /// model is active.
+    pub turbulent_kinetic_energy: Option<Vec<f64>>,
+    /// Cell-centred turbulent dissipation rate `ε` (m²/s³), when the `kEpsilon`
+    /// model is active.
+    pub turbulent_dissipation: Option<Vec<f64>>,
     /// Simulation report.
     pub report: Report,
 }
@@ -536,7 +560,16 @@ pub fn solve_with_checkpoint(
         iterations: model.time.pressure_iterations,
         tolerance: model.time.tolerance,
     };
-    let mut eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+    let mut kepsilon = match model.turbulence.as_ref() {
+        Some(turbulence) if turbulence.model == TurbulenceModel::KEpsilon => {
+            Some(kepsilon_initial(&mesh, turbulence))
+        }
+        _ => None,
+    };
+    let mut eddy = match kepsilon.as_ref() {
+        Some((k, epsilon)) => Some(kepsilon_eddy(&mesh, k, epsilon)),
+        None => eddy_viscosity_field(&mesh, model, &u, &v),
+    };
     let porous = porous_cells(&mesh, model);
     if !model.time.adaptive {
         check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
@@ -580,7 +613,10 @@ pub fn solve_with_checkpoint(
         let step = start_step + local_step;
         u_previous.copy_from_slice(&u);
         v_previous.copy_from_slice(&v);
-        eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+        eddy = match kepsilon.as_ref() {
+            Some((k, epsilon)) => Some(kepsilon_eddy(&mesh, k, epsilon)),
+            None => eddy_viscosity_field(&mesh, model, &u, &v),
+        };
         let dt = if model.time.adaptive {
             adaptive_dt(&mesh, model, &u, &v, eddy.as_deref())
         } else {
@@ -666,6 +702,23 @@ pub fn solve_with_checkpoint(
             )?;
         }
 
+        if let (Some(turbulence), Some((k_field, epsilon_field))) =
+            (model.turbulence.as_ref(), kepsilon.as_mut())
+        {
+            if turbulence.model == TurbulenceModel::KEpsilon {
+                transport_kepsilon(
+                    &mesh,
+                    model.fluid.viscosity,
+                    dt,
+                    &u,
+                    &v,
+                    k_field,
+                    epsilon_field,
+                )?;
+                eddy = Some(kepsilon_eddy(&mesh, k_field, epsilon_field));
+            }
+        }
+
         if !u
             .iter()
             .chain(v.iter())
@@ -740,6 +793,16 @@ pub fn solve_with_checkpoint(
     let probes = build_probes(model, &probe_cells, &probe_samples);
     let wall_shear_summary = wall_shear(&mesh, model, &u, &v);
     let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
+    let (tke_min, tke_max, tke_mean) =
+        eddy_stats(&mesh, kepsilon.as_ref().map(|(k, _)| k.as_slice()));
+    let (dissipation_min, dissipation_max, dissipation_mean) = eddy_stats(
+        &mesh,
+        kepsilon.as_ref().map(|(_, epsilon)| epsilon.as_slice()),
+    );
+    let (turbulent_kinetic_energy, turbulent_dissipation) = match kepsilon {
+        Some((k, epsilon)) => (Some(k), Some(epsilon)),
+        None => (None, None),
+    };
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
     let porous_summary = porous_summary(&mesh, model, &porous, &u, &v);
 
@@ -798,6 +861,12 @@ pub fn solve_with_checkpoint(
         eddy_viscosity_min: eddy_min,
         eddy_viscosity_max: eddy_max,
         eddy_viscosity_mean: eddy_mean,
+        turbulent_kinetic_energy_min: tke_min,
+        turbulent_kinetic_energy_max: tke_max,
+        turbulent_kinetic_energy_mean: tke_mean,
+        turbulent_dissipation_min: dissipation_min,
+        turbulent_dissipation_max: dissipation_max,
+        turbulent_dissipation_mean: dissipation_mean,
         nusselt,
         porous: porous_summary,
         buoyancy: model
@@ -815,6 +884,8 @@ pub fn solve_with_checkpoint(
         vorticity: vorticity_field,
         stream_function: stream_function_field,
         eddy_viscosity: eddy,
+        turbulent_kinetic_energy,
+        turbulent_dissipation,
         report,
     })
 }
@@ -1681,6 +1752,7 @@ fn eddy_viscosity_field(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Opt
             Some(field)
         }
         TurbulenceModel::MixingLength => Some(mixing_length_field(mesh, turbulence, u, v)),
+        TurbulenceModel::KEpsilon => None,
     }
 }
 
@@ -1705,6 +1777,206 @@ fn mixing_length_field(mesh: &Mesh, turbulence: &Turbulence, u: &[f64], v: &[f64
     field
 }
 
+/// Standard `k`–`ε` closure constants used by the two-equation model.
+const K_EPSILON_C_MU: f64 = 0.09;
+const K_EPSILON_SIGMA_K: f64 = 1.0;
+const K_EPSILON_SIGMA_EPSILON: f64 = 1.3;
+const K_EPSILON_C1: f64 = 1.44;
+const K_EPSILON_C2: f64 = 1.92;
+const K_EPSILON_FLOOR: f64 = 1e-12;
+
+/// Initial cell-centred `k` and `ε` fields of the `kEpsilon` model.
+fn kepsilon_initial(mesh: &Mesh, turbulence: &Turbulence) -> (Vec<f64>, Vec<f64>) {
+    let mut k = vec![turbulence.k.max(0.0); mesh.pressure_count()];
+    let mut epsilon = vec![turbulence.epsilon.max(K_EPSILON_FLOOR); mesh.pressure_count()];
+    for (index, value) in k.iter_mut().enumerate() {
+        if mesh.solid[index] {
+            *value = 0.0;
+        }
+    }
+    for (index, value) in epsilon.iter_mut().enumerate() {
+        if mesh.solid[index] {
+            *value = 0.0;
+        }
+    }
+    (k, epsilon)
+}
+
+/// Cell-centred eddy viscosity `ν_t = C_mu · k² / ε` of the `kEpsilon` model.
+fn kepsilon_eddy(mesh: &Mesh, k: &[f64], epsilon: &[f64]) -> Vec<f64> {
+    let mut field = vec![0.0; mesh.pressure_count()];
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                continue;
+            }
+            let energy = k[index].max(0.0);
+            let dissipation = epsilon[index].max(K_EPSILON_FLOOR);
+            field[index] = K_EPSILON_C_MU * energy * energy / dissipation;
+        }
+    }
+    field
+}
+
+/// Advances `k` and `ε` by one explicit step of the standard `k`–`ε` model.
+///
+/// Advection is first-order upwind and diffusion is central, both on cell
+/// centres. The production term is `ν_t · |S|²` with `|S|` the resolved strain
+/// magnitude. Solid cells carry zero values and zero-flux faces. The step is
+/// explicit, so it requires `(ν + ν_t/σ_k)·dt·(1/dx² + 1/dy²) ≤ 0.5` and a
+/// convective CFL at most one, which the solver checks before stepping.
+#[allow(clippy::too_many_arguments)]
+fn transport_kepsilon(
+    mesh: &Mesh,
+    viscosity: f64,
+    dt: f64,
+    u: &[f64],
+    v: &[f64],
+    k: &mut [f64],
+    epsilon: &mut [f64],
+) -> Result<(), CfdError> {
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "dt must be a finite positive number",
+        ));
+    }
+    if k.len() != mesh.pressure_count() || epsilon.len() != mesh.pressure_count() {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "k-epsilon array length does not match the mesh",
+        ));
+    }
+    let eddy = kepsilon_eddy(mesh, k, epsilon);
+    let max_eddy = eddy.iter().copied().fold(0.0_f64, f64::max);
+    let diffusion_number =
+        (viscosity + max_eddy) * dt * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
+    if diffusion_number > 0.5 {
+        return Err(CfdError::new(
+            "solver/unstable",
+            format!(
+                "explicit k-epsilon diffusion is unstable: (ν+ν_t/σ)·dt·(1/dx²+1/dy²) = {diffusion_number:.3} > 0.5; reduce dt, refine the mesh or lower k and epsilon"
+            ),
+        ));
+    }
+
+    let mut next_k = k.to_vec();
+    let mut next_epsilon = epsilon.to_vec();
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                next_k[index] = 0.0;
+                next_epsilon[index] = 0.0;
+                continue;
+            }
+            let energy = k[index].max(0.0);
+            let dissipation = epsilon[index].max(K_EPSILON_FLOOR);
+            let nu_t = eddy[index];
+            let du_dx = cell_gradient(mesh, u, v, i, j, Gradient::UDx);
+            let du_dy = cell_gradient(mesh, u, v, i, j, Gradient::UDy);
+            let dv_dx = cell_gradient(mesh, u, v, i, j, Gradient::VDx);
+            let dv_dy = cell_gradient(mesh, u, v, i, j, Gradient::VDy);
+            let strain =
+                (2.0 * (du_dx * du_dx + dv_dy * dv_dy) + (du_dy + dv_dx) * (du_dy + dv_dx)).sqrt();
+            let production = nu_t * strain * strain;
+            let kappa_k = viscosity + nu_t / K_EPSILON_SIGMA_K;
+            let kappa_epsilon = viscosity + nu_t / K_EPSILON_SIGMA_EPSILON;
+            let k_source = -cell_advection(mesh, u, v, k, i, j)
+                + cell_diffusion(mesh, k, i, j, kappa_k)
+                + production
+                - dissipation;
+            let epsilon_source = -cell_advection(mesh, u, v, epsilon, i, j)
+                + cell_diffusion(mesh, epsilon, i, j, kappa_epsilon)
+                + K_EPSILON_C1 * (dissipation / energy.max(K_EPSILON_FLOOR)) * production
+                - K_EPSILON_C2 * dissipation * dissipation / energy.max(K_EPSILON_FLOOR);
+            next_k[index] = (energy + dt * k_source).max(0.0);
+            next_epsilon[index] = (dissipation + dt * epsilon_source).max(K_EPSILON_FLOOR);
+        }
+    }
+    k.copy_from_slice(&next_k);
+    epsilon.copy_from_slice(&next_epsilon);
+    if !k
+        .iter()
+        .chain(epsilon.iter())
+        .all(|value| value.is_finite())
+    {
+        return Err(CfdError::new(
+            "solver/non-finite",
+            "k-epsilon transport produced NaN or Inf; reduce dt or lower the initial k and epsilon",
+        ));
+    }
+    Ok(())
+}
+
+/// First-order upwind advective derivative of a cell-centred field.
+fn cell_advection(mesh: &Mesh, u: &[f64], v: &[f64], field: &[f64], i: usize, j: usize) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    let centre = field[index];
+    let (velocity_x, velocity_y) = mesh.cell_velocity(u, v, i, j);
+    let west = if i == 0 || mesh.solid[index - 1] {
+        centre
+    } else {
+        field[index - 1]
+    };
+    let east = if i + 1 == mesh.nx || mesh.solid[index + 1] {
+        centre
+    } else {
+        field[index + 1]
+    };
+    let south = if j == 0 || mesh.solid[index - mesh.nx] {
+        centre
+    } else {
+        field[index - mesh.nx]
+    };
+    let north = if j + 1 == mesh.ny || mesh.solid[index + mesh.nx] {
+        centre
+    } else {
+        field[index + mesh.nx]
+    };
+    let derivative_x = if velocity_x >= 0.0 {
+        (centre - west) / mesh.dx
+    } else {
+        (east - centre) / mesh.dx
+    };
+    let derivative_y = if velocity_y >= 0.0 {
+        (centre - south) / mesh.dy
+    } else {
+        (north - centre) / mesh.dy
+    };
+    velocity_x * derivative_x + velocity_y * derivative_y
+}
+
+/// Central diffusion of a cell-centred field with zero-flux solid faces.
+fn cell_diffusion(mesh: &Mesh, field: &[f64], i: usize, j: usize, kappa: f64) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    let centre = field[index];
+    let west = if i == 0 || mesh.solid[index - 1] {
+        centre
+    } else {
+        field[index - 1]
+    };
+    let east = if i + 1 == mesh.nx || mesh.solid[index + 1] {
+        centre
+    } else {
+        field[index + 1]
+    };
+    let south = if j == 0 || mesh.solid[index - mesh.nx] {
+        centre
+    } else {
+        field[index - mesh.nx]
+    };
+    let north = if j + 1 == mesh.ny || mesh.solid[index + mesh.nx] {
+        centre
+    } else {
+        field[index + mesh.nx]
+    };
+    kappa
+        * ((east - 2.0 * centre + west) / (mesh.dx * mesh.dx)
+            + (north - 2.0 * centre + south) / (mesh.dy * mesh.dy))
+}
+
 #[derive(Clone, Copy)]
 enum Gradient {
     UDx,
@@ -1712,7 +1984,6 @@ enum Gradient {
     VDx,
     VDy,
 }
-
 fn cell_gradient(mesh: &Mesh, u: &[f64], v: &[f64], i: usize, j: usize, kind: Gradient) -> f64 {
     let component = |ci: usize, cj: usize| {
         let (ux, uy) = mesh.cell_velocity(u, v, ci, cj);

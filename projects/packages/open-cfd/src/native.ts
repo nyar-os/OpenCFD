@@ -31,6 +31,14 @@ export interface NativeBinding {
     probe_list(handle: number): string;
     probe_clear(handle: number): string;
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
+    turbulence_set(
+        handle: number,
+        model: string,
+        nuT: number,
+        mixingLength: number,
+        k?: number,
+        epsilon?: number,
+    ): string;
     buoyancy_set(handle: number, beta: number, tRef: number, gx: number, gy: number): string;
     convection_set(handle: number, scheme: string): string;
     pressure_gradient_set(handle: number, dpdx: number, dpdy: number): string;

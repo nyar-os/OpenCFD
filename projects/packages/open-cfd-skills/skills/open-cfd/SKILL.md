@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets, convective outlets and periodic sides), pressure-driven flow, obstacle, porous region, passive scalar, buoyancy, turbulence, wall function or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets, convective outlets and periodic sides), pressure-driven flow, obstacle, porous region, passive scalar, buoyancy, turbulence (including standard k-epsilon), wall function or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -52,7 +52,7 @@ ocfd probe list <file>
 ocfd probe clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
-ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
+ocfd turbulence set <file> --model none|constant|mixingLength|kEpsilon [--nu-t <m2/s>] [--mixing-length <m>] [--k <m2/s2>] [--epsilon <m2/s3>]
 ocfd heat set <file> [thermal options]
 ocfd wall function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
 ocfd wall function clear <file>
@@ -62,7 +62,7 @@ ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd quality <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -94,7 +94,15 @@ rename. Confirm the path before running them.
 
 - The solver is two-dimensional, single-phase, incompressible and
   constant-property, on a structured Cartesian mesh.
-- Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
+- Turbulence is limited to `none`, `constant`, `mixingLength` and `kEpsilon`.
+  `kEpsilon` solves the standard `k` and `ε` transport equations explicitly
+  with `νt = 0.09·k²/ε`, first-order upwind advection and central diffusion.
+  It needs positive initial `--k` and `--epsilon`, shares the explicit
+  diffusion/CFL guards (reduce `--dt` when the solve reports
+  `solver/unstable`) and adds `k`/`ε` fields, their `turbulentKineticEnergy*`
+  and `turbulentDissipation*` report statistics, `--field
+  turbulentKineticEnergy|turbulentDissipation` export, and extra
+  `turbulentKineticEnergy`/`turbulentDissipation` CSV/VTK columns.
 - Heat transfer uses the implemented passive scalar and thermal configuration.
   `buoyancy set` couples the temperature field back to momentum with
   `−β(T − tRef)·g`, requires scalar transport, and `--beta 0` disables it.

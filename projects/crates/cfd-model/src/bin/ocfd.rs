@@ -35,7 +35,7 @@ Usage:
   ocfd convection set <file> --scheme upwind|central|quick
   ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
-  ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
+  ocfd turbulence set <file> --model none|constant|mixingLength|kEpsilon [--nu-t <m2/s>] [--mixing-length <m>] [--k <m2/s2>] [--epsilon <m2/s3>]
   ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>]
        [--heat-source <W/m3>] [--left-temperature <K>] [--right-temperature <K>]
        [--top-temperature <K>] [--bottom-temperature <K>]
@@ -47,7 +47,7 @@ Usage:
   ocfd validate <file>
   ocfd quality <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -803,23 +803,31 @@ fn turbulence_command(args: &[String]) -> Result<i32, CfdError> {
 }
 
 fn turbulence_set(args: &[String]) -> Result<i32, CfdError> {
-    let parsed = parse(args, &["--model", "--nu-t", "--mixing-length"], &[])?;
+    let parsed = parse(
+        args,
+        &["--model", "--nu-t", "--mixing-length", "--k", "--epsilon"],
+        &[],
+    )?;
     let file = positional(
         &parsed,
         0,
-        "turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]",
+        "turbulence set <file> --model none|constant|mixingLength|kEpsilon [--nu-t <m2/s>] [--mixing-length <m>] [--k <m2/s2>] [--epsilon <m2/s3>]",
     )?;
     let model = required(&parsed, "--model")?.parse::<TurbulenceModel>()?;
     let nu_t = number(&parsed, "--nu-t")?.unwrap_or(0.0);
     let mixing_length = number(&parsed, "--mixing-length")?.unwrap_or(0.1);
+    let k = number(&parsed, "--k")?;
+    let epsilon = number(&parsed, "--epsilon")?;
     let mut session = open_session(file)?;
-    let summary = session.turbulence_set(model, nu_t, mixing_length)?;
+    let summary = session.turbulence_set(model, nu_t, mixing_length, k, epsilon)?;
     match summary.turbulence.as_ref() {
         Some(turbulence) => println!(
-            "turbulence set: {}, nuT={} m2/s, mixingLength={} m",
+            "turbulence set: {}, nuT={} m2/s, mixingLength={} m, k={} m2/s2, epsilon={} m2/s3",
             turbulence.model.as_str(),
             turbulence.nu_t,
-            turbulence.mixing_length
+            turbulence.mixing_length,
+            turbulence.k,
+            turbulence.epsilon
         ),
         None => println!("turbulence disabled (laminar)"),
     }

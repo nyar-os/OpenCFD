@@ -33,6 +33,7 @@ import type {
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
+    TurbulenceSetRequest,
 } from './types.js';
 
 /** One open case. Owns exactly one native session handle. */
@@ -168,9 +169,14 @@ export class CfdCase {
         return this.adopt(service.scalarSet(this.handle, request));
     }
 
-    /** Configures Boussinesq buoyancy and writes the document back. */
-    setBuoyancy(request: BuoyancySetRequest): CaseSummary {
+    /** Configures the eddy-viscosity turbulence model and writes the document back. */
+    setTurbulence(request: TurbulenceSetRequest): CaseSummary {
         this.assertOpen();
+        return this.adopt(service.turbulenceSet(this.handle, request));
+    }
+
+    /** Configures Boussinesq buoyancy and writes the document back. */
+    setBuoyancy(request: BuoyancySetRequest): CaseSummary {        this.assertOpen();
         return this.adopt(service.buoyancySet(this.handle, request));
     }
 

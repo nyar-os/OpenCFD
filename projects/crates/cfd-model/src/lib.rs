@@ -12,7 +12,8 @@
 //! * uniform, parabolic and power-law inlet velocity profiles;
 //! * passive scalar (temperature) transport with explicit advection-diffusion;
 //! * isotropic porous regions with a Darcy–Forchheimer momentum sink;
-//! * optional eddy-viscosity turbulence (constant or mixing-length);
+//! * optional eddy-viscosity turbulence (constant or mixing-length) and a
+//!   standard `k`–`ε` model with `k`/`ε` fields and export;
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
 //! * Boussinesq buoyancy coupling the temperature field back to the momentum
@@ -112,6 +113,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "buoyancy": "supported",
     "compressible": "unsupported",
     "turbulence": "supported",
+    "kEpsilonTurbulence": "supported",
     "heat": "supported",
     "threeD": "unsupported"
   },

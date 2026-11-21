@@ -18,6 +18,7 @@ use std::sync::{Mutex, MutexGuard};
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
+    TurbulenceModel,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -332,6 +333,21 @@ fn scalar_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Configures the eddy-viscosity turbulence model and returns the summary.
+#[function]
+fn turbulence_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let model = text(&ctx, 1)?.parse::<TurbulenceModel>().map_err(fail)?;
+    let nu_t = number(&ctx, 2)?;
+    let mixing_length = number(&ctx, 3)?;
+    let k = optional_number(&ctx, 4)?;
+    let epsilon = optional_number(&ctx, 5)?;
+    let summary = with_session(handle, |session| {
+        session.turbulence_set(model, nu_t, mixing_length, k, epsilon)
+    })?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Configures Boussinesq buoyancy and returns the summary.
 #[function]
 fn buoyancy_set(ctx: CallContext) -> Result<JsValue> {
@@ -451,6 +467,7 @@ register_module![
     probe_list,
     probe_clear,
     scalar_set,
+    turbulence_set,
     buoyancy_set,
     convection_set,
     pressure_gradient_set,
