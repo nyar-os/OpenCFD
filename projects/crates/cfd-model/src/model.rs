@@ -725,6 +725,95 @@ impl Obstacle {
     }
 }
 
+/// Isotropic porous region with a Darcy–Forchheimer resistance.
+///
+/// A fluid cell whose centre lies inside the rectangle carries the momentum
+/// sink `−(ν/K)·U − (C_F/√K)·|U|·U`, the per-unit-mass form of the Darcy term
+/// `−μU/K` and the Forchheimer term `−ρ·C_F·|U|·U/√K`. A region does not change
+/// the solid mask, so flow can enter and leave it, and the first region in
+/// document order owns an overlapping cell. When `id` is empty the report names
+/// the region `porous-N` by its one-based document position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PorousRegion {
+    /// Stable identifier used by the porous report; empty means `porous-N`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    /// Lower x coordinate (m).
+    pub x0: f64,
+    /// Lower y coordinate (m).
+    pub y0: f64,
+    /// Upper x coordinate (m).
+    pub x1: f64,
+    /// Upper y coordinate (m).
+    pub y1: f64,
+    /// Permeability `K` (m²); must be finite and positive.
+    pub permeability: f64,
+    /// Forchheimer inertial coefficient `C_F`; finite and non-negative, zero by
+    /// default, which keeps the model purely linear Darcy.
+    #[serde(default)]
+    pub inertial: f64,
+}
+
+impl PorousRegion {
+    /// Stable identifier, or an empty string when the document omitted it.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns a copy of this region carrying `id`.
+    pub fn with_id(self, id: String) -> Self {
+        Self { id, ..self }
+    }
+
+    /// Whether the point `(x, y)` lies inside the region (edges included).
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
+    }
+
+    /// Checks positive size, finite coefficients and that the region lies
+    /// inside the domain.
+    pub fn validate(&self, length_x: f64, length_y: f64) -> Result<(), CfdError> {
+        if ![self.x0, self.y0, self.x1, self.y1]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(CfdError::new(
+                "porous/invalid",
+                "porous region coordinates must be finite",
+            ));
+        }
+        if self.x1 <= self.x0 || self.y1 <= self.y0 {
+            return Err(CfdError::new(
+                "porous/invalid",
+                "porous region must satisfy x1 > x0 and y1 > y0",
+            ));
+        }
+        if self.x0 < 0.0 || self.y0 < 0.0 || self.x1 > length_x || self.y1 > length_y {
+            return Err(CfdError::new(
+                "porous/invalid",
+                format!(
+                    "porous region ({}, {})-({}, {}) lies outside the {}×{} m domain",
+                    self.x0, self.y0, self.x1, self.y1, length_x, length_y
+                ),
+            ));
+        }
+        if !self.permeability.is_finite() || self.permeability <= 0.0 {
+            return Err(CfdError::new(
+                "porous/invalid",
+                "porous.permeability must be a finite positive number",
+            ));
+        }
+        if !self.inertial.is_finite() || self.inertial < 0.0 {
+            return Err(CfdError::new(
+                "porous/invalid",
+                "porous.inertial must be a finite non-negative number",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Point monitor sampled during the solve.
 ///
 /// The probe is bound to the cell whose centre is nearest to `(x, y)`. It must
@@ -1041,6 +1130,9 @@ pub struct Model {
     /// Solid obstacles, applied in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obstacles: Vec<Obstacle>,
+    /// Porous regions carrying a Darcy–Forchheimer momentum sink.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub porous: Vec<PorousRegion>,
     /// Point monitors sampled during the solve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<Probe>,
@@ -1085,6 +1177,7 @@ impl Model {
             boundaries,
             initial: None,
             obstacles: Vec::new(),
+            porous: Vec::new(),
             probes: Vec::new(),
             scalar: None,
             turbulence: None,
@@ -1292,6 +1385,11 @@ impl Model {
         }
         for obstacle in &self.obstacles {
             if let Err(error) = obstacle.validate(self.mesh.length_x, self.mesh.length_y) {
+                report.push(Issue::error(error.code, error.message));
+            }
+        }
+        for region in &self.porous {
+            if let Err(error) = region.validate(self.mesh.length_x, self.mesh.length_y) {
                 report.push(Issue::error(error.code, error.message));
             }
         }

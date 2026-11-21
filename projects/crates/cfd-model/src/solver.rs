@@ -39,6 +39,24 @@ fn default_time_scheme_name() -> String {
     TimeScheme::Euler.as_str().to_string()
 }
 
+/// Per-region porous resistance summary.
+///
+/// `meanSpeed` is the area mean cell speed inside the region and `meanDrag` the
+/// mean Darcy–Forchheimer acceleration magnitude `(ν/K)|U| + (C_F/√K)|U|²` in
+/// m/s², both over the fluid cells the region owns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PorousSummary {
+    /// Stable region identifier.
+    pub id: String,
+    /// Number of fluid cells owned by the region.
+    pub cells: usize,
+    /// Mean cell speed inside the region (m/s).
+    pub mean_speed: f64,
+    /// Mean drag acceleration magnitude inside the region (m/s²).
+    pub mean_drag: f64,
+}
+
 /// One sampled velocity residual.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -313,6 +331,9 @@ pub struct Report {
     /// Per-obstacle Nusselt numbers, when a thermal configuration is present.
     #[serde(default)]
     pub nusselt: Vec<ObstacleNusselt>,
+    /// Per-region porous resistance summary, in document order.
+    #[serde(default)]
+    pub porous: Vec<PorousSummary>,
     /// Whether Boussinesq buoyancy coupled the temperature field to momentum.
     #[serde(default)]
     pub buoyancy: bool,
@@ -479,6 +500,7 @@ pub fn solve_with_checkpoint(
         tolerance: model.time.tolerance,
     };
     let mut eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+    let porous = porous_cells(&mesh, model);
     if !model.time.adaptive {
         check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
     }
@@ -537,6 +559,7 @@ pub fn solve_with_checkpoint(
                 &p,
                 temperature.as_deref(),
                 eddy.as_deref(),
+                &porous,
                 dt,
                 &mut u_star,
                 &mut v_star,
@@ -551,6 +574,7 @@ pub fn solve_with_checkpoint(
                 &p,
                 temperature.as_deref(),
                 eddy.as_deref(),
+                &porous,
                 dt,
                 &mut u_star,
                 &mut v_star,
@@ -678,6 +702,7 @@ pub fn solve_with_checkpoint(
     let wall_shear_summary = wall_shear(&mesh, model, &u, &v);
     let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
+    let porous_summary = porous_summary(&mesh, model, &porous, &u, &v);
 
     let report = Report {
         format: REPORT_FORMAT.to_string(),
@@ -733,6 +758,7 @@ pub fn solve_with_checkpoint(
         eddy_viscosity_max: eddy_max,
         eddy_viscosity_mean: eddy_mean,
         nusselt,
+        porous: porous_summary,
         buoyancy: model
             .buoyancy
             .as_ref()
@@ -1043,6 +1069,90 @@ fn face_buoyancy(
     -buoyancy.beta * (value - buoyancy.t_ref) * buoyancy.gravity[component]
 }
 
+/// Index of the porous region that owns each cell, or `-1` for free fluid.
+///
+/// The first region in document order owns a cell when regions overlap, matching
+/// the obstacle rule. Solid cells stay free of porous ownership because they are
+/// already impermeable.
+fn porous_cells(mesh: &Mesh, model: &Model) -> Vec<i32> {
+    let mut owner = vec![-1; mesh.pressure_count()];
+    if model.porous.is_empty() {
+        return owner;
+    }
+    for (index, region) in model.porous.iter().enumerate() {
+        for j in 0..mesh.ny {
+            for i in 0..mesh.nx {
+                let cell = mesh.pressure_index(i, j);
+                if owner[cell] >= 0 || mesh.solid[cell] {
+                    continue;
+                }
+                let (x, y) = mesh.cell_center(i, j);
+                if region.contains(x, y) {
+                    owner[cell] = index as i32;
+                }
+            }
+        }
+    }
+    owner
+}
+
+/// Region that owns a velocity face, taken from its first owned adjacent cell.
+fn face_porous_owner(
+    mesh: &Mesh,
+    porous: &[i32],
+    first: Option<(usize, usize)>,
+    second: Option<(usize, usize)>,
+) -> i32 {
+    if porous.is_empty() {
+        return -1;
+    }
+    for (i, j) in [first, second].into_iter().flatten() {
+        let owner = porous[mesh.pressure_index(i, j)];
+        if owner >= 0 {
+            return owner;
+        }
+    }
+    -1
+}
+
+/// Darcy linear and Forchheimer quadratic drag coefficients of one region.
+///
+/// Returns `(ν/K, C_F/√K)`; both are zero for a free-fluid face.
+fn porous_coefficient(model: &Model, owner: i32) -> (f64, f64) {
+    let Ok(index) = usize::try_from(owner) else {
+        return (0.0, 0.0);
+    };
+    let Some(region) = model.porous.get(index) else {
+        return (0.0, 0.0);
+    };
+    (
+        model.fluid.viscosity / region.permeability,
+        region.inertial / region.permeability.sqrt(),
+    )
+}
+
+/// Porous acceleration `−(ν/K)·u − (C_F/√K)·|U|·u` at one velocity face.
+fn porous_drag(model: &Model, owner: i32, velocity: f64, transverse: f64) -> f64 {
+    let (linear, quadratic) = porous_coefficient(model, owner);
+    if linear == 0.0 && quadratic == 0.0 {
+        return 0.0;
+    }
+    let speed = velocity.hypot(transverse);
+    -(linear + quadratic * speed) * velocity
+}
+
+/// Largest explicit damping rate `ν/K + C_F·|U|/√K` over all regions (1/s).
+fn porous_rate(model: &Model, max_speed: f64) -> f64 {
+    model
+        .porous
+        .iter()
+        .map(|region| {
+            model.fluid.viscosity / region.permeability
+                + region.inertial / region.permeability.sqrt() * max_speed
+        })
+        .fold(0.0_f64, f64::max)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn momentum_derivative(
     mesh: &Mesh,
@@ -1052,6 +1162,7 @@ fn momentum_derivative(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    porous: &[i32],
     du: &mut [f64],
     dv: &mut [f64],
 ) {
@@ -1132,6 +1243,12 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_west]) / dx;
             let effective = nu + u_face_eddy(mesh, eddy, i, j);
+            let porous_owner = face_porous_owner(
+                mesh,
+                porous,
+                (i > 0).then(|| (i - 1, j)),
+                (i < mesh.nx).then_some((i, j)),
+            );
             let buoyancy_x = if i == 0 {
                 if periodic_x {
                     face_buoyancy(
@@ -1157,7 +1274,8 @@ fn momentum_derivative(
             };
             du[index] = -convection + effective * diffusion - pressure_gradient / rho
                 + source_x
-                + buoyancy_x;
+                + buoyancy_x
+                + porous_drag(model, porous_owner, centre, v_face);
         }
         if periodic_x {
             du[mesh.u_index(mesh.nx, j)] = du[mesh.u_index(0, j)];
@@ -1235,6 +1353,12 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_south]) / dy;
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
+            let porous_owner = face_porous_owner(
+                mesh,
+                porous,
+                (j > 0).then(|| (i, j - 1)),
+                (j < mesh.ny).then_some((i, j)),
+            );
             let buoyancy_y = if j == 0 {
                 if periodic_y {
                     face_buoyancy(
@@ -1260,7 +1384,8 @@ fn momentum_derivative(
             };
             dv[index] = -convection + effective * diffusion - pressure_gradient / rho
                 + source_y
-                + buoyancy_y;
+                + buoyancy_y
+                + porous_drag(model, porous_owner, centre, u_face);
         }
     }
     if periodic_y {
@@ -1280,13 +1405,14 @@ fn momentum_euler(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    porous: &[i32],
     dt: f64,
     u_star: &mut [f64],
     v_star: &mut [f64],
     du: &mut [f64],
     dv: &mut [f64],
 ) {
-    momentum_derivative(mesh, model, u, v, p, temperature, eddy, du, dv);
+    momentum_derivative(mesh, model, u, v, p, temperature, eddy, porous, du, dv);
     for index in 0..u.len() {
         u_star[index] = u[index] + dt * du[index];
     }
@@ -1306,6 +1432,7 @@ fn momentum_heun(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    porous: &[i32],
     dt: f64,
     u_star: &mut [f64],
     v_star: &mut [f64],
@@ -1317,7 +1444,18 @@ fn momentum_heun(
     let mut du2 = vec![0.0; u.len()];
     let mut dv2 = vec![0.0; v.len()];
 
-    momentum_derivative(mesh, model, u, v, p, temperature, eddy, &mut du1, &mut dv1);
+    momentum_derivative(
+        mesh,
+        model,
+        u,
+        v,
+        p,
+        temperature,
+        eddy,
+        porous,
+        &mut du1,
+        &mut dv1,
+    );
     for index in 0..u.len() {
         u1[index] = u[index] + dt * du1[index];
     }
@@ -1334,6 +1472,7 @@ fn momentum_heun(
         p,
         temperature,
         eddy,
+        porous,
         &mut du2,
         &mut dv2,
     );
@@ -1624,6 +1763,66 @@ fn eddy_stats(mesh: &Mesh, eddy: Option<&[f64]>) -> (f64, f64, f64) {
     }
 }
 
+/// Per-region mean cell speed and Darcy–Forchheimer drag acceleration.
+fn porous_summary(
+    mesh: &Mesh,
+    model: &Model,
+    porous: &[i32],
+    u: &[f64],
+    v: &[f64],
+) -> Vec<PorousSummary> {
+    if model.porous.is_empty() {
+        return Vec::new();
+    }
+    let mut cells = vec![0_usize; model.porous.len()];
+    let mut speed_sum = vec![0.0; model.porous.len()];
+    let mut drag_sum = vec![0.0; model.porous.len()];
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let cell = mesh.pressure_index(i, j);
+            let owner = porous[cell];
+            let Ok(index) = usize::try_from(owner) else {
+                continue;
+            };
+            if mesh.solid[cell] {
+                continue;
+            }
+            let (ux, uy) = mesh.cell_velocity(u, v, i, j);
+            let speed = ux.hypot(uy);
+            let (linear, quadratic) = porous_coefficient(model, owner);
+            cells[index] += 1;
+            speed_sum[index] += speed;
+            drag_sum[index] += linear * speed + quadratic * speed * speed;
+        }
+    }
+    model
+        .porous
+        .iter()
+        .enumerate()
+        .map(|(index, region)| {
+            let count = cells[index];
+            PorousSummary {
+                id: if region.id().is_empty() {
+                    format!("porous-{}", index + 1)
+                } else {
+                    region.id().to_string()
+                },
+                cells: count,
+                mean_speed: if count > 0 {
+                    speed_sum[index] / count as f64
+                } else {
+                    0.0
+                },
+                mean_drag: if count > 0 {
+                    drag_sum[index] / count as f64
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect()
+}
+
 fn project_velocity(
     mesh: &Mesh,
     boundaries: &Boundaries,
@@ -1719,6 +1918,22 @@ fn check_explicit_stability(
     if let Some(issue) = report.issues.first() {
         return Err(CfdError::new(issue.code.clone(), issue.message.clone()));
     }
+    check_porous_stability(model, max_speed, model.time.dt)
+}
+
+/// Porous drag must be resolved by the explicit step: the damping rate
+/// `(ν/K + C_F·|U|/√K)` times `dt` may not exceed one.
+fn check_porous_stability(model: &Model, max_speed: f64, dt: f64) -> Result<(), CfdError> {
+    let rate = porous_rate(model, max_speed);
+    if rate > 0.0 && rate * dt > 1.0 {
+        return Err(CfdError::new(
+            "solver/unstable",
+            format!(
+                "explicit porous drag is unstable: (ν/K + C_F·|U|/√K)·dt = {:.3} > 1; reduce dt or increase the permeability",
+                rate * dt
+            ),
+        ));
+    }
     Ok(())
 }
 
@@ -1782,6 +1997,10 @@ fn adaptive_dt(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64], eddy: Option<&[
     let diffusivity = scalar_diffusivity(model);
     if diffusivity > 0.0 {
         limit = limit.min(0.5 / (diffusivity * cell_factor));
+    }
+    let drag_rate = porous_rate(model, max_speed);
+    if drag_rate > 0.0 {
+        limit = limit.min(0.9 / drag_rate);
     }
     if limit.is_finite() && limit > 0.0 {
         limit.min(model.time.dt)

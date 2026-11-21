@@ -5,8 +5,8 @@ use std::process;
 
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
-    ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal,
-    SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel,
+    ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, Side,
+    SideThermal, SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel,
 };
 
 const USAGE: &str = "\
@@ -24,6 +24,8 @@ Usage:
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
+  ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
+  ocfd porous list <file>
   ocfd probe add <file> --x <m> --y <m> [--id <name>]
   ocfd probe list <file>
   ocfd probe clear <file>
@@ -83,6 +85,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "time" => time_command(&args[1..]),
         "boundary" => boundary_command(&args[1..]),
         "obstacle" => obstacle_command(&args[1..]),
+        "porous" => porous_command(&args[1..]),
         "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
         "buoyancy" => subcommand(args, "set", "buoyancy"),
@@ -463,6 +466,77 @@ fn obstacle_list(args: &[String]) -> Result<i32, CfdError> {
         CfdError::new(
             "document/serialize",
             format!("cannot serialize obstacles: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn porous_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("add") => porous_add(&args[1..]),
+        Some("list") => porous_list(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`porous` has no subcommand `{other}`; only add and list are supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`porous` requires a subcommand; only add and list are supported",
+        )),
+    }
+}
+
+fn porous_add(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &[
+            "--id",
+            "--x0",
+            "--y0",
+            "--x1",
+            "--y1",
+            "--permeability",
+            "--inertial",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]",
+    )?;
+    let region = PorousRegion {
+        id: parsed.options.get("--id").cloned().unwrap_or_default(),
+        x0: required_number(&parsed, "--x0")?,
+        y0: required_number(&parsed, "--y0")?,
+        x1: required_number(&parsed, "--x1")?,
+        y1: required_number(&parsed, "--y1")?,
+        permeability: required_number(&parsed, "--permeability")?,
+        inertial: number(&parsed, "--inertial")?.unwrap_or(0.0),
+    };
+    let mut session = open_session(file)?;
+    let summary = session.porous_add(region)?;
+    let added = summary.porous.last().expect("region was just appended");
+    println!(
+        "added porous region `{}` with K={} m2 and C_F={}; {} total",
+        added.id,
+        added.permeability,
+        added.inertial,
+        summary.porous.len()
+    );
+    Ok(0)
+}
+
+fn porous_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "porous list <file>")?;
+    let session = open_session(file)?;
+    let regions = session.porous_list();
+    let json = serde_json::to_string_pretty(&regions).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize porous regions: {error}"),
         )
     })?;
     println!("{json}");

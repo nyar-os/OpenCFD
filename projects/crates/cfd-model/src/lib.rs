@@ -11,6 +11,7 @@
 //!   coefficients and configurable reference quantities;
 //! * uniform, parabolic and power-law inlet velocity profiles;
 //! * passive scalar (temperature) transport with explicit advection-diffusion;
+//! * isotropic porous regions with a Darcy–Forchheimer momentum sink;
 //! * optional eddy-viscosity turbulence (constant or mixing-length);
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
@@ -52,18 +53,18 @@ pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
-    InletProfile, InletProfiles, MeshConfig, Model, Obstacle, Probe, Reference, ScalarConfig, Side,
-    SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence, TurbulenceModel, Units,
-    FORMAT, VERSION,
+    InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
+    ScalarConfig, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence,
+    TurbulenceModel, Units, FORMAT, VERSION,
 };
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
 pub use crate::solver::{
     solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar, transport_thermal,
-    ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats,
-    ProbeSample, ProbeSeries, Report, ResidualSample, Solution, SolveOptions, WallShear,
-    REPORT_FORMAT, REPORT_VERSION,
+    ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, PorousSummary, PressureSettings,
+    PressureStats, ProbeSample, ProbeSeries, Report, ResidualSample, Solution, SolveOptions,
+    WallShear, REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -76,6 +77,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "cavity2d": "supported",
     "couette2d": "supported",
     "obstacles": "supported",
+    "porousMedia": "supported",
     "scalar": "supported",
     "convergence": "supported",
     "vorticity": "supported",

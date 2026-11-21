@@ -9,8 +9,8 @@ use cfd_model::{
     solve_pressure, solve_with, solve_with_checkpoint, stream_function, transport_scalar,
     vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme,
     ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle,
-    PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution, SolveOptions,
-    ThermalConfig, CAPABILITIES_JSON, VERSION,
+    PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution,
+    SolveOptions, ThermalConfig, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -39,6 +39,18 @@ fn assert_finite(values: &[f64], label: &str) {
         values.iter().all(|value| value.is_finite()),
         "{label} contains NaN or Inf"
     );
+}
+
+fn mean_cell_speed(solution: &Solution) -> f64 {
+    let mesh = &solution.mesh;
+    let mut sum = 0.0;
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let (u, v) = mesh.cell_velocity(&solution.u, &solution.v, i, j);
+            sum += u.hypot(v);
+        }
+    }
+    sum / (mesh.nx * mesh.ny) as f64
 }
 
 #[test]
@@ -1818,6 +1830,112 @@ fn pressure_gradient_round_trips_and_rejects_non_finite_values() {
     assert_eq!(
         invalid.validate().expect_err("non-finite gradient").code,
         "pressure/invalid"
+    );
+}
+
+#[test]
+fn porous_region_validation_and_round_trip() {
+    let mut model = Model::new();
+    model.porous.push(PorousRegion {
+        id: String::new(),
+        x0: 0.2,
+        y0: 0.2,
+        x1: 0.8,
+        y1: 0.8,
+        permeability: 1.0e-3,
+        inertial: 0.5,
+    });
+    model.validate().expect("valid porous region");
+    let text = model.to_json_pretty().expect("serialize");
+    let parsed = Model::parse_json(&text).expect("parse");
+    assert_eq!(parsed.porous, model.porous);
+
+    let mut zero = model.clone();
+    zero.porous[0].permeability = 0.0;
+    assert_eq!(
+        zero.validate().expect_err("zero permeability").code,
+        "porous/invalid"
+    );
+
+    let mut outside = model.clone();
+    outside.porous[0].x1 = 2.0;
+    assert_eq!(
+        outside.validate().expect_err("outside the domain").code,
+        "porous/invalid"
+    );
+
+    let mut negative = model.clone();
+    negative.porous[0].inertial = -1.0;
+    assert_eq!(
+        negative
+            .validate()
+            .expect_err("negative Forchheimer coefficient")
+            .code,
+        "porous/invalid"
+    );
+}
+
+#[test]
+fn porous_region_slows_a_pressure_driven_channel() {
+    let mut model = mesh_model(16, 16);
+    model.boundaries.left.kind = BoundaryKind::Periodic;
+    model.boundaries.right.kind = BoundaryKind::Periodic;
+    model.boundaries.bottom = Boundary::wall();
+    model.boundaries.top = Boundary::wall();
+    model.fluid.density = 1.0;
+    model.fluid.viscosity = 0.02;
+    model.pressure_gradient = Some([-0.02, 0.0]);
+    model.time.dt = 0.03;
+    model.time.steps = 200;
+    model.time.pressure_iterations = 30;
+
+    let free = solve(&model).expect("free channel solve");
+    let free_mean = mean_cell_speed(&free);
+    assert!(free_mean > 0.0);
+
+    model.porous.push(PorousRegion {
+        id: "filter".to_string(),
+        x0: 0.0,
+        y0: 0.0,
+        x1: 1.0,
+        y1: 1.0,
+        permeability: 1.0e-3,
+        inertial: 0.0,
+    });
+    let laden = solve(&model).expect("porous channel solve");
+    assert_finite(&laden.u, "u");
+    assert_finite(&laden.v, "v");
+    let laden_mean = mean_cell_speed(&laden);
+    assert!(
+        laden_mean < free_mean,
+        "porous mean speed {laden_mean} should be below the free channel {free_mean}"
+    );
+    assert_eq!(laden.report.porous.len(), 1);
+    let summary = &laden.report.porous[0];
+    assert_eq!(summary.id, "filter");
+    assert_eq!(summary.cells, 16 * 16);
+    assert!(summary.mean_speed.is_finite() && summary.mean_speed > 0.0);
+    assert!(summary.mean_drag > 0.0, "drag {}", summary.mean_drag);
+}
+
+#[test]
+fn porous_drag_rejects_a_step_it_cannot_resolve() {
+    let mut model = mesh_model(8, 8);
+    model.time.dt = 0.01;
+    model.porous.push(PorousRegion {
+        id: String::new(),
+        x0: 0.0,
+        y0: 0.0,
+        x1: 1.0,
+        y1: 1.0,
+        permeability: 1.0e-8,
+        inertial: 0.0,
+    });
+    assert_eq!(
+        solve(&model)
+            .expect_err("drag exceeds the explicit bound")
+            .code,
+        "solver/unstable"
     );
 }
 

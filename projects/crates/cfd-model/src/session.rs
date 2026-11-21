@@ -20,8 +20,8 @@ use crate::export::{
 };
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
-    MeshConfig, Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeScheme,
-    TimeSettings, Turbulence, TurbulenceModel,
+    MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, Side, ThermalConfig,
+    TimeScheme, TimeSettings, Turbulence, TurbulenceModel,
 };
 use crate::solver::{
     solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
@@ -142,6 +142,9 @@ pub struct CaseSummary {
     pub initial: Option<InitialField>,
     /// Solid obstacles in document order.
     pub obstacles: Vec<Obstacle>,
+    /// Porous regions in document order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub porous: Vec<PorousRegion>,
     /// Point monitors in document order.
     pub probes: Vec<Probe>,
     /// Optional passive scalar transport settings.
@@ -174,6 +177,7 @@ impl CaseSummary {
             boundaries: model.boundaries.clone(),
             initial: model.initial.clone(),
             obstacles: model.obstacles.clone(),
+            porous: model.porous.clone(),
             probes: model.probes.clone(),
             scalar: model.scalar.clone(),
             turbulence: model.turbulence.clone(),
@@ -481,6 +485,26 @@ impl OpenCfd {
     /// Returns the solid obstacles in document order.
     pub fn obstacle_list(&self) -> Vec<Obstacle> {
         self.model.obstacles.clone()
+    }
+
+    /// Appends a porous region and writes the document back.
+    ///
+    /// An empty id is replaced by `porous-N`, where `N` is the one-based
+    /// position in the region list.
+    pub fn porous_add(&mut self, region: PorousRegion) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            let id = if region.id().is_empty() {
+                format!("porous-{}", model.porous.len() + 1)
+            } else {
+                region.id().to_string()
+            };
+            model.porous.push(region.with_id(id));
+        })
+    }
+
+    /// Returns the porous regions in document order.
+    pub fn porous_list(&self) -> Vec<PorousRegion> {
+        self.model.porous.clone()
     }
 
     /// Appends a point monitor and writes the document back.

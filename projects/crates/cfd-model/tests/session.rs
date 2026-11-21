@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Model, OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
+    InletProfile, Model, OpenCfd, OpenCfdOptions, PorousRegion, Probe, Side, SolveOptions,
+    TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -638,6 +639,68 @@ fn session_pressure_gradient_round_trips_through_cli() {
     assert_eq!(summary.pressure_gradient, None);
     let stored = Model::load(&path).expect("reload");
     assert_eq!(stored.pressure_gradient, None);
+}
+
+#[test]
+fn session_porous_region_round_trips_through_cli() {
+    let directory = temporary_dir("porous");
+    let path = directory.join("porous.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .porous_add(PorousRegion {
+            id: String::new(),
+            x0: 0.2,
+            y0: 0.2,
+            x1: 0.8,
+            y1: 0.8,
+            permeability: 1.0e-3,
+            inertial: 0.5,
+        })
+        .expect("porous add");
+    assert_eq!(summary.porous.len(), 1);
+    assert_eq!(summary.porous[0].id, "porous-1");
+    assert_eq!(session.porous_list().len(), 1);
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.porous, summary.porous);
+
+    let cli_path = directory.join("cli-porous.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "porous",
+        "add",
+        &cli,
+        "--x0",
+        "0.2",
+        "--y0",
+        "0.2",
+        "--x1",
+        "0.8",
+        "--y1",
+        "0.8",
+        "--permeability",
+        "0.001",
+        "--inertial",
+        "0.5",
+        "--id",
+        "filter",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd porous add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(cli_stored.porous.len(), 1);
+    assert_eq!(cli_stored.porous[0].id, "filter");
+    assert_eq!(cli_stored.porous[0].permeability, 1.0e-3);
+    assert_eq!(cli_stored.porous[0].inertial, 0.5);
+
+    let listed = run_cli(&["porous", "list", &cli]);
+    assert!(listed.status.success());
+    let listing = String::from_utf8_lossy(&listed.stdout);
+    assert!(listing.contains("\"filter\""), "listing {listing}");
 }
 
 #[test]

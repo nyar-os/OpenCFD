@@ -202,13 +202,39 @@ export interface Buoyancy {
     readonly gravity: readonly [number, number];
 }
 
-/** Surface heat-transfer summary of one obstacle. */export interface ObstacleNusselt {
+/** Surface heat-transfer summary of one obstacle. */
+export interface ObstacleNusselt {
     readonly id: string;
     readonly kind: 'rect' | 'circle';
     readonly meanHeatFlux: number;
     readonly wallTemperature: number;
     readonly referenceTemperature: number;
     readonly nusselt: number;
+}
+
+/** Isotropic porous region with a Darcy–Forchheimer resistance. */
+export interface PorousRegion {
+    /** Stable identifier; omitted means `porous-N` in document order. */
+    readonly id?: string;
+    readonly x0: number;
+    readonly y0: number;
+    readonly x1: number;
+    readonly y1: number;
+    /** Permeability K in m²; must be positive. */
+    readonly permeability: number;
+    /** Forchheimer inertial coefficient C_F; non-negative, `0` by default. */
+    readonly inertial: number;
+}
+
+/** Per-region porous resistance summary. */
+export interface PorousSummary {
+    readonly id: string;
+    /** Number of fluid cells owned by the region. */
+    readonly cells: number;
+    /** Mean cell speed inside the region in m/s. */
+    readonly meanSpeed: number;
+    /** Mean drag acceleration magnitude inside the region in m/s². */
+    readonly meanDrag: number;
 }
 
 /** Snapshot of one open case document. */
@@ -232,6 +258,8 @@ export interface CaseSummary {
     readonly initial?: InitialField;
     /** Solid obstacles in document order. */
     readonly obstacles: readonly Obstacle[];
+    /** Porous regions in document order. */
+    readonly porous: readonly PorousRegion[];
     /** Point monitors in document order. */
     readonly probes: readonly Probe[];
     /** Passive scalar settings, when configured. */
@@ -432,6 +460,8 @@ export interface SolveReport {
     readonly pressureResidual: number;
     readonly pressureResidualInitial: number;
     readonly forces: readonly ObstacleForce[];
+    /** Porous resistance summary in document order. */
+    readonly porous: readonly PorousSummary[];
     /** Point monitor time series in document order. */
     readonly probes: readonly ProbeSeries[];
     /** Wall shear and friction summary of every wall side. */
