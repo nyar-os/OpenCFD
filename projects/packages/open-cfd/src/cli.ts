@@ -33,6 +33,9 @@ usage:
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   open-cfd obstacle list <file>
+  open-cfd probe add <file> --x <m> --y <m> [--id <name>]
+  open-cfd probe list <file>
+  open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   open-cfd convection set <file> --scheme upwind|central|quick
   open-cfd validate <file>
@@ -363,6 +366,50 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const added = summary.obstacles[summary.obstacles.length - 1];
             console.log(
                 `added ${added.kind} obstacle ${added.id ?? ''}; ${summary.obstacles.length} total`,
+            );
+            return 0;
+        }
+        case 'probe': {
+            const action = rest[0];
+            if (action === 'list') {
+                const parsed = parseArguments(rest.slice(1), []);
+                const file = positional(parsed, 0, 'probe list <file>');
+                const document = await session.open(file);
+                console.log(JSON.stringify(document.listProbes(), null, 2));
+                return 0;
+            }
+            if (action === 'clear') {
+                const parsed = parseArguments(rest.slice(1), []);
+                const file = positional(parsed, 0, 'probe clear <file>');
+                const document = await session.open(file);
+                document.clearProbes();
+                console.log('cleared all probes');
+                return 0;
+            }
+            if (action !== 'add') {
+                throw cliError(
+                    'cli/unknown-command',
+                    action === undefined
+                        ? '`probe` needs the `add`, `list` or `clear` subcommand'
+                        : `\`probe\` subcommand \`${action}\` does not exist; use add, list or clear`,
+                );
+            }
+            const parsed = parseArguments(rest.slice(1), ['--id', '--x', '--y']);
+            const file = positional(
+                parsed,
+                0,
+                'probe add <file> --x <m> --y <m> [--id <name>]',
+            );
+            const id = parsed.options['--id'];
+            const document = await session.open(file);
+            const summary = document.addProbe({
+                ...(id === undefined ? {} : { id }),
+                x: numberOption(parsed, '--x'),
+                y: numberOption(parsed, '--y'),
+            });
+            const added = summary.probes[summary.probes.length - 1];
+            console.log(
+                `added probe ${added.id ?? ''} at (${added.x}, ${added.y}) m; ${summary.probes.length} total`,
             );
             return 0;
         }

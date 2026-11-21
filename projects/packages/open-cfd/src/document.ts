@@ -19,6 +19,7 @@ import type {
     FluidSetRequest,
     MeshSetRequest,
     Obstacle,
+    Probe,
     SaveReport,
     ScalarSetRequest,
     SolveOptions,
@@ -92,6 +93,29 @@ export class CfdCase {
     listObstacles(): readonly Obstacle[] {
         this.assertOpen();
         return service.obstacleList(this.handle);
+    }
+
+    /** Point monitors in document order. */
+    get probes(): readonly Probe[] {
+        return this.state.probes;
+    }
+
+    /** Appends one point monitor and writes the document back. */
+    addProbe(probe: Probe): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.probeAdd(this.handle, probe));
+    }
+
+    /** Returns the point monitors in document order. */
+    listProbes(): readonly Probe[] {
+        this.assertOpen();
+        return service.probeList(this.handle);
+    }
+
+    /** Removes every point monitor and writes the document back. */
+    clearProbes(): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.probeClear(this.handle));
     }
 
     /** Selects the convective discretisation and writes the document back. */

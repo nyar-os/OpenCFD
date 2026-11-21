@@ -24,6 +24,9 @@ export interface NativeBinding {
     boundary_set(handle: number, side: string, kind: string, u?: number, v?: number): string;
     obstacle_add(handle: number, requestJson: string): string;
     obstacle_list(handle: number): string;
+    probe_add(handle: number, requestJson: string): string;
+    probe_list(handle: number): string;
+    probe_clear(handle: number): string;
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
     convection_set(handle: number, scheme: string): string;
     validate(handle: number): string;

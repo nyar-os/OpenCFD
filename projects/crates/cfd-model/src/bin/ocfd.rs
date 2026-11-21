@@ -5,7 +5,7 @@ use std::process;
 
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
-    Obstacle, OpenCfd, OpenCfdOptions, Side, SideThermal, SolveOptions, ThermalConfig,
+    Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal, SolveOptions, ThermalConfig,
     TurbulenceModel,
 };
 
@@ -21,6 +21,9 @@ Usage:
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
+  ocfd probe add <file> --x <m> --y <m> [--id <name>]
+  ocfd probe list <file>
+  ocfd probe clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   ocfd convection set <file> --scheme upwind|central|quick
   ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
@@ -74,6 +77,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "time" => subcommand(args, "set", "time"),
         "boundary" => subcommand(args, "set", "boundary"),
         "obstacle" => obstacle_command(&args[1..]),
+        "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
         "convection" => convection_command(&args[1..]),
         "turbulence" => turbulence_command(&args[1..]),
@@ -304,6 +308,67 @@ fn obstacle_list(args: &[String]) -> Result<i32, CfdError> {
         )
     })?;
     println!("{json}");
+    Ok(0)
+}
+
+fn probe_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("add") => probe_add(&args[1..]),
+        Some("list") => probe_list(&args[1..]),
+        Some("clear") => probe_clear(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`probe` has no subcommand `{other}`; only add, list and clear are supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`probe` requires a subcommand; only add, list and clear are supported",
+        )),
+    }
+}
+
+fn probe_add(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--id", "--x", "--y"], &[])?;
+    let file = positional(&parsed, 0, "probe add <file> --x <m> --y <m> [--id <name>]")?;
+    let probe = Probe {
+        id: parsed.options.get("--id").cloned().unwrap_or_default(),
+        x: required_number(&parsed, "--x")?,
+        y: required_number(&parsed, "--y")?,
+    };
+    let mut session = open_session(file)?;
+    let summary = session.probe_add(probe)?;
+    let added = summary.probes.last().expect("probe was just appended");
+    println!(
+        "added probe `{}` at ({}, {}) m; {} total",
+        added.id(),
+        added.x,
+        added.y,
+        summary.probes.len()
+    );
+    Ok(0)
+}
+
+fn probe_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "probe list <file>")?;
+    let session = open_session(file)?;
+    let probes = session.probe_list();
+    let json = serde_json::to_string_pretty(&probes).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize probes: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn probe_clear(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "probe clear <file>")?;
+    let mut session = open_session(file)?;
+    session.probe_clear()?;
+    println!("cleared all probes");
     Ok(0)
 }
 

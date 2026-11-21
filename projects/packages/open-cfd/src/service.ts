@@ -20,6 +20,7 @@ import type {
     MeshSetRequest,
     Obstacle,
     OpenCfdCapabilities,
+    Probe,
     SaveReport,
     ScalarSetRequest,
     SolveOptions,
@@ -146,6 +147,23 @@ export function obstacleAdd(handle: number, obstacle: Obstacle): CaseSummary {
 /** Returns the solid obstacles in document order. */
 export function obstacleList(handle: number): readonly Obstacle[] {
     return decode<readonly Obstacle[]>(() => binding('obstacle.list').obstacle_list(handle));
+}
+
+/** Appends one point monitor and writes the document back. */
+export function probeAdd(handle: number, probe: Probe): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('probe.add').probe_add(handle, JSON.stringify(probe)),
+    );
+}
+
+/** Returns the point monitors in document order. */
+export function probeList(handle: number): readonly Probe[] {
+    return decode<readonly Probe[]>(() => binding('probe.list').probe_list(handle));
+}
+
+/** Removes every point monitor and writes the document back. */
+export function probeClear(handle: number): CaseSummary {
+    return decode<CaseSummary>(() => binding('probe.clear').probe_clear(handle));
 }
 
 /** Configures passive scalar transport and writes the document back. */

@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, Obstacle, OpenCfd,
-    OpenCfdOptions, Side, SolveOptions,
+    OpenCfdOptions, Probe, Side, SolveOptions,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -240,6 +240,36 @@ fn obstacle_list(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(obstacles))
 }
 
+/// Appends one point monitor from a JSON request and returns the summary.
+#[function]
+fn probe_add(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let request = text(&ctx, 1)?;
+    let probe = serde_json::from_str::<Probe>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the probe request: {error}"
+        ))
+    })?;
+    let summary = with_session(handle, |session| session.probe_add(probe))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Returns the point monitors of one session document as a JSON array.
+#[function]
+fn probe_list(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let probes = with_session(handle, |session| Ok(session.probe_list()))?;
+    respond(&ctx, &json!(probes))
+}
+
+/// Removes every point monitor and returns the summary.
+#[function]
+fn probe_clear(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let summary = with_session(handle, |session| session.probe_clear())?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Configures passive scalar transport and returns the summary.
 #[function]
 fn scalar_set(ctx: CallContext) -> Result<JsValue> {
@@ -321,6 +351,9 @@ register_module![
     boundary_set,
     obstacle_add,
     obstacle_list,
+    probe_add,
+    probe_list,
+    probe_clear,
     scalar_set,
     convection_set,
     validate,

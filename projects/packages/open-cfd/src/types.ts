@@ -91,6 +91,14 @@ export interface CircleObstacle {
 /** Solid obstacle accepted by `CfdCase.addObstacle()`. */
 export type Obstacle = RectObstacle | CircleObstacle;
 
+/** Point monitor sampled during a solve. */
+export interface Probe {
+    /** Stable identifier; omitted means `probe-N` in document order. */
+    readonly id?: string;
+    readonly x: number;
+    readonly y: number;
+}
+
 /** Passive scalar (temperature) transport settings. */
 export interface ScalarConfig {
     /** Constant diffusivity in m²/s; zero means pure advection. */
@@ -171,6 +179,8 @@ export interface CaseSummary {
     readonly initial?: InitialField;
     /** Solid obstacles in document order. */
     readonly obstacles: readonly Obstacle[];
+    /** Point monitors in document order. */
+    readonly probes: readonly Probe[];
     /** Passive scalar settings, when configured. */
     readonly scalar?: ScalarConfig;
     /** Eddy-viscosity turbulence settings, when configured. */
@@ -223,6 +233,42 @@ export interface ObstacleForce {
     readonly history: readonly ForceSample[];
 }
 
+/** One sampled probe reading. */
+export interface ProbeSample {
+    readonly step: number;
+    /** Physical time of the sample in seconds. */
+    readonly time: number;
+    readonly u: number;
+    readonly v: number;
+    /** Speed in m/s. */
+    readonly speed: number;
+    /** Cell-centred gauge pressure in Pa. */
+    readonly pressure: number;
+    /** Temperature in K, or `null` when no scalar is configured. */
+    readonly temperature: number | null;
+}
+
+/** Time series recorded at one point monitor. */
+export interface ProbeSeries {
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    /** Nearest cell `[i, j]`. */
+    readonly cell: readonly [number, number];
+    readonly history: readonly ProbeSample[];
+}
+
+/** Wall shear and friction summary of one wall side. */
+export interface WallShear {
+    readonly side: Side;
+    /** Length-averaged wall shear stress in Pa. */
+    readonly meanShear: number;
+    /** Largest absolute wall shear stress along the side in Pa. */
+    readonly maxShear: number;
+    /** Friction coefficient `meanShear / (0.5 ρ U²)`. */
+    readonly frictionCoefficient: number;
+}
+
 /** Solve-time overrides accepted by `CfdCase.solve()`. */
 export interface SolveOptions {
     /** Steps to advance; overrides `time.steps`. */
@@ -267,6 +313,10 @@ export interface SolveReport {
     readonly pressureResidual: number;
     readonly pressureResidualInitial: number;
     readonly forces: readonly ObstacleForce[];
+    /** Point monitor time series in document order. */
+    readonly probes: readonly ProbeSeries[];
+    /** Wall shear and friction summary of every wall side. */
+    readonly wallShear: readonly WallShear[];
     /** Convection scheme used by the run. */
     readonly convection: string;
 }

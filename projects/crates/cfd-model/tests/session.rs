@@ -4,7 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions, Side,
+    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions,
+    Probe, Side,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -82,6 +83,16 @@ fn session_create_edit_solve_export_matches_cli() {
         .convection_set(ConvectionScheme::Quick)
         .expect("convection set");
     assert_eq!(summary.convection.as_str(), "quick");
+    let summary = session
+        .probe_add(Probe {
+            id: String::new(),
+            x: 0.5,
+            y: 0.5,
+        })
+        .expect("probe add");
+    assert_eq!(summary.probes.len(), 1);
+    assert_eq!(summary.probes[0].id, "probe-1");
+    assert_eq!(session.probe_list().len(), 1);
 
     let stored = Model::load(&session_path).expect("load saved document");
     assert_eq!(stored.mesh.nx, 12);
@@ -94,6 +105,10 @@ fn session_create_edit_solve_export_matches_cli() {
     assert!(report.max_velocity > 0.0);
     assert_eq!(report.steps, 5);
     assert_eq!(report.convection, "quick");
+    assert_eq!(report.probes.len(), 1);
+    assert_eq!(report.probes[0].id, "probe-1");
+    assert_eq!(report.probes[0].history.len(), 5);
+    assert_eq!(report.wall_shear.len(), 4);
 
     let csv = session
         .export(ExportFormat::Csv, &directory.join("csv"))
@@ -160,6 +175,7 @@ fn session_create_edit_solve_export_matches_cli() {
             "--v",
             "0",
         ],
+        vec!["probe", "add", cli.as_str(), "--x", "0.5", "--y", "0.5"],
     ] {
         let output = run_cli(&args);
         assert!(
@@ -222,6 +238,14 @@ fn session_create_edit_solve_export_matches_cli() {
     );
     let cli_svg = fs::read_to_string(&cli_svg_path).expect("CLI svg");
     assert!(cli_svg.contains("OpenCFD streamFunction field (m²/s)"));
+
+    let output = run_cli(&["probe", "list", &text(&cli_path)]);
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("probe-1"));
+
+    let summary = session.probe_clear().expect("probe clear");
+    assert!(summary.probes.is_empty());
+    assert!(session.probe_list().is_empty());
 }
 
 #[test]
