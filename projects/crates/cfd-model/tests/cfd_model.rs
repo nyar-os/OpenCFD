@@ -5,10 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
-    export_vtk, solve, solve_pressure, solve_with, stream_function, transport_scalar, vorticity,
-    Boundaries, Boundary, BoundaryKind, ConvectionScheme, ExportField, InitialField, InletProfile,
-    Mesh, MeshConfig, Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution,
-    SolveOptions, CAPABILITIES_JSON, VERSION,
+    export_vtk, solve, solve_pressure, solve_with, solve_with_checkpoint, stream_function,
+    transport_scalar, vorticity, Boundaries, Boundary, BoundaryKind, Checkpoint, ConvectionScheme,
+    ExportField, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings,
+    Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -377,6 +377,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"contours\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"periodic\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"pressureDriven\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"restart\": \"supported\""));
 }
 
 #[test]
@@ -1608,5 +1609,77 @@ fn pressure_gradient_round_trips_and_rejects_non_finite_values() {
     assert_eq!(
         invalid.validate().expect_err("non-finite gradient").code,
         "pressure/invalid"
+    );
+}
+
+#[test]
+fn checkpoint_restart_reproduces_a_continuous_run() {
+    let mut model = mesh_model(12, 8);
+    model.time.steps = 5;
+    model.time.dt = 0.01;
+    model.time.pressure_iterations = 30;
+
+    let continuous = solve_with(
+        &model,
+        &SolveOptions {
+            steps: Some(10),
+            ..SolveOptions::default()
+        },
+    )
+    .expect("continuous solve");
+    let first = solve_with(
+        &model,
+        &SolveOptions {
+            steps: Some(5),
+            ..SolveOptions::default()
+        },
+    )
+    .expect("first half");
+    let checkpoint = Checkpoint::capture(&model, &first);
+    let directory = temporary_dir("checkpoint");
+    let path = directory.join("state.json");
+    checkpoint.save(&path).expect("save checkpoint");
+    let loaded = Checkpoint::load(&path).expect("load checkpoint");
+    assert_eq!(loaded.mesh, checkpoint.mesh);
+    assert_eq!(loaded.steps, 5);
+    assert!((loaded.time - checkpoint.time).abs() < 1e-12);
+    for (a, b) in loaded.u.iter().zip(checkpoint.u.iter()) {
+        assert!((a - b).abs() < 1e-15, "checkpoint u lost precision");
+    }
+
+    let resumed = solve_with_checkpoint(
+        &model,
+        &SolveOptions {
+            steps: Some(5),
+            ..SolveOptions::default()
+        },
+        Some(&loaded),
+    )
+    .expect("resume");
+    assert_eq!(resumed.report.steps, 10);
+    assert!((resumed.report.time - continuous.report.time).abs() < 1e-12);
+    for (a, b) in resumed.u.iter().zip(continuous.u.iter()) {
+        assert!((a - b).abs() < 1e-12, "u differs after restart");
+    }
+    for (a, b) in resumed.v.iter().zip(continuous.v.iter()) {
+        assert!((a - b).abs() < 1e-12, "v differs after restart");
+    }
+    for (a, b) in resumed.p.iter().zip(continuous.p.iter()) {
+        assert!((a - b).abs() < 1e-12, "p differs after restart");
+    }
+}
+
+#[test]
+fn checkpoint_rejects_a_different_mesh() {
+    let model = mesh_model(12, 8);
+    let solution = solve(&model).expect("solve");
+    let checkpoint = Checkpoint::capture(&model, &solution);
+    let other = mesh_model(10, 8);
+    assert_eq!(
+        checkpoint
+            .validate_against(&other)
+            .expect_err("mesh mismatch")
+            .code,
+        "checkpoint/mismatch"
     );
 }

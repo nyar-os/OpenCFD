@@ -14,7 +14,8 @@ parabolic/power-law inlet profiles), uniform pressure gradients for
 pressure-driven flow, obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
-streamlines, residual history CSV or force history CSV. The solve report also
+streamlines, residual history CSV or force history CSV. `solve` can resume from
+a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
 (`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
@@ -47,7 +48,7 @@ ocfd convection set <file> --scheme upwind|central|quick
 ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
-ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
+ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
 ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
 ```
 
@@ -102,6 +103,12 @@ rename. Confirm the path before running them.
   is given and reports `converged`, `steadyState`, `residual`,
   `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,
   `massBalance` and `forces` (with `cm` and the resolved reference quantities).
+  `--restart` resumes from an `open-cfd-checkpoint` JSON document and
+  `--checkpoint` writes the final state; resumed reports keep cumulative
+  `steps` and `time`. The mesh and scalar configuration must match or the
+  command fails with `checkpoint/mismatch`.
+- Do not hand-edit checkpoints: they are written by the solver and validated on
+  load (`checkpoint/invalid` for a malformed format, version, shape or values).
   It prints the JSON report on stdout and a one-line summary on stderr.
 
 ## Hard rules

@@ -35,7 +35,14 @@ export interface NativeBinding {
     pressure_gradient_set(handle: number, dpdx: number, dpdy: number): string;
     reference_set(handle: number, velocity?: number, area?: number, length?: number): string;
     validate(handle: number): string;
-    solve(handle: number, steps?: number, tolerance?: number, checkEvery?: number): string;
+    solve(
+        handle: number,
+        steps?: number,
+        tolerance?: number,
+        checkEvery?: number,
+        restart?: string,
+        checkpoint?: string,
+    ): string;
     export(handle: number, format: string, out: string, field?: string): string;
     close(handle: number): boolean;
 }

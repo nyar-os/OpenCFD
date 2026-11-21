@@ -11,7 +11,7 @@
 #![deny(missing_docs)]
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -365,7 +365,11 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
         tolerance: optional_number(&ctx, 2)?,
         check_every: optional_unsigned(&ctx, 3)?,
     };
-    let report = with_session(handle, |session| session.solve_with(&options))?;
+    let restart = optional_text(&ctx, 4)?.map(PathBuf::from);
+    let checkpoint = optional_text(&ctx, 5)?.map(PathBuf::from);
+    let report = with_session(handle, |session| {
+        session.solve_with_checkpoint(&options, restart.as_deref(), checkpoint.as_deref())
+    })?;
     respond(&ctx, &json!(report))
 }
 

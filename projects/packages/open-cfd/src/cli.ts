@@ -46,7 +46,7 @@ usage:
   open-cfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
-  open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
+  open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
@@ -644,17 +644,21 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 '--steps',
                 '--tolerance',
                 '--check-every',
+                '--restart',
+                '--checkpoint',
             ]);
             const file = positional(
                 parsed,
                 0,
-                'solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]',
+                'solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]',
             );
             const steps = optionalInteger(parsed, '--steps');
             const tolerance = optionalNumber(parsed, '--tolerance');
             const checkEvery = optionalInteger(parsed, '--check-every');
+            const restart = parsed.options['--restart'];
+            const checkpoint = parsed.options['--checkpoint'];
             const document = await session.open(file);
-            const report = document.solve({ steps, tolerance, checkEvery });
+            const report = document.solve({ steps, tolerance, checkEvery, restart, checkpoint });
             const json = JSON.stringify(report, null, 2);
             const out = parsed.options['--out'];
             if (out !== undefined) {

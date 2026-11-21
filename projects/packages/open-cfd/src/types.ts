@@ -354,6 +354,10 @@ export interface SolveOptions {
     readonly tolerance?: number;
     /** Sample and test the steady-state residual every this many steps. */
     readonly checkEvery?: number;
+    /** Checkpoint file to resume from before advancing. */
+    readonly restart?: string;
+    /** Path that receives the final state as a restart checkpoint. */
+    readonly checkpoint?: string;
 }
 
 /** Report returned by `solve()`. */

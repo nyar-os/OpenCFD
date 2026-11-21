@@ -39,7 +39,7 @@ Usage:
        [--bottom-heat-flux <W/m2>] [--obstacle-temperature <K>] [--obstacle-heat-flux <W/m2>]
        [--reference-temperature <K>]
   ocfd validate <file>
-  ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
+  ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction|speed] --out <dir|file>
   ocfd capabilities
   ocfd --help
@@ -766,21 +766,31 @@ fn validate(args: &[String]) -> Result<i32, CfdError> {
 fn solve_command(args: &[String]) -> Result<i32, CfdError> {
     let parsed = parse(
         args,
-        &["--out", "--steps", "--tolerance", "--check-every"],
+        &[
+            "--out",
+            "--steps",
+            "--tolerance",
+            "--check-every",
+            "--restart",
+            "--checkpoint",
+        ],
         &[],
     )?;
     let file = positional(
         &parsed,
         0,
-        "solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]",
+        "solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]",
     )?;
     let options = SolveOptions {
         steps: optional_usize(&parsed, "--steps")?,
         tolerance: number(&parsed, "--tolerance")?,
         check_every: optional_usize(&parsed, "--check-every")?,
     };
+    let restart = parsed.options.get("--restart").map(PathBuf::from);
+    let checkpoint = parsed.options.get("--checkpoint").map(PathBuf::from);
     let session = open_session(file)?;
-    let report = session.solve_with(&options)?;
+    let report =
+        session.solve_with_checkpoint(&options, restart.as_deref(), checkpoint.as_deref())?;
     eprintln!(
         "solve summary: {} steps, t={} s, termination={}, steadyState={}, residual={:.6e}, continuity={:.6e}, massBalance={:.6e} kg/s (relative {:.6e})",
         report.steps,

@@ -276,6 +276,8 @@ export function solve(handle: number, options?: SolveOptions): SolveReport {
                   options.steps,
                   options.tolerance,
                   options.checkEvery,
+                  options.restart,
+                  options.checkpoint,
               ),
     );
 }

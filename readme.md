@@ -47,12 +47,13 @@ await cfd.dispose();
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
 - Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- `solve(options?)` accepts `steps`, `tolerance`, `checkEvery`, `restart` (checkpoint path to resume) and `checkpoint` (path that receives the final state). Resumed reports keep cumulative `steps`/`time`.
+- `setBoundary` accepts `wall`, `inlet`, `outlet`, `slip` and `periodic`; `pressure` sets the outlet gauge pressure. Periodic sides must be paired. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setPressureGradient({dpdx, dpdy})` imposes a uniform pressure gradient in Pa/m as the momentum body force `-∇p/ρ`; setting both components to zero removes it. It drives pressure-driven channel flow, and combined with paired periodic sides it forms a fully developed periodic channel.
-- `setBoundary` accepts `wall`, `inlet`, `outlet` and `slip`; `pressure` sets the outlet gauge pressure. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setTimeScheme` selects `euler` (default) or `rk2` for the explicit momentum step.
 - `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory` (with per-sample `continuity`), `terminationReason`, `timeScheme`, `massBalance`, `forces` (with `cm` and resolved reference quantities), `probes`, `wallShear`, and the vorticity and stream-function extremes.
 - Errors are always `OpenCFDError`; `code` is the contract (for example `mesh/invalid`, `obstacle/invalid`, `solver/unstable`). A missing native addon reports `capability/not-implemented`.
-- `export(format, target, field?)` writes CSV, legacy ASCII VTK, an SVG preview, a streamline SVG, a residual history CSV or a force history CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals` and `forces`. A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
+- `export(format, target, field?)` writes CSV, legacy ASCII VTK, an SVG preview, contour SVG, a streamline SVG, a residual history CSV or a force history CSV; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`) and is ignored by `streamlines`, `residuals` and `forces`. A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
 
 Build the native addon and SDK:
 
@@ -144,7 +145,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd turbulence set <file> --model none\|constant\|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]` | Select the eddy-viscosity model; `none` removes the turbulence section |
 | `ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] ...` | Configure energy-equation boundaries, volumetric source and reference temperature; requires scalar transport |
 | `ocfd validate <file>` | Structural validation; on failure prints a JSON error and returns exit code `1` |
-| `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]` | Solve and print an `open-cfd-report` JSON on stdout and a convergence/mass-balance summary on stderr; `--tolerance` enables steady-state early stopping and `--check-every` controls the sampling interval |
+| `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]` | Solve and print an `open-cfd-report` JSON on stdout and a convergence/mass-balance summary on stderr; `--tolerance` enables steady-state early stopping, `--check-every` controls the sampling interval, `--restart` resumes from a checkpoint and `--checkpoint` writes the final state |
 | `ocfd export <file> --format csv --out <dir\|file.csv>` | After solving, write cell-centred `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` |
 | `ocfd export <file> --format vtk --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data |
 | `ocfd export <file> --format svg [--field pressure\|temperature\|vorticity\|streamFunction\|speed] --out <dir\|file.svg>` | After solving, write a self-contained SVG preview of one cell-centred field |
@@ -158,6 +159,10 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 Exit codes: `0` success, `1` input, validation or IO error, `2` capability not implemented.
 
 An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution.vtk`, `solution-<field>.svg`, `solution-<field>-contours.svg`, `solution-streamlines.svg`, `residuals.csv` or `forces.csv` is written inside it. CSV, VTK, all SVG outputs and both history CSVs are all written atomically through a temporary file plus rename.
+
+### Restart checkpoints
+
+`ocfd solve --checkpoint state.json` writes an `open-cfd-checkpoint` JSON document containing the mesh size, cumulative `steps`, `time`, last `dt`, the staggered `u`/`v` faces, cell pressure and the optional scalar field. `--restart state.json` validates that the mesh and scalar configuration match the case, restores the state and continues the step and sample numbering; the report's `steps` and `time` are then cumulative totals since `t = 0`. A chain of checkpointed runs reproduces a single continuous run. Checkpoints are rejected with `checkpoint/invalid` when the format, version, array sizes or values are malformed, and with `checkpoint/mismatch` when the case mesh or scalar configuration differs.
 
 ## The `.ocfd` document format
 
@@ -281,6 +286,7 @@ Boundary semantics:
 | `.ocfd` JSON read and write | ✅ Supported |
 | CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported |
 | Residual/continuity and obstacle force history CSV export (`history`) | ✅ Supported |
+| Restart checkpoints read/write (`restart`) | ✅ Supported |
 | Compressible flow (`compressible`) | ❌ Not implemented |
 | Three-dimensional flow (`threeD`) | ❌ Not implemented |
 | External format import and export such as Abaqus `.inp` and OpenFOAM | ❌ Not implemented |
@@ -341,7 +347,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 23. **Contours**: exporting `speed` writes `solution-speed-contours.svg` with the field/unit title, filled-band polygon elements, marching-squares iso-lines and the legend text; a named `.svg` target is used verbatim and temperature contours without a scalar field fail with `export/no-field`.
 24. **Adaptive time step**: a lid-driven cavity with `dt = 0.05 s`, target CFL 0.5 and `h = 0.05 m` reduces every step to about 0.025 s, reports `adaptive = true` and `time = averageDt × steps`, and rejects `targetCfl > 1` with `time/invalid`.
 25. **Periodic sides**: a single periodic side without its opposite pair is rejected with `boundary/invalid`; `apply_velocity_boundaries` copies the opposite boundary face; a periodic channel keeps a streamwise initial flow, wraps both boundary faces exactly and reports zero inflow, outflow and net mass balance because periodic sides are excluded.
-26. **Pressure-driven flow**: a fully periodic inviscid domain with `pressureGradient = [1, 0]` accelerates uniformly to `u = G·t/ρ` and keeps `v = 0`; a periodic channel with no-slip walls driven by a negative x gradient develops a symmetric positive parabolic-like profile with zero net boundary mass flow; a non-finite gradient is rejected with `pressure/invalid`.
+27. **Restart checkpoints**: a five-step solve saved to a checkpoint and resumed for five more steps matches a continuous ten-step solve field-for-field, reports cumulative `steps = 10`, and a checkpoint captured on a 12×8 mesh is rejected with `checkpoint/mismatch` on a 10×8 case; the CLI `solve --checkpoint` / `--restart` pair writes and chains checkpoints.
 
 `projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK/SVG/streamline/residual/force export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation. It also round-trips slip walls, outlet pressure, reference quantities, inlet profiles, the time scheme and adaptive time settings through both the session and CLI paths.
 

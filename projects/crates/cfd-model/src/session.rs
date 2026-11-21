@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
+use crate::checkpoint::Checkpoint;
 use crate::export::{
     export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
     export_vtk, ExportField,
@@ -22,7 +23,9 @@ use crate::model::{
     Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeScheme, TimeSettings,
     Turbulence, TurbulenceModel,
 };
-use crate::solver::{solve, solve_with, Report, SolveOptions};
+use crate::solver::{
+    solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
+};
 use crate::{CfdError, CAPABILITIES_JSON};
 
 /// Exchange formats supported by [`OpenCfd::export`].
@@ -567,6 +570,22 @@ impl OpenCfd {
     /// Solves with solve-time overrides and returns the report.
     pub fn solve_with(&self, options: &SolveOptions) -> Result<Report, CfdError> {
         Ok(solve_with(&self.model, options)?.report)
+    }
+
+    /// Solves, optionally resuming from `restart`, and optionally writes the
+    /// final state to `checkpoint`.
+    pub fn solve_with_checkpoint(
+        &self,
+        options: &SolveOptions,
+        restart: Option<&Path>,
+        checkpoint: Option<&Path>,
+    ) -> Result<Report, CfdError> {
+        let state = restart.map(Checkpoint::load).transpose()?;
+        let solution = solve_resuming(&self.model, options, state.as_ref())?;
+        if let Some(path) = checkpoint {
+            Checkpoint::capture(&self.model, &solution).save(path)?;
+        }
+        Ok(solution.report)
     }
 
     /// Solves the current document and writes a CSV, VTK, contour or pressure

@@ -1,6 +1,7 @@
 use boost_check::{CheckReport, Issue};
 use serde::{Deserialize, Serialize};
 
+use crate::checkpoint::Checkpoint;
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
@@ -218,7 +219,8 @@ pub struct Report {
     pub format: String,
     /// Report version; always [`REPORT_VERSION`].
     pub version: u32,
-    /// Number of time steps that were actually advanced.
+    /// Number of time steps advanced since `t = 0`, including steps restored
+    /// from a checkpoint.
     pub steps: usize,
     /// Time step of the last advanced step (s).
     pub dt: f64,
@@ -234,7 +236,8 @@ pub struct Report {
     /// Largest time step used (s).
     #[serde(default)]
     pub max_dt: f64,
-    /// Simulated physical time, the sum of the advanced time steps (s).
+    /// Simulated physical time since `t = 0`, including time restored from a
+    /// checkpoint (s).
     pub time: f64,
     /// Maximum velocity magnitude on all faces (m/s).
     pub max_velocity: f64,
@@ -421,26 +424,52 @@ pub fn solve(model: &Model) -> Result<Solution, CfdError> {
 /// run stops as soon as the L2 norm of the velocity change at a checked step is
 /// at most that tolerance.
 pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, CfdError> {
+    solve_with_checkpoint(model, options, None)
+}
+
+/// Solves a case, optionally resuming from a checkpoint and continuing its
+/// step and sample numbering.
+///
+/// When `checkpoint` is present the mesh and scalar configuration must match
+/// the case; the stored `u`, `v`, `p` and optional scalar replace the initial
+/// field, the first advanced step is `checkpoint.steps + 1`, and the reported
+/// `steps` and `time` are cumulative totals since `t = 0`.
+pub fn solve_with_checkpoint(
+    model: &Model,
+    options: &SolveOptions,
+    checkpoint: Option<&Checkpoint>,
+) -> Result<Solution, CfdError> {
     model.validate()?;
     options.validate()?;
     let mut mesh = Mesh::new(&model.mesh)?;
     mesh.apply_obstacles(&model.obstacles)?;
     let steps = options.steps.unwrap_or(model.time.steps);
 
-    let mut u = vec![0.0; mesh.u_count()];
-    let mut v = vec![0.0; mesh.v_count()];
-    let mut p = vec![0.0; mesh.pressure_count()];
-
-    if let Some(initial) = &model.initial {
-        u.fill(initial.velocity[0]);
-        v.fill(initial.velocity[1]);
-    }
-    mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
-
-    let mut temperature = model
-        .scalar
-        .as_ref()
-        .map(|config| initial_temperature(&mesh, config));
+    let (mut u, mut v, mut p, mut temperature) = if let Some(state) = checkpoint {
+        state.validate_against(model)?;
+        (
+            state.u.clone(),
+            state.v.clone(),
+            state.p.clone(),
+            state.temperature.clone(),
+        )
+    } else {
+        let mut u = vec![0.0; mesh.u_count()];
+        let mut v = vec![0.0; mesh.v_count()];
+        let p = vec![0.0; mesh.pressure_count()];
+        if let Some(initial) = &model.initial {
+            u.fill(initial.velocity[0]);
+            v.fill(initial.velocity[1]);
+        }
+        mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
+        let temperature = model
+            .scalar
+            .as_ref()
+            .map(|config| initial_temperature(&mesh, config));
+        (u, v, p, temperature)
+    };
+    let start_step = checkpoint.map_or(0, |state| state.steps);
+    let mut simulated_time = checkpoint.map_or(0.0, |state| state.time);
 
     let settings = PressureSettings {
         iterations: model.time.pressure_iterations,
@@ -467,20 +496,26 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
 
     let check_every = options.check_every.unwrap_or(1);
     let sample_stride = check_every.max(steps.div_ceil(MAX_HISTORY));
-    let mut completed = steps;
+    let mut advanced = steps;
     let mut residual = 0.0;
     let mut steady_state = false;
     let mut residual_history = Vec::new();
     let mut force_samples: Vec<Vec<ForceSample>> = vec![Vec::new(); model.obstacles.len()];
     let probe_cells = locate_probes(&mesh, model)?;
     let mut probe_samples: Vec<Vec<ProbeSample>> = vec![Vec::new(); model.probes.len()];
-    let mut simulated_time = 0.0;
     let mut dt_sum = 0.0;
     let mut dt_min = f64::INFINITY;
     let mut dt_max = 0.0_f64;
-    let mut last_dt = model.time.dt;
+    let mut last_dt = checkpoint.map_or(model.time.dt, |state| {
+        if state.dt > 0.0 {
+            state.dt
+        } else {
+            model.time.dt
+        }
+    });
 
-    for step in 1..=steps {
+    for local_step in 1..=steps {
+        let step = start_step + local_step;
         u_previous.copy_from_slice(&u);
         v_previous.copy_from_slice(&v);
         eddy = eddy_viscosity_field(&mesh, model, &u, &v);
@@ -577,7 +612,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         last_dt = dt;
 
         residual = velocity_residual(&u_previous, &v_previous, &u, &v);
-        let sample = step % sample_stride == 0 || step == steps;
+        let sample = local_step % sample_stride == 0 || local_step == steps;
         if sample {
             residual_history.push(ResidualSample {
                 step,
@@ -608,9 +643,9 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         }
 
         if let Some(tolerance) = options.tolerance {
-            if step % check_every == 0 && residual <= tolerance {
+            if local_step % check_every == 0 && residual <= tolerance {
                 steady_state = true;
-                completed = step;
+                advanced = local_step;
                 break;
             }
         }
@@ -634,11 +669,11 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
     let report = Report {
         format: REPORT_FORMAT.to_string(),
         version: REPORT_VERSION,
-        steps: completed,
+        steps: start_step + advanced,
         dt: last_dt,
         adaptive: model.time.adaptive,
-        average_dt: if completed > 0 {
-            dt_sum / completed as f64
+        average_dt: if advanced > 0 {
+            dt_sum / advanced as f64
         } else {
             last_dt
         },

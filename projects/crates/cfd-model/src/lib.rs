@@ -29,6 +29,7 @@
 
 #![deny(missing_docs)]
 
+mod checkpoint;
 mod error;
 mod export;
 mod fields;
@@ -37,6 +38,7 @@ mod model;
 mod session;
 mod solver;
 
+pub use crate::checkpoint::{Checkpoint, CheckpointMesh, CHECKPOINT_FORMAT, CHECKPOINT_VERSION};
 pub use crate::error::CfdError;
 pub use crate::export::{
     export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
@@ -54,10 +56,10 @@ pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
 pub use crate::solver::{
-    solve, solve_pressure, solve_with, transport_scalar, transport_thermal, ForceSample,
-    MassBalance, ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats, ProbeSample,
-    ProbeSeries, Report, ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT,
-    REPORT_VERSION,
+    solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar, transport_thermal,
+    ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats,
+    ProbeSample, ProbeSeries, Report, ResidualSample, Solution, SolveOptions, WallShear,
+    REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -100,6 +102,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "streamlines": "supported",
     "history": "supported",
     "contours": "supported",
+    "restart": "supported",
     "inp": "unsupported",
     "openfoam": "unsupported"
   }

@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, InletProfile, Model, OpenCfd,
-    OpenCfdOptions, Probe, Side, TimeScheme,
+    BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, InletProfile, Model,
+    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -615,4 +615,69 @@ fn session_pressure_gradient_round_trips_through_cli() {
     assert_eq!(summary.pressure_gradient, None);
     let stored = Model::load(&path).expect("reload");
     assert_eq!(stored.pressure_gradient, None);
+}
+
+#[test]
+fn session_and_cli_restart_from_checkpoints() {
+    let directory = temporary_dir("restart");
+    let path = directory.join("restart.ocfd");
+    let first = directory.join("first.json");
+    let second = directory.join("second.json");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.time_set(0.01, 10, 30, None).expect("time settings");
+
+    let options = SolveOptions {
+        steps: Some(4),
+        ..SolveOptions::default()
+    };
+    let report = session
+        .solve_with_checkpoint(&options, None, Some(&first))
+        .expect("first run");
+    assert_eq!(report.steps, 4);
+    let checkpoint = Checkpoint::load(&first).expect("load checkpoint");
+    assert_eq!(checkpoint.steps, 4);
+
+    let report = session
+        .solve_with_checkpoint(&options, Some(&first), Some(&second))
+        .expect("resumed run");
+    assert_eq!(report.steps, 8);
+    let checkpoint = Checkpoint::load(&second).expect("load second checkpoint");
+    assert_eq!(checkpoint.steps, 8);
+
+    let cli_path = directory.join("cli-restart.ocfd");
+    let cli_first = directory.join("cli-first.json");
+    let cli_second = directory.join("cli-second.json");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "solve",
+        &cli,
+        "--steps",
+        "3",
+        "--checkpoint",
+        &text(&cli_first),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd solve --checkpoint failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = run_cli(&[
+        "solve",
+        &cli,
+        "--steps",
+        "2",
+        "--restart",
+        &text(&cli_first),
+        "--checkpoint",
+        &text(&cli_second),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd solve --restart failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let checkpoint = Checkpoint::load(&cli_second).expect("load CLI checkpoint");
+    assert_eq!(checkpoint.steps, 5);
 }
