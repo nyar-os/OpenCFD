@@ -25,6 +25,7 @@
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
 //! * mesh quality metrics (non-orthogonality, aspect ratio and skewness);
+//! * Lagrangian particle tracing exported as time-accurate trajectories;
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet,
 //!   pressure-outlet and convective-outlet sides.
 //!
@@ -41,6 +42,7 @@ mod export;
 mod fields;
 mod mesh;
 mod model;
+mod particles;
 mod quality;
 mod session;
 mod solver;
@@ -59,6 +61,10 @@ pub use crate::model::{
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
     ScalarConfig, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence,
     TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
+};
+pub use crate::particles::{
+    export_particles, trace_particles, trace_solution_particles, ParticleConfig, ParticleSample,
+    ParticleSeed, ParticleTrack, DEFAULT_PARTICLE_STEPS,
 };
 pub use crate::quality::{mesh_quality, MeshQuality};
 pub use crate::session::{
@@ -118,6 +124,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "coefficients": "supported",
     "contours": "supported",
     "restart": "supported",
+    "particles": "supported",
     "inp": "unsupported",
     "openfoam": "unsupported"
   }

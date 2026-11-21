@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Model, OpenCfd, OpenCfdOptions, PorousRegion, Probe, Side, SolveOptions,
-    TimeScheme,
+    InletProfile, Model, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed, PorousRegion,
+    Probe, Side, SolveOptions, TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -828,6 +828,49 @@ fn session_and_cli_report_the_same_mesh_quality() {
     assert_eq!(decoded["cells"].as_u64(), Some(50));
     assert_eq!(decoded["fluidCells"].as_u64(), Some(50));
     assert!((decoded["maxAspectRatio"].as_f64().expect("ratio") - 2.0).abs() < 1e-12);
+}
+
+#[test]
+fn session_and_cli_export_particle_trajectories() {
+    let directory = temporary_dir("particles");
+    let path = directory.join("particles.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.time_set(0.01, 5, 30, None).expect("time");
+    let config = ParticleConfig {
+        seeds: vec![ParticleSeed { x: 0.4, y: 0.4 }],
+        dt: 0.0,
+        max_steps: 3,
+    };
+    let report = session
+        .export_particles(&directory.join("session"), &config)
+        .expect("session export");
+    assert_eq!(report.format, "particles");
+    assert!(std::path::Path::new(&report.path).exists());
+    let csv = fs::read_to_string(&report.path).expect("read particles");
+    assert!(csv.starts_with("particle,step,time,x,y,u,v,speed\n"));
+    assert!(csv.contains("particle-1,"));
+
+    let cli = text(&path);
+    let out = text(&directory.join("cli"));
+    let output = run_cli(&[
+        "export",
+        &cli,
+        "--format",
+        "particles",
+        "--seed",
+        "0.4,0.4",
+        "--particle-steps",
+        "3",
+        "--out",
+        &out,
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd particle export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(directory.join("cli").join("particles.csv").exists());
 }
 
 #[test]

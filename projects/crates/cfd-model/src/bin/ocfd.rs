@@ -5,8 +5,9 @@ use std::process;
 
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
-    ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, Side,
-    SideThermal, SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel, WallFunction,
+    ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
+    PorousRegion, Probe, Side, SideThermal, SolveOptions, ThermalConfig, TimeScheme,
+    TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
 };
 
 const USAGE: &str = "\
@@ -46,7 +47,7 @@ Usage:
   ocfd validate <file>
   ocfd quality <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -1002,11 +1003,22 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
 }
 
 fn export(args: &[String]) -> Result<i32, CfdError> {
-    let parsed = parse(args, &["--format", "--out", "--field", "--layout"], &[])?;
+    let parsed = parse(
+        args,
+        &[
+            "--format",
+            "--out",
+            "--field",
+            "--layout",
+            "--seed",
+            "--particle-steps",
+        ],
+        &[],
+    )?;
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
@@ -1019,7 +1031,43 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     };
     let out = required(&parsed, "--out")?;
     let session = open_session(file)?;
-    let report = session.export_field_with_layout(format, Path::new(out), field, layout)?;
+    let report = match format {
+        ExportFormat::Particles => {
+            let seeds = parsed
+                .options
+                .get("--seed")
+                .map(|raw| particle_seeds(raw))
+                .transpose()?
+                .unwrap_or_default();
+            let max_steps = match parsed.options.get("--particle-steps") {
+                Some(raw) => {
+                    let steps = raw.parse::<usize>().map_err(|_| {
+                        CfdError::new(
+                            "cli/invalid-number",
+                            format!(
+                                "value `{raw}` of `--particle-steps` is not a positive integer"
+                            ),
+                        )
+                    })?;
+                    if steps == 0 {
+                        return Err(CfdError::new(
+                            "cli/invalid-number",
+                            "`--particle-steps` must be greater than 0",
+                        ));
+                    }
+                    steps
+                }
+                None => DEFAULT_PARTICLE_STEPS,
+            };
+            let config = ParticleConfig {
+                seeds,
+                dt: 0.0,
+                max_steps,
+            };
+            session.export_particles(Path::new(out), &config)?
+        }
+        other => session.export_field_with_layout(other, Path::new(out), field, layout)?,
+    };
     let layout_label = match layout {
         ExportLayout::Cell => "",
         ExportLayout::Node => " (nodes)",
@@ -1037,8 +1085,36 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         ExportFormat::Coefficients => {
             println!("exported coefficient summary CSV: {}", report.path)
         }
+        ExportFormat::Particles => println!("exported particle trajectories CSV: {}", report.path),
     }
     Ok(0)
+}
+
+/// Parses `x,y` seeds separated by semicolons.
+fn particle_seeds(raw: &str) -> Result<Vec<ParticleSeed>, CfdError> {
+    let mut seeds = Vec::new();
+    for part in raw.split(';').filter(|part| !part.trim().is_empty()) {
+        let (x, y) = part.split_once(',').ok_or_else(|| {
+            CfdError::new(
+                "cli/invalid-seed",
+                format!("particle seed `{part}` must look like `x,y`"),
+            )
+        })?;
+        let x = x.trim().parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-seed",
+                format!("particle seed x coordinate `{}` is not a number", x.trim()),
+            )
+        })?;
+        let y = y.trim().parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-seed",
+                format!("particle seed y coordinate `{}` is not a number", y.trim()),
+            )
+        })?;
+        seeds.push(ParticleSeed { x, y });
+    }
+    Ok(seeds)
 }
 
 fn not_implemented(feature: &str) -> CfdError {

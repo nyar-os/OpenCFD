@@ -303,7 +303,8 @@ export type ExportFormat =
     | 'streamlines'
     | 'residuals'
     | 'forces'
-    | 'coefficients';
+    | 'coefficients'
+    | 'particles';
 
 /** Cell-centred field an SVG or contour export can visualise. */
 export type ExportField =

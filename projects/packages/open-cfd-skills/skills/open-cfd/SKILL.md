@@ -15,8 +15,8 @@ uniform pressure gradients for pressure-driven flow, obstacle, porous region,
 force/moment reference, passive scalar, buoyancy, turbulence, wall function and
 thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
-streamlines, residual history CSV, force history CSV or a final drag/lift/moment
-summary CSV. CSV and VTK can sample
+streamlines, residual history CSV, force history CSV, a final drag/lift/moment
+summary CSV or Lagrangian particle trajectories as CSV. CSV and VTK can sample
 cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
@@ -61,7 +61,7 @@ ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd quality <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -99,11 +99,15 @@ rename. Confirm the path before running them.
   `−β(T − tRef)·g`, requires scalar transport, and `--beta 0` disables it.
   The coupling is explicit, so pick `--dt` small enough for the induced
   acceleration.
-- `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces` and
-  `coefficients` are
+- `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces`,
+  `coefficients` and `particles` are
   the only export targets. `inp` and `openfoam` reject with
   `capability/not-implemented`. Periodic sides must come in opposite pairs and
   are excluded from the boundary mass balance.
+  `particles` traces massless tracers with a second-order midpoint rule on the
+  solved field and writes `particle,step,time,x,y,u,v,speed`; without
+  `--seed x,y` it uses a 5×5 regular fluid grid, `--particle-steps` defaults to
+  200, and the step defaults to the last solve step.
   `contours` writes nine filled value bands plus marching-squares iso-lines and
   accepts the same `--field` names as `svg`, including `speed`.
   `--layout node` samples the `(nx+1)×(ny+1)` mesh vertices (each value is the

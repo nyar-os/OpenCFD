@@ -1160,7 +1160,7 @@ fn temperature_at(solution: &Solution, i: usize, j: usize) -> f64 {
         .unwrap_or(0.0)
 }
 
-fn with_extension_or_file(path: &Path, extension: &str, default_name: &str) -> PathBuf {
+pub(crate) fn with_extension_or_file(path: &Path, extension: &str, default_name: &str) -> PathBuf {
     if path.extension().and_then(|value| value.to_str()) == Some(extension) {
         path.to_path_buf()
     } else {

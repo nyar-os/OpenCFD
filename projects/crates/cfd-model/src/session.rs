@@ -24,6 +24,9 @@ use crate::model::{
     MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, Side, ThermalConfig,
     TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
 };
+use crate::particles::{
+    export_particles as write_particles, ParticleConfig, DEFAULT_PARTICLE_STEPS,
+};
 use crate::quality::{mesh_quality as measure_quality, MeshQuality};
 use crate::solver::{
     solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
@@ -49,6 +52,8 @@ pub enum ExportFormat {
     Forces,
     /// Final per-obstacle drag, lift and moment summary CSV rows.
     Coefficients,
+    /// Traced particle trajectories as CSV rows.
+    Particles,
 }
 
 impl ExportFormat {
@@ -63,6 +68,7 @@ impl ExportFormat {
             Self::Residuals => "residuals",
             Self::Forces => "forces",
             Self::Coefficients => "coefficients",
+            Self::Particles => "particles",
         }
     }
 }
@@ -80,16 +86,17 @@ impl FromStr for ExportFormat {
             "residuals" | "residual" => Ok(Self::Residuals),
             "forces" | "force" => Ok(Self::Forces),
             "coefficients" | "coefficient" | "cdcl" => Ok(Self::Coefficients),
+            "particles" | "particle" | "tracers" => Ok(Self::Particles),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces or coefficients are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients or particles are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces or coefficients are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients or particles are supported"
                 ),
             )),
         }
@@ -728,10 +735,41 @@ impl OpenCfd {
             ExportFormat::Residuals => export_residuals(&solution, out)?,
             ExportFormat::Forces => export_forces(&solution, out)?,
             ExportFormat::Coefficients => export_coefficients(&solution, out)?,
+            ExportFormat::Particles => {
+                let config = ParticleConfig {
+                    seeds: Vec::new(),
+                    dt: solution.report.dt,
+                    max_steps: DEFAULT_PARTICLE_STEPS,
+                };
+                write_particles(&solution, out, &config)?
+            }
         };
         Ok(ExportReport {
             format: format.as_str().to_string(),
             layout: layout.as_str().to_string(),
+            path: written.display().to_string(),
+        })
+    }
+
+    /// Solves and writes Lagrangian particle trajectories as CSV rows.
+    ///
+    /// `config.dt` must be positive; a non-positive or non-finite value is
+    /// replaced by the last time step of the solve. An empty `seeds` list uses
+    /// the default regular seed grid. See [`write_particles`] for the header.
+    pub fn export_particles(
+        &self,
+        out: &Path,
+        config: &ParticleConfig,
+    ) -> Result<ExportReport, CfdError> {
+        let solution = solve(&self.model)?;
+        let mut config = config.clone();
+        if !config.dt.is_finite() || config.dt <= 0.0 {
+            config.dt = solution.report.dt;
+        }
+        let written = write_particles(&solution, out, &config)?;
+        Ok(ExportReport {
+            format: ExportFormat::Particles.as_str().to_string(),
+            layout: ExportLayout::Cell.as_str().to_string(),
             path: written.display().to_string(),
         })
     }

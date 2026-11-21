@@ -5,12 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
-    export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout,
-    mesh_quality, solve, solve_pressure, solve_with, solve_with_checkpoint, stream_function,
-    transport_scalar, vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint,
-    ConvectionScheme, ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig,
-    Model, Obstacle, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal,
-    Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
+    export_particles, export_residuals, export_streamlines, export_svg, export_vtk,
+    export_vtk_with_layout, mesh_quality, solve, solve_pressure, solve_with, solve_with_checkpoint,
+    stream_function, trace_particles, transport_scalar, vorticity, Boundaries, Boundary,
+    BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField, ExportLayout, InitialField,
+    InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig, ParticleSeed, PorousRegion,
+    PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution, SolveOptions,
+    ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -2235,4 +2236,152 @@ fn mesh_quality_excludes_solids_and_is_reported_after_a_solve() {
         mesh_quality(&solution.mesh),
         "the report must carry the measured mesh quality"
     );
+}
+
+#[test]
+fn particles_follow_a_uniform_flow() {
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 8,
+        ny: 6,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let u = vec![1.0; mesh.u_count()];
+    let v = vec![0.0; mesh.v_count()];
+    let config = ParticleConfig {
+        seeds: vec![ParticleSeed { x: 0.2, y: 0.5 }],
+        dt: 0.05,
+        max_steps: 4,
+    };
+    let tracks = trace_particles(&mesh, &u, &v, &config).expect("trace");
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].id, "particle-1");
+    let samples = &tracks[0].samples;
+    assert_eq!(samples.len(), 5, "one initial sample plus four steps");
+    assert!((samples[0].x - 0.2).abs() < 1e-12);
+    assert!((samples[0].time).abs() < 1e-12);
+    for pair in samples.windows(2) {
+        assert!(pair[1].x > pair[0].x, "the tracer must move downstream");
+        assert!((pair[1].x - pair[0].x - 0.05).abs() < 1e-9);
+    }
+    assert!((samples[4].x - 0.4).abs() < 1e-9);
+    for sample in samples {
+        assert!((sample.y - 0.5).abs() < 1e-9);
+        assert!((sample.u - 1.0).abs() < 1e-9);
+        assert!((sample.speed - 1.0).abs() < 1e-9);
+        assert_eq!(sample.time, sample.step as f64 * 0.05);
+    }
+}
+
+#[test]
+fn particles_stop_before_a_solid_cell() {
+    let mut mesh = Mesh::new(&MeshConfig {
+        nx: 10,
+        ny: 10,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    mesh.apply_obstacles(&[Obstacle::Rect {
+        id: "block".to_string(),
+        x0: 0.35,
+        y0: 0.35,
+        x1: 0.55,
+        y1: 0.55,
+    }])
+    .expect("obstacle");
+    assert!(mesh.is_solid(4, 4));
+    let u = vec![1.0; mesh.u_count()];
+    let v = vec![0.0; mesh.v_count()];
+    let config = ParticleConfig {
+        seeds: vec![ParticleSeed { x: 0.2, y: 0.45 }],
+        dt: 0.05,
+        max_steps: 10,
+    };
+    let tracks = trace_particles(&mesh, &u, &v, &config).expect("trace");
+    let samples = &tracks[0].samples;
+    assert!(
+        samples.len() < config.max_steps + 1,
+        "the tracer must stop at the obstacle"
+    );
+    let last = samples.last().expect("a seed sample");
+    assert!(last.x < 0.4, "last x {} must stay before the solid", last.x);
+    for sample in samples {
+        let i = ((sample.x / mesh.dx).floor() as usize).min(mesh.nx - 1);
+        let j = ((sample.y / mesh.dy).floor() as usize).min(mesh.ny - 1);
+        assert!(!mesh.is_solid(i, j), "a trajectory entered a solid cell");
+    }
+}
+
+#[test]
+fn particle_export_and_validation_are_honest() {
+    let solution = solve(&mesh_model(8, 6)).expect("solve");
+    let directory = temporary_dir("particles");
+    let path = export_particles(
+        &solution,
+        &directory,
+        &ParticleConfig {
+            seeds: vec![ParticleSeed { x: 0.3, y: 0.5 }],
+            dt: 0.01,
+            max_steps: 3,
+        },
+    )
+    .expect("export");
+    let text = fs::read_to_string(&path).expect("read particles");
+    assert!(text.starts_with("particle,step,time,x,y,u,v,speed\n"));
+    assert!(text.contains("particle-1,"));
+    assert!(text.lines().count() >= 4, "expected a traced trajectory");
+
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 8,
+        ny: 6,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let u = vec![1.0; mesh.u_count()];
+    let v = vec![0.0; mesh.v_count()];
+    assert_eq!(
+        trace_particles(
+            &mesh,
+            &u,
+            &v,
+            &ParticleConfig {
+                seeds: Vec::new(),
+                dt: 0.0,
+                max_steps: 3,
+            }
+        )
+        .expect_err("zero dt")
+        .code,
+        "particle/invalid"
+    );
+    assert_eq!(
+        trace_particles(
+            &mesh,
+            &u,
+            &v,
+            &ParticleConfig {
+                seeds: vec![ParticleSeed { x: 2.0, y: 0.5 }],
+                dt: 0.05,
+                max_steps: 3,
+            }
+        )
+        .expect_err("seed outside the domain")
+        .code,
+        "particle/invalid"
+    );
+    let default = trace_particles(
+        &mesh,
+        &u,
+        &v,
+        &ParticleConfig {
+            seeds: Vec::new(),
+            dt: 0.05,
+            max_steps: 2,
+        },
+    )
+    .expect("default seeds");
+    assert_eq!(default.len(), 25, "the default grid is 5x5");
 }
