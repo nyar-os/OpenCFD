@@ -55,6 +55,19 @@ export interface TimeSettings {
 /** Boundary kind of one side. */
 export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'slip';
 
+/** Normal-velocity shape of an inlet side. */
+export type InletProfile = 'uniform' | 'parabolic' | 'powerLaw';
+
+/** Per-side inlet velocity profile; only applies to `inlet` sides. */
+export interface InletProfiles {
+    readonly left: InletProfile;
+    readonly right: InletProfile;
+    readonly top: InletProfile;
+    readonly bottom: InletProfile;
+    /** Power-law exponent `n`; must be finite and positive. */
+    readonly exponent: number;
+}
+
 /** Domain side name. */
 export type Side = 'left' | 'right' | 'top' | 'bottom';
 
@@ -72,6 +85,8 @@ export interface Boundaries {
     readonly right: Boundary;
     readonly top: Boundary;
     readonly bottom: Boundary;
+    /** Normal-velocity shapes of the four inlet sides. */
+    readonly inletProfiles: InletProfiles;
 }
 
 /** Optional uniform initial velocity. */
@@ -395,6 +410,14 @@ export interface BoundarySetRequest {
     readonly v?: number;
     /** Outlet reference pressure in Pa; omitted keeps the current value. */
     readonly pressure?: number;
+}
+
+/** Arguments of `CfdCase.setInletProfile()`. */
+export interface BoundaryProfileSetRequest {
+    readonly side: Side;
+    readonly profile: InletProfile;
+    /** Power-law exponent; omitted keeps the current value. */
+    readonly exponent?: number;
 }
 
 /** Arguments of `CfdCase.setConvection()`. */

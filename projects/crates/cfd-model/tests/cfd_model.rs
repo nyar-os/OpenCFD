@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_csv, export_streamlines, export_svg, export_vtk, solve, solve_pressure, solve_with,
     stream_function, transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme,
-    ExportField, Mesh, Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution,
-    SolveOptions, CAPABILITIES_JSON, VERSION,
+    ExportField, InletProfile, Mesh, Model, Obstacle, PressureSettings, Probe, Reference,
+    ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -331,6 +331,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"wallShear\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"slipBoundary\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"pressureOutlet\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"inletProfiles\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"momentCoefficients\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"massBalance\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamlines\": \"supported\""));
@@ -1142,5 +1143,117 @@ fn convection_scheme_changes_the_cavity_solution_and_stays_stable() {
     assert!(
         difference(&solutions[0], &solutions[2]) > 1e-4,
         "QUICK produced an identical velocity field to upwind"
+    );
+}
+
+#[test]
+fn inlet_profiles_shape_the_normal_velocity() {
+    let mut model = Model::new();
+    model.mesh.nx = 8;
+    model.mesh.ny = 10;
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+
+    let mut boundaries = cfd_model::Boundaries {
+        left: Boundary {
+            kind: BoundaryKind::Inlet,
+            velocity: [1.5, 0.0],
+            pressure: 0.0,
+        },
+        ..Default::default()
+    };
+    boundaries.inlet_profiles.left = InletProfile::Parabolic;
+
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+
+    let mut discrete_mean = 0.0;
+    for j in 0..mesh.ny {
+        let s = (j as f64 + 0.5) / mesh.ny as f64;
+        let expected = 1.5 * 4.0 * s * (1.0 - s);
+        let actual = u[mesh.u_index(0, j)];
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "parabolic face {j} is {actual}, expected {expected}"
+        );
+        discrete_mean += actual;
+    }
+    discrete_mean /= mesh.ny as f64;
+    assert!(
+        (discrete_mean - 1.0).abs() < 0.05,
+        "parabolic mean inflow {discrete_mean} should approach 2/3 of the peak"
+    );
+
+    boundaries.inlet_profiles.left = InletProfile::PowerLaw;
+    boundaries.inlet_profiles.exponent = 1.0;
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    for j in 0..mesh.ny {
+        let s = (j as f64 + 0.5) / mesh.ny as f64;
+        let expected = 1.5 * (1.0 - (2.0 * s - 1.0).abs());
+        let actual = u[mesh.u_index(0, j)];
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "power-law face {j} is {actual}, expected {expected}"
+        );
+    }
+
+    boundaries.inlet_profiles.left = InletProfile::Uniform;
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    for j in 0..mesh.ny {
+        assert!((u[mesh.u_index(0, j)] - 1.5).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn parabolic_inlet_conserves_the_discrete_mask_flow() {
+    let mut model = Model::new();
+    model.mesh.nx = 20;
+    model.mesh.ny = 16;
+    model.mesh.length_x = 2.0;
+    model.mesh.length_y = 1.0;
+    model.fluid.viscosity = 0.01;
+    model.time.dt = 0.005;
+    model.time.steps = 30;
+    model.time.pressure_iterations = 60;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top = Boundary::wall();
+    model.boundaries.bottom = Boundary::wall();
+    model.boundaries.inlet_profiles.left = InletProfile::Parabolic;
+
+    let solution = solve(&model).expect("solve");
+    let mesh = &solution.mesh;
+    let mut expected_inflow = 0.0;
+    for j in 0..mesh.ny {
+        let s = (j as f64 + 0.5) / mesh.ny as f64;
+        let expected = 4.0 * s * (1.0 - s);
+        let actual = solution.u[mesh.u_index(0, j)];
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "inlet face {j} drifted to {actual}, expected {expected}"
+        );
+        expected_inflow += actual * mesh.dy;
+    }
+    let expected_inflow = expected_inflow * model.fluid.density;
+    let balance = solution.report.mass_balance;
+    assert!(
+        (balance.inflow - expected_inflow).abs() < 1e-9 * expected_inflow.max(1.0),
+        "inflow {} should equal the parabolic mask integral {expected_inflow}",
+        balance.inflow
+    );
+
+    let mut invalid = model.clone();
+    invalid.boundaries.inlet_profiles.exponent = 0.0;
+    assert_eq!(
+        invalid.validate().expect_err("zero exponent").code,
+        "boundary/invalid"
     );
 }

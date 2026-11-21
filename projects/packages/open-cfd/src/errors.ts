@@ -41,6 +41,7 @@ export const errorCodes = [
     'cli/invalid-number',
     'cli/invalid-side',
     'cli/invalid-boundary-kind',
+    'cli/invalid-inlet-profile',
     'cli/invalid-obstacle-kind',
     'cli/invalid-convection-scheme',
 ] as const;

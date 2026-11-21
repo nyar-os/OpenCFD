@@ -244,6 +244,54 @@ impl FromStr for BoundaryKind {
     }
 }
 
+/// Shape of the normal velocity across an inlet side.
+///
+/// The profile multiplies the normal component of [`Boundary::velocity`] and
+/// leaves the tangential component unchanged. It is ignored by walls, outlets
+/// and slip sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InletProfile {
+    /// Uniform inflow at the prescribed velocity.
+    #[default]
+    Uniform,
+    /// Poiseuille parabola: zero at both ends and the prescribed velocity at
+    /// the middle of the side.
+    Parabolic,
+    /// Symmetric power law `(1 − |2s − 1|)^(1/n)` with `s ∈ [0, 1]`, zero at
+    /// both ends and the prescribed velocity at the middle.
+    PowerLaw,
+}
+
+impl InletProfile {
+    /// Returns the identifier used in documents, reports and the CLI.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Uniform => "uniform",
+            Self::Parabolic => "parabolic",
+            Self::PowerLaw => "powerLaw",
+        }
+    }
+}
+
+impl FromStr for InletProfile {
+    type Err = CfdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "uniform" => Ok(Self::Uniform),
+            "parabolic" => Ok(Self::Parabolic),
+            "powerLaw" | "power-law" | "power_law" => Ok(Self::PowerLaw),
+            other => Err(CfdError::new(
+                "cli/invalid-inlet-profile",
+                format!(
+                    "unknown inlet profile `{other}`; only uniform, parabolic or powerLaw is supported"
+                ),
+            )),
+        }
+    }
+}
+
 /// Boundary condition of one side.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -273,6 +321,81 @@ impl Boundary {
     }
 }
 
+/// Normal-velocity shape of the four inlet sides.
+///
+/// A profile multiplies the normal component of the side velocity and leaves
+/// the tangential component unchanged. It only takes effect on an `inlet` side;
+/// walls, outlets and slip sides ignore it. `exponent` is the `n` of
+/// [`InletProfile::PowerLaw`] and is shared by every side.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InletProfiles {
+    /// Left side (`x = 0`) profile.
+    #[serde(default)]
+    pub left: InletProfile,
+    /// Right side (`x = lengthX`) profile.
+    #[serde(default)]
+    pub right: InletProfile,
+    /// Top side (`y = lengthY`) profile.
+    #[serde(default)]
+    pub top: InletProfile,
+    /// Bottom side (`y = 0`) profile.
+    #[serde(default)]
+    pub bottom: InletProfile,
+    /// Power-law exponent `n`; must be finite and positive.
+    #[serde(default = "default_profile_exponent")]
+    pub exponent: f64,
+}
+
+impl Default for InletProfiles {
+    fn default() -> Self {
+        Self {
+            left: InletProfile::Uniform,
+            right: InletProfile::Uniform,
+            top: InletProfile::Uniform,
+            bottom: InletProfile::Uniform,
+            exponent: default_profile_exponent(),
+        }
+    }
+}
+
+impl InletProfiles {
+    /// Profile of one side.
+    pub fn get(&self, side: Side) -> InletProfile {
+        match side {
+            Side::Left => self.left,
+            Side::Right => self.right,
+            Side::Top => self.top,
+            Side::Bottom => self.bottom,
+        }
+    }
+
+    /// Mutable profile of one side.
+    pub fn get_mut(&mut self, side: Side) -> &mut InletProfile {
+        match side {
+            Side::Left => &mut self.left,
+            Side::Right => &mut self.right,
+            Side::Top => &mut self.top,
+            Side::Bottom => &mut self.bottom,
+        }
+    }
+
+    /// Scale factor of the normal velocity at the normalized position
+    /// `fraction ∈ [0, 1]` along `side`.
+    ///
+    /// `Uniform` gives `1`, `Parabolic` gives `4s(1−s)` and `PowerLaw` gives
+    /// `(1−|2s−1|)^(1/n)`, so both shaped profiles vanish at the two ends and
+    /// reach `1` at the middle.
+    pub fn scale(&self, side: Side, fraction: f64) -> f64 {
+        let s = fraction.clamp(0.0, 1.0);
+        match self.get(side) {
+            InletProfile::Uniform => 1.0,
+            InletProfile::Parabolic => 4.0 * s * (1.0 - s),
+            InletProfile::PowerLaw => (1.0 - (2.0 * s - 1.0).abs()).powf(1.0 / self.exponent),
+        }
+    }
+}
+
 impl Default for Boundary {
     fn default() -> Self {
         Self::wall()
@@ -295,6 +418,9 @@ pub struct Boundaries {
     /// Bottom side (`y = 0`).
     #[serde(default)]
     pub bottom: Boundary,
+    /// Normal-velocity shapes of the four inlet sides.
+    #[serde(default)]
+    pub inlet_profiles: InletProfiles,
 }
 
 /// Names of the four domain sides, used by the CLI.
@@ -1024,6 +1150,12 @@ impl Model {
                 ));
             }
         }
+        if !finite_positive(self.boundaries.inlet_profiles.exponent) {
+            report.push(Issue::error(
+                "boundary/invalid",
+                "boundaries.inletProfiles.exponent must be a finite positive number",
+            ));
+        }
         if let Some(initial) = &self.initial {
             if !initial.velocity.iter().all(|value| value.is_finite()) {
                 report.push(Issue::error(
@@ -1195,4 +1327,8 @@ fn default_mixing_length() -> f64 {
 
 fn default_specific_heat() -> f64 {
     1.0
+}
+
+fn default_profile_exponent() -> f64 {
+    7.0
 }

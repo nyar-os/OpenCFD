@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
-    BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, Obstacle, OpenCfd,
-    OpenCfdOptions, Probe, Side, SolveOptions,
+    BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, InletProfile, Obstacle,
+    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -213,6 +213,19 @@ fn boundary_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Sets the normal-velocity profile of one inlet side.
+#[function]
+fn boundary_profile_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let side = text(&ctx, 1)?.parse::<Side>().map_err(fail)?;
+    let profile = text(&ctx, 2)?.parse::<InletProfile>().map_err(fail)?;
+    let exponent = optional_number(&ctx, 3)?;
+    let summary = with_session(handle, |session| {
+        session.boundary_profile_set(side, profile, exponent)
+    })?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Validates one session document and returns its summary.
 #[function]
 fn validate(ctx: CallContext) -> Result<JsValue> {
@@ -365,6 +378,7 @@ register_module![
     fluid_set,
     time_set,
     boundary_set,
+    boundary_profile_set,
     obstacle_add,
     obstacle_list,
     probe_add,

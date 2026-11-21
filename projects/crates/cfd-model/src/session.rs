@@ -15,8 +15,9 @@ use serde::Serialize;
 
 use crate::export::{export_csv, export_streamlines, export_svg, export_vtk, ExportField};
 use crate::model::{
-    Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, MeshConfig, Model, Obstacle,
-    Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
+    Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
+    Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence,
+    TurbulenceModel,
 };
 use crate::solver::{solve, solve_with, Report, SolveOptions};
 use crate::{CfdError, CAPABILITIES_JSON};
@@ -370,6 +371,25 @@ impl OpenCfd {
     pub fn validate(&self) -> Result<CaseSummary, CfdError> {
         self.model.validate()?;
         self.summary()
+    }
+
+    /// Sets the normal-velocity profile of one inlet side and writes the
+    /// document back.
+    ///
+    /// `profile` applies only when the side is an `inlet`; `exponent` updates
+    /// the shared power-law exponent and is ignored by other profiles.
+    pub fn boundary_profile_set(
+        &mut self,
+        side: Side,
+        profile: InletProfile,
+        exponent: Option<f64>,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            *model.boundaries.inlet_profiles.get_mut(side) = profile;
+            if let Some(exponent) = exponent {
+                model.boundaries.inlet_profiles.exponent = exponent;
+            }
+        })
     }
 
     /// Appends a solid obstacle and writes the document back.

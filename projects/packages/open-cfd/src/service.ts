@@ -10,6 +10,7 @@
 import { NotImplementedError, OpenCFDError, errorCodes, type OpenCFDErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    BoundaryProfileSetRequest,
     BoundarySetRequest,
     CaseSummary,
     ConvectionSetRequest,
@@ -139,9 +140,29 @@ export function boundarySet(handle: number, request: BoundarySetRequest): CaseSu
     );
 }
 
-/** Appends one solid obstacle and writes the document back. */
-export function obstacleAdd(handle: number, obstacle: Obstacle): CaseSummary {
+/** Sets the normal-velocity profile of one inlet side and writes the document back. */
+export function boundaryProfileSet(
+    handle: number,
+    request: BoundaryProfileSetRequest,
+): CaseSummary {
     return decode<CaseSummary>(() =>
+        request.exponent === undefined
+            ? binding('boundary.profile.set').boundary_profile_set(
+                  handle,
+                  request.side,
+                  request.profile,
+              )
+            : binding('boundary.profile.set').boundary_profile_set(
+                  handle,
+                  request.side,
+                  request.profile,
+                  request.exponent,
+              ),
+    );
+}
+
+/** Appends one solid obstacle and writes the document back. */
+export function obstacleAdd(handle: number, obstacle: Obstacle): CaseSummary {    return decode<CaseSummary>(() =>
         binding('obstacle.add').obstacle_add(handle, JSON.stringify(obstacle)),
     );
 }

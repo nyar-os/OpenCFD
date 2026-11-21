@@ -18,6 +18,7 @@ import type {
     ConvectionScheme,
     ExportField,
     ExportFormat,
+    InletProfile,
     Obstacle,
     Side,
 } from './types.js';
@@ -30,6 +31,7 @@ usage:
   open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   open-cfd obstacle list <file>
@@ -50,6 +52,7 @@ exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
 
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom'];
 const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet', 'slip'];
+const INLET_PROFILES: readonly InletProfile[] = ['uniform', 'parabolic', 'powerLaw'];
 const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
 
 interface ParsedArguments {
@@ -161,8 +164,17 @@ function parseBoundaryKind(raw: string): BoundaryKind {
     return raw as BoundaryKind;
 }
 
-function parseConvectionScheme(raw: string): ConvectionScheme {
-    if (!CONVECTION_SCHEMES.includes(raw as ConvectionScheme)) {
+function parseInletProfile(raw: string): InletProfile {
+    if (!INLET_PROFILES.includes(raw as InletProfile)) {
+        throw cliError(
+            'cli/invalid-inlet-profile',
+            `unknown inlet profile \`${raw}\`; use uniform, parabolic or powerLaw`,
+        );
+    }
+    return raw as InletProfile;
+}
+
+function parseConvectionScheme(raw: string): ConvectionScheme {    if (!CONVECTION_SCHEMES.includes(raw as ConvectionScheme)) {
         throw cliError(
             'cli/invalid-convection-scheme',
             `unknown convection scheme \`${raw}\`; use upwind, central or quick`,
@@ -307,6 +319,35 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'boundary': {
+            if (rest[0] === 'profile') {
+                if (rest[1] !== 'set') {
+                    throw cliError(
+                        'cli/unknown-command',
+                        rest[1] === undefined
+                            ? '`boundary profile` needs the `set` subcommand'
+                            : `\`boundary profile\` subcommand \`${rest[1]}\` does not exist; only \`set\` is supported`,
+                    );
+                }
+                const parsed = parseArguments(rest.slice(2), [
+                    '--side',
+                    '--profile',
+                    '--exponent',
+                ]);
+                const file = positional(
+                    parsed,
+                    0,
+                    'boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]',
+                );
+                const side = parseSide(requiredOption(parsed, '--side'));
+                const profile = parseInletProfile(requiredOption(parsed, '--profile'));
+                const exponent = optionalNumber(parsed, '--exponent');
+                const document = await session.open(file);
+                const summary = document.setInletProfile({ side, profile, exponent });
+                console.log(
+                    `${side} inlet profile set to ${summary.boundaries.inletProfiles[side]} (power-law exponent ${summary.boundaries.inletProfiles.exponent})`,
+                );
+                return 0;
+            }
             expectSet(rest, 'boundary');
             const parsed = parseArguments(rest.slice(1), [
                 '--side',

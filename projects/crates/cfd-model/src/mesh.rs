@@ -1,4 +1,4 @@
-use crate::model::{Boundaries, Boundary, BoundaryKind, MeshConfig, Obstacle};
+use crate::model::{Boundaries, Boundary, BoundaryKind, MeshConfig, Obstacle, Side};
 use crate::CfdError;
 
 /// A structured, staggered (MAC) mesh over a rectangle.
@@ -182,15 +182,37 @@ impl Mesh {
     /// face touching a solid cell is set to zero afterwards, which makes the
     /// obstacle a no-slip, no-flux boundary.
     pub fn apply_velocity_boundaries(&self, boundaries: &Boundaries, u: &mut [f64], v: &mut [f64]) {
+        let ny = self.ny as f64;
+        let nx = self.nx as f64;
         for j in 0..self.ny {
-            u[self.u_index(0, j)] = normal_velocity(&boundaries.left, u[self.u_index(1, j)], 0);
-            u[self.u_index(self.nx, j)] =
-                normal_velocity(&boundaries.right, u[self.u_index(self.nx - 1, j)], 0);
+            let fraction = (j as f64 + 0.5) / ny;
+            u[self.u_index(0, j)] = normal_velocity(
+                &boundaries.left,
+                u[self.u_index(1, j)],
+                0,
+                boundaries.inlet_profiles.scale(Side::Left, fraction),
+            );
+            u[self.u_index(self.nx, j)] = normal_velocity(
+                &boundaries.right,
+                u[self.u_index(self.nx - 1, j)],
+                0,
+                boundaries.inlet_profiles.scale(Side::Right, fraction),
+            );
         }
         for i in 0..self.nx {
-            v[self.v_index(i, 0)] = normal_velocity(&boundaries.bottom, v[self.v_index(i, 1)], 1);
-            v[self.v_index(i, self.ny)] =
-                normal_velocity(&boundaries.top, v[self.v_index(i, self.ny - 1)], 1);
+            let fraction = (i as f64 + 0.5) / nx;
+            v[self.v_index(i, 0)] = normal_velocity(
+                &boundaries.bottom,
+                v[self.v_index(i, 1)],
+                1,
+                boundaries.inlet_profiles.scale(Side::Bottom, fraction),
+            );
+            v[self.v_index(i, self.ny)] = normal_velocity(
+                &boundaries.top,
+                v[self.v_index(i, self.ny - 1)],
+                1,
+                boundaries.inlet_profiles.scale(Side::Top, fraction),
+            );
         }
         self.zero_solid_faces(u, v);
     }
@@ -235,11 +257,14 @@ impl Mesh {
 /// Normal velocity stored on one domain boundary face.
 ///
 /// Outlets continue the adjacent interior value (zero gradient), slip walls
-/// block penetration, and walls and inlets prescribe the document velocity.
-fn normal_velocity(boundary: &Boundary, interior: f64, component: usize) -> f64 {
+/// block penetration, and walls prescribe the document velocity. Inlets scale
+/// the prescribed normal velocity by `scale`, the configured profile factor at
+/// the face position measured from the low corner of the side.
+fn normal_velocity(boundary: &Boundary, interior: f64, component: usize, scale: f64) -> f64 {
     match boundary.kind {
         BoundaryKind::Outlet => interior,
         BoundaryKind::Slip => 0.0,
-        BoundaryKind::Wall | BoundaryKind::Inlet => boundary.velocity[component],
+        BoundaryKind::Wall => boundary.velocity[component],
+        BoundaryKind::Inlet => boundary.velocity[component] * scale,
     }
 }

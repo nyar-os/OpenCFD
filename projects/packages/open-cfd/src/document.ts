@@ -10,6 +10,7 @@
 import { OpenCFDError } from './errors.js';
 import * as service from './service.js';
 import type {
+    BoundaryProfileSetRequest,
     BoundarySetRequest,
     CaseSummary,
     ConvectionSetRequest,
@@ -77,6 +78,12 @@ export class CfdCase {
     setBoundary(request: BoundarySetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.boundarySet(this.handle, request));
+    }
+
+    /** Sets one inlet's normal-velocity profile and writes the document back. */
+    setInletProfile(request: BoundaryProfileSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.boundaryProfileSet(this.handle, request));
     }
 
     /** Solid obstacles in document order. */

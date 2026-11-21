@@ -4,8 +4,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions,
-    Probe, Side,
+    BoundaryKind, ConvectionScheme, ExportField, ExportFormat, InletProfile, Model, OpenCfd,
+    OpenCfdOptions, Probe, Side,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -103,6 +103,70 @@ fn session_slip_and_outlet_pressure_round_trip() {
     );
     let cli_stored = Model::load(&cli_path).expect("load CLI document");
     assert_eq!(cli_stored.boundaries.right.pressure, 1.5);
+}
+
+#[test]
+fn session_inlet_profile_round_trips_through_cli() {
+    let directory = temporary_dir("inlet-profile");
+    let path = directory.join("profile.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .boundary_profile_set(Side::Left, InletProfile::Parabolic, Some(5.0))
+        .expect("profile set");
+    assert_eq!(
+        summary.boundaries.inlet_profiles.left,
+        InletProfile::Parabolic
+    );
+    assert_eq!(summary.boundaries.inlet_profiles.exponent, 5.0);
+
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(
+        stored.boundaries.inlet_profiles.left,
+        InletProfile::Parabolic
+    );
+    assert_eq!(stored.boundaries.inlet_profiles.exponent, 5.0);
+
+    let cli_path = directory.join("cli-profile.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "boundary",
+        "profile",
+        "set",
+        &cli,
+        "--side",
+        "left",
+        "--profile",
+        "powerLaw",
+        "--exponent",
+        "9",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd boundary profile set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(
+        cli_stored.boundaries.inlet_profiles.left,
+        InletProfile::PowerLaw
+    );
+    assert_eq!(cli_stored.boundaries.inlet_profiles.exponent, 9.0);
+
+    let output = run_cli(&[
+        "boundary",
+        "profile",
+        "set",
+        &cli,
+        "--side",
+        "left",
+        "--profile",
+        "parabolic",
+        "--exponent",
+        "0",
+    ]);
+    assert!(!output.status.success(), "zero exponent must be rejected");
 }
 
 #[test]

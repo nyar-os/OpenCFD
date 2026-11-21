@@ -5,8 +5,8 @@ use std::process;
 
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
-    Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal, SolveOptions, ThermalConfig,
-    TurbulenceModel,
+    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal, SolveOptions,
+    ThermalConfig, TurbulenceModel,
 };
 
 const USAGE: &str = "\
@@ -18,6 +18,7 @@ Usage:
   ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
@@ -76,7 +77,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "mesh" => subcommand(args, "set", "mesh"),
         "fluid" => subcommand(args, "set", "fluid"),
         "time" => subcommand(args, "set", "time"),
-        "boundary" => subcommand(args, "set", "boundary"),
+        "boundary" => boundary_command(&args[1..]),
         "obstacle" => obstacle_command(&args[1..]),
         "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
@@ -103,7 +104,6 @@ fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CfdEr
             ("mesh", "set") => mesh_set(&args[2..]),
             ("fluid", "set") => fluid_set(&args[2..]),
             ("time", "set") => time_set(&args[2..]),
-            ("boundary", "set") => boundary_set(&args[2..]),
             ("reference", "set") => reference_set(&args[2..]),
             _ => Err(CfdError::new(
                 "cli/unknown-command",
@@ -201,6 +201,52 @@ fn time_set(args: &[String]) -> Result<i32, CfdError> {
         summary.time.steps,
         summary.time.pressure_iterations,
         summary.time.tolerance
+    );
+    Ok(0)
+}
+
+fn boundary_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => boundary_set(&args[1..]),
+        Some("profile") => match args.get(1).map(String::as_str) {
+            Some("set") => boundary_profile_set(&args[2..]),
+            Some(other) => Err(CfdError::new(
+                "cli/unknown-command",
+                format!("`boundary profile` has no subcommand `{other}`; only set is supported"),
+            )),
+            None => Err(CfdError::new(
+                "cli/missing-argument",
+                "`boundary profile` requires a subcommand; only set is supported",
+            )),
+        },
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`boundary` has no subcommand `{other}`; only set and profile are supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`boundary` requires a subcommand; only set and profile are supported",
+        )),
+    }
+}
+
+fn boundary_profile_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--side", "--profile", "--exponent"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]",
+    )?;
+    let side = required(&parsed, "--side")?.parse::<Side>()?;
+    let profile = required(&parsed, "--profile")?.parse::<InletProfile>()?;
+    let exponent = number(&parsed, "--exponent")?;
+    let mut session = open_session(file)?;
+    let summary = session.boundary_profile_set(side, profile, exponent)?;
+    println!(
+        "{} inlet profile set to {} (power-law exponent {})",
+        side.as_str(),
+        summary.boundaries.inlet_profiles.get(side).as_str(),
+        summary.boundaries.inlet_profiles.exponent
     );
     Ok(0)
 }
