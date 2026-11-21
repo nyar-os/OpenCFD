@@ -8,13 +8,15 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 ## Status
 
 The two-dimensional incompressible document core is executable. The CLI and SDK
-create and reopen one `.ocfd` case, edit mesh, fluid, time, boundary (including
-free-slip walls and outlet pressure), obstacle, force/moment reference, passive
+create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
+`euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure and
+parabolic/power-law inlet profiles), obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
-legacy ASCII VTK, SVG field previews or SVG streamlines. The solve report also
-contains point monitor time series (`probes`), wall shear/friction summaries
-(`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
-boundary mass balance (`massBalance`). Compressible flow, three-dimensional flow,
+legacy ASCII VTK, SVG field previews, SVG streamlines, residual history CSV or
+force history CSV. The solve report also contains point monitor time series
+(`probes`), wall shear/friction summaries (`wallShear`), drag/lift/moment
+coefficients (`forces`), sampled continuity and boundary mass balance
+(`massBalance`), the selected `timeScheme` and the `terminationReason`. Compressible flow, three-dimensional flow,
 Boussinesq buoyancy, periodic boundaries, contour export, adaptive meshing and
 external format import are not implemented and report
 `capability/not-implemented`.
@@ -27,7 +29,9 @@ ocfd create <file.ocfd>
 ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
 ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
 ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
+ocfd time scheme set <file> --scheme euler|rk2
 ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
@@ -41,7 +45,7 @@ ocfd convection set <file> --scheme upwind|central|quick
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -75,14 +79,18 @@ rename. Confirm the path before running them.
 - Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
 - Heat transfer uses the implemented passive scalar and thermal configuration;
   there is no coupled buoyancy.
-- `csv`, `vtk`, `svg` and `streamlines` are the only export targets. `inp` and
-  `openfoam` reject with `capability/not-implemented`; periodic boundaries and
-  contour export are not implemented.
+- `csv`, `vtk`, `svg`, `streamlines`, `residuals` and `forces` are the only
+  export targets. `inp` and `openfoam` reject with `capability/not-implemented`;
+  periodic boundaries and contour export are not implemented.
+- Momentum time integration is `euler` (default) or `rk2`; both are explicit and
+  share the same CFL and diffusion stability guards.
+- Inlet profiles (`uniform`, `parabolic`, `powerLaw`) shape only the normal
+  velocity of an `inlet` side.
 - `solve` stops early on the L2 norm of the velocity change when `--tolerance`
   is given and reports `converged`, `steadyState`, `residual`,
-  `residualHistory` (with `continuity`), `massBalance` and `forces` (with
-  `cm` and the resolved reference quantities). It prints the JSON report on
-  stdout and a one-line summary on stderr.
+  `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,
+  `massBalance` and `forces` (with `cm` and the resolved reference quantities).
+  It prints the JSON report on stdout and a one-line summary on stderr.
 
 ## Hard rules
 

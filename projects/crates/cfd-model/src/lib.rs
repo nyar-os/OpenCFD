@@ -5,14 +5,17 @@
 //! * two-dimensional, single-phase, incompressible flow;
 //! * constant density and constant dynamic viscosity (laminar);
 //! * a structured Cartesian mesh with staggered pressure and velocity;
-//! * first-order explicit time stepping with the Chorin projection method;
+//! * first-order explicit Euler or second-order Runge-Kutta time stepping with
+//!   the Chorin projection method;
 //! * solid rectangle and circle obstacles with drag, lift and moment
 //!   coefficients and configurable reference quantities;
+//! * uniform, parabolic and power-law inlet velocity profiles;
 //! * passive scalar (temperature) transport with explicit advection-diffusion;
 //! * optional eddy-viscosity turbulence (constant or mixing-length);
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
 //! * SVG previews of cell-centred fields and traced streamlines;
+//! * residual/continuity and obstacle force history CSV export;
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet and
