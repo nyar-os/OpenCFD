@@ -22,6 +22,7 @@ export interface NativeBinding {
     fluid_set(handle: number, density: number, viscosity: number): string;
     time_set(handle: number, dt: number, steps: number, pressureIterations: number, tolerance?: number): string;
     time_scheme_set(handle: number, scheme: string): string;
+    time_adaptive_set(handle: number, enabled: boolean, targetCfl?: number): string;
     boundary_set(handle: number, side: string, kind: string, u?: number, v?: number, pressure?: number): string;
     boundary_profile_set(handle: number, side: string, profile: string, exponent?: number): string;
     obstacle_add(handle: number, requestJson: string): string;

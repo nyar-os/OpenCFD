@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, and filled-contour/iso-line SVG export. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, filled-contour/iso-line SVG export, and CFL-limited adaptive time stepping with step statistics. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -125,6 +125,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>` | Set density and dynamic viscosity; `mu=0` means inviscid |
 | `ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]` | Set the time step, step count, maximum pressure SOR iterations and relative residual tolerance |
 | `ocfd time scheme set <file> --scheme euler\|rk2` | Select explicit Euler (default) or second-order Runge-Kutta (Heun) for the momentum step |
+| `ocfd time adaptive set <file> --cfl <n\|off>` | Enable adaptive stepping with a target convective CFL in `(0, 1]`, or disable it with `--cfl off` |
 | `ocfd boundary set <file> --side left\|right\|top\|bottom --kind wall\|inlet\|outlet\|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]` | Set a side's boundary type, velocity and outlet gauge pressure; omitted values are unchanged |
 | `ocfd boundary profile set <file> --side left\|right\|top\|bottom --profile uniform\|parabolic\|powerLaw [--exponent <n>]` | Shape the normal velocity of an inlet side; `parabolic` is Poiseuille, `powerLaw` uses `(1−\|2s−1\|)^(1/n)` |
 | `ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]` | Add a rectangular obstacle; omitting `--id` generates `obstacle-N` in order |
@@ -172,7 +173,9 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
     "steps": 200,
     "pressureIterations": 100,
     "tolerance": 1e-3,
-    "scheme": "euler"
+    "scheme": "euler",
+    "adaptive": false,
+    "targetCfl": 0.9
   },
   "boundaries": {
     "left":   { "kind": "wall", "velocity": [0.0, 0.0] },
@@ -201,7 +204,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `fluid` | Constant density `density` and constant dynamic viscosity `viscosity` |
 | `reference` | Optional; `velocity` (m/s), `area` (m²) and `length` (m) override the force and moment reference quantities independently. Defaults are the maximum inlet speed, the obstacle characteristic length times unit depth, and the obstacle characteristic length |
 | `convection` | Optional; `upwind` (default), `central` or `quick`, applied to the face-normal advective derivative of momentum and scalar transport |
-| `time` | `dt`, step count `steps`, maximum pressure SOR sweeps per step `pressureIterations`, relative residual tolerance `tolerance`, and the momentum time scheme `scheme` (`euler` default or `rk2`) |
+| `time` | `dt`, step count `steps`, maximum pressure SOR sweeps per step `pressureIterations`, relative residual tolerance `tolerance`, the momentum time scheme `scheme` (`euler` default or `rk2`), adaptive stepping `adaptive` and its target convective CFL `targetCfl` in `(0, 1]` |
 | `boundaries` | One `kind`, velocity `[u, v]` and outlet `pressure` (Pa) for each of the four sides, plus `inletProfiles` with a `profile` per side (`uniform`, `parabolic`, `powerLaw`) and the shared power-law `exponent` |
 | `initial` | Optional; uniform initial velocity `[u, v]`, at rest by default |
 | `obstacles` | Optional; rectangle `{kind:"rect",x0,y0,x1,y1}` or circle `{kind:"circle",x,y,r}`; `id` may be omitted and becomes `obstacle-N` in order |
@@ -223,7 +226,8 @@ Boundary semantics:
 
 | Field | Meaning |
 |-------|---------|
-| `steps` / `dt` / `time` | Steps actually advanced, time step, total physical time |
+| `steps` / `dt` / `time` | Steps actually advanced, time step of the last advanced step, and total physical time (the sum of all advanced steps) |
+| `adaptive` / `averageDt` / `minDt` / `maxDt` | Whether adaptive stepping was enabled and the mean, smallest and largest step actually used; all four equal `dt` when adaptivity is off |
 | `maxVelocity` | Maximum absolute velocity over all faces |
 | `minPressure` / `maxPressure` | Pressure extremes at fluid cell centres |
 | `vorticityMin` / `vorticityMax` | Vorticity `∂v/∂x − ∂u/∂y` extremes over fluid cells (1/s) |
@@ -260,6 +264,7 @@ Boundary semantics:
 | Vorticity and stream-function fields with report extremes (`vorticity`, `streamFunction`) | ✅ Supported |
 | Selectable upwind, central or QUICK convection (`convectionSchemes`) | ✅ Supported |
 | Selectable explicit Euler or RK2 time integration (`timeSchemes`) | ✅ Supported |
+| CFL-limited adaptive time step with step statistics (`adaptiveTimeStep`) | ✅ Supported |
 | Point monitor time series (`probes`) | ✅ Supported |
 | Wall shear stress and friction coefficients (`wallShear`) | ✅ Supported |
 | Eddy-viscosity turbulence, constant or mixing length (`turbulence`) | ✅ Supported (no energy-equation closure) |
@@ -284,7 +289,7 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 5. **Obstacle forces**: on every fluid-solid face, pressure `p × face length` and viscous shear `μ·u_fluid/(half-cell distance) × face length` are accumulated per obstacle `id`. The face force is also crossed with its position relative to the obstacle centroid to obtain `mz`; `Cd = 2Fx/(ρU²A)`, `Cl = 2Fy/(ρU²A)` and `Cm = 2Mz/(ρU²AL)` use the resolved reference speed, area and length.
 6. **Passive scalar**: the same selectable convection scheme plus central diffusion is advanced explicitly at cell centres; solid faces carry zero flux, solid cells hold no scalar and inlet faces use `inletValue`. A violation returns `solver/unstable`.
 7. **Convergence detection**: each step computes the L2 norm of the velocity change, samples it every `checkEvery` steps and checks it against `tolerance`, stopping early when it passes; each sample also stores the RMS divergence, and history is capped at 1000 entries.
-8. **Stability guards**: before solving, the explicit convective CFL number and the momentum and scalar diffusion numbers are checked; a violation returns `solver/unstable` and never emits NaN or Inf. Every step also checks that all fields are finite.
+8. **Stability guards**: before solving, the explicit convective CFL number and the momentum and scalar diffusion numbers are checked; a violation returns `solver/unstable` and never emits NaN or Inf. Every step also checks that all fields are finite. With adaptive stepping enabled the initial guard is skipped because every step is clamped instead.
 9. **Eddy viscosity**: the optional turbulence section either applies a constant `nuT` or evaluates `nuT = l²·|S|` per cell from the resolved strain-rate tensor. Fluid faces use the mean of the adjacent cell values and solid cells carry zero.
 10. **Thermal transport**: when a `thermal` section is present, the scalar equation becomes an energy equation. The transported diffusivity is `k/(ρ·cp)`, sides and obstacle surfaces use fixed temperature or fixed heat flux, and a uniform volumetric source is added. Every obstacle reports `meanHeatFlux`, `wallTemperature` and `Nu = q̅·D/(k·ΔT)`.
 11. **Derived fields**: after the solve, cell-centred vorticity `ω = ∂v/∂x − ∂u/∂y` uses central differences of the averaged face velocities, with one-sided differences on the first and last row or column. The stream function satisfies `∂ψ/∂y = u` and `∂ψ/∂x = −v`, is integrated from the bottom-left corner and has its fluid-cell mean removed, so it is a gauge-fixed value rather than a unique potential in multiply connected domains.
@@ -292,6 +297,7 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 13. **Boundary mass balance**: after the final projection, the outward mass flux `ρ·u·dy` or `ρ·v·dx` is integrated over all four sides. The report splits it into inflow and outflow magnitudes and reports the signed net and `|net| / max(inflow, outflow)` as a conservation check.
 14. **Streamlines**: a self-contained SVG traces streamlines from a regular seed grid with a second-order midpoint rule in both directions, using bilinear cell-centred velocity. Integration stops at solids, domain sides, stagnation or 600 steps, and solid cells are drawn as a grey mask.
 15. **Contours**: a self-contained SVG samples one field at pressure-cell centres, clips every interior quad into nine value bands by linear interpolation along its edges, fills each band with one palette colour and traces the eight band boundaries with marching squares. Ambiguous saddle cells are resolved by the average corner value, solid cells stay dark grey, and the legend carries the discrete bands and the physical range. `speed` is derived as `√(u² + v²)` at cell centres.
+16. **Adaptive time step**: with `time.adaptive`, every step is recomputed as `min(time.dt, targetCfl·min(dx,dy)/max(U), 0.5/((ν+νt)·(1/dx²+1/dy²)), 0.5/(κ·(1/dx²+1/dy²)))`, where `U` includes boundary velocities and `κ` is the scalar or thermal diffusivity. The report stores the mean, smallest and largest step and the summed physical time, so a run under a fixed step budget reaches a different final time than its non-adaptive counterpart.
 
 Upwind and explicit Euler are first-order in space and time, so the default configuration has visible numerical diffusion. Selecting `central` or `quick` sharpens fronts and reduces diffusion, at the cost of possible dispersive overshoot and a tighter cell-Péclet stability limit.
 
@@ -326,8 +332,9 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 21. **Time schemes**: Euler and RK2 both stay finite on a lid-driven cavity at the same physical time and report their scheme; against a fine RK2 reference the RK2 coarse solution has less than half the Euler temporal error.
 22. **Termination reason**: a loose tolerance stops with `terminationReason = steadyState`; a strict short run reports `maxSteps`.
 23. **Contours**: exporting `speed` writes `solution-speed-contours.svg` with the field/unit title, filled-band polygon elements, marching-squares iso-lines and the legend text; a named `.svg` target is used verbatim and temperature contours without a scalar field fail with `export/no-field`.
+24. **Adaptive time step**: a lid-driven cavity with `dt = 0.05 s`, target CFL 0.5 and `h = 0.05 m` reduces every step to about 0.025 s, reports `adaptive = true` and `time = averageDt × steps`, and rejects `targetCfl > 1` with `time/invalid`.
 
-`projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK/SVG/streamline/residual/force export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation. It also round-trips slip walls, outlet pressure, reference quantities, inlet profiles and the time scheme through both the session and CLI paths.
+`projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK/SVG/streamline/residual/force export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation. It also round-trips slip walls, outlet pressure, reference quantities, inlet profiles, the time scheme and adaptive time settings through both the session and CLI paths.
 
 Node-API and TypeScript layer checks:
 
@@ -348,7 +355,8 @@ cargo build -p cfd-model --offline
 - Two dimensions only; no three-dimensional mesh or axisymmetric support.
 - Single-phase, incompressible, constant-density, constant-viscosity Newtonian flow only; the optional eddy viscosity is algebraic (constant or mixing length), so high-Reynolds-number results remain a laminar approximation.
 - Uniform structured Cartesian meshes only; no body-fitted meshes, adaptive refinement, moving meshes or immersed boundaries. Obstacles are stair-stepped by cell centre.
-- Explicit time stepping is limited by CFL and diffusion numbers; finer meshes and higher viscosity require a smaller `dt`. Violations raise an error instead of reducing the step automatically.
+- Explicit time stepping is limited by CFL and diffusion numbers; finer meshes and higher viscosity require a smaller `dt`. Without adaptivity a violation raises an error; with `time.adaptive` every step is clamped to the target CFL and diffusion bound instead.
+- Adaptive stepping changes the physical time reached for a fixed step count. It does not adapt the mesh, and it uses the velocity at the start of the step, so a strong transient can briefly exceed the target before the next step clamps again.
 - The default first-order upwind plus explicit Euler makes space and time first-order, with significant numerical diffusion. `central` and `quick` are available, but above a cell Péclet number of about 2 they can oscillate and destabilise the explicit scheme. `rk2` reduces the temporal error (about 3.5× at a representative cavity step) but keeps the same pressure projection and CFL limits, so it does not permit a larger `dt`.
 - Inlet profiles shape only the normal velocity of an `inlet` side; the tangential component stays uniform, and walls, slip sides and outlets ignore the profile.
 - Passive scalar (temperature) transport is supported, but Boussinesq buoyancy is not; the `buoyancy` field is rejected with `capability/not-implemented`.

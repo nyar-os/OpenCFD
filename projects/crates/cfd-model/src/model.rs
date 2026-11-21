@@ -161,7 +161,7 @@ impl FromStr for TimeScheme {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeSettings {
-    /// Constant time step `dt` (s).
+    /// Constant time step `dt` (s). With `adaptive` it is the upper bound.
     #[serde(default = "default_dt")]
     pub dt: f64,
     /// Number of time steps to advance.
@@ -178,6 +178,12 @@ pub struct TimeSettings {
     /// Explicit time integration scheme of the momentum equation.
     #[serde(default)]
     pub scheme: TimeScheme,
+    /// Reduce every step to satisfy the explicit stability limits.
+    #[serde(default)]
+    pub adaptive: bool,
+    /// Target convective CFL number of an adaptive step, in `(0, 1]`.
+    #[serde(default = "default_target_cfl")]
+    pub target_cfl: f64,
 }
 
 impl Default for TimeSettings {
@@ -188,6 +194,8 @@ impl Default for TimeSettings {
             pressure_iterations: default_pressure_iterations(),
             tolerance: default_tolerance(),
             scheme: TimeScheme::default(),
+            adaptive: false,
+            target_cfl: default_target_cfl(),
         }
     }
 }
@@ -1172,6 +1180,15 @@ impl Model {
                 "tolerance must be a finite positive number",
             ));
         }
+        if !self.time.target_cfl.is_finite()
+            || self.time.target_cfl <= 0.0
+            || self.time.target_cfl > 1.0
+        {
+            report.push(Issue::error(
+                "time/invalid",
+                "time.targetCfl must be a finite number in (0, 1]",
+            ));
+        }
         for (name, boundary) in [
             ("left", &self.boundaries.left),
             ("right", &self.boundaries.right),
@@ -1360,6 +1377,10 @@ fn default_pressure_iterations() -> usize {
 
 fn default_tolerance() -> f64 {
     1e-3
+}
+
+fn default_target_cfl() -> f64 {
+    0.9
 }
 
 fn default_mixing_length() -> f64 {

@@ -27,6 +27,7 @@ import type {
     ScalarSetRequest,
     SolveOptions,
     SolveReport,
+    TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
 } from './types.js';
@@ -134,6 +135,20 @@ export function timeSchemeSet(
 ): CaseSummary {
     return decode<CaseSummary>(() =>
         binding('time.scheme.set').time_scheme_set(handle, request.scheme),
+    );
+}
+
+/** Enables or disables adaptive time stepping and writes the document back. */
+export function timeAdaptiveSet(
+    handle: number,
+    request: TimeAdaptiveSetRequest,
+): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('time.adaptive.set').time_adaptive_set(
+            handle,
+            request.enabled,
+            request.targetCfl,
+        ),
     );
 }
 

@@ -26,6 +26,7 @@ import type {
     ScalarSetRequest,
     SolveOptions,
     SolveReport,
+    TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
 } from './types.js';
@@ -79,6 +80,12 @@ export class CfdCase {
     setTimeScheme(request: TimeSchemeSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.timeSchemeSet(this.handle, request));
+    }
+
+    /** Enables or disables adaptive time stepping and writes the document back. */
+    setTimeAdaptive(request: TimeAdaptiveSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.timeAdaptiveSet(this.handle, request));
     }
 
     /** Sets one boundary and writes the document back. */

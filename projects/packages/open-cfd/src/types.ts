@@ -55,6 +55,10 @@ export interface TimeSettings {
     readonly tolerance: number;
     /** Explicit time integration scheme. */
     readonly scheme: TimeScheme;
+    /** Whether every step is reduced to satisfy the explicit stability limits. */
+    readonly adaptive: boolean;
+    /** Target convective CFL number of an adaptive step, in `(0, 1]`. */
+    readonly targetCfl: number;
 }
 
 /** Boundary kind of one side. */
@@ -355,7 +359,17 @@ export interface SolveReport {
     readonly format: string;
     readonly version: number;
     readonly steps: number;
+    /** Time step of the last advanced step. */
     readonly dt: number;
+    /** Whether adaptive time stepping reduced the configured upper bound. */
+    readonly adaptive: boolean;
+    /** Mean time step over the advanced steps. */
+    readonly averageDt: number;
+    /** Smallest time step used. */
+    readonly minDt: number;
+    /** Largest time step used. */
+    readonly maxDt: number;
+    /** Simulated physical time, the sum of the advanced steps. */
     readonly time: number;
     readonly maxVelocity: number;
     readonly minPressure: number;
@@ -424,6 +438,13 @@ export interface TimeSetRequest {
 /** Arguments of `CfdCase.setTimeScheme()`. */
 export interface TimeSchemeSetRequest {
     readonly scheme: TimeScheme;
+}
+
+/** Arguments of `CfdCase.setTimeAdaptive()`. */
+export interface TimeAdaptiveSetRequest {
+    readonly enabled: boolean;
+    /** Target CFL in `(0, 1]`; omitted keeps the current value. */
+    readonly targetCfl?: number;
 }
 
 /** Arguments of `CfdCase.setBoundary()`. */

@@ -220,9 +220,21 @@ pub struct Report {
     pub version: u32,
     /// Number of time steps that were actually advanced.
     pub steps: usize,
-    /// Time step `dt` (s).
+    /// Time step of the last advanced step (s).
     pub dt: f64,
-    /// Simulated physical time `steps * dt` (s).
+    /// Whether adaptive time stepping reduced the configured upper bound.
+    #[serde(default)]
+    pub adaptive: bool,
+    /// Mean time step over the advanced steps (s).
+    #[serde(default)]
+    pub average_dt: f64,
+    /// Smallest time step used (s).
+    #[serde(default)]
+    pub min_dt: f64,
+    /// Largest time step used (s).
+    #[serde(default)]
+    pub max_dt: f64,
+    /// Simulated physical time, the sum of the advanced time steps (s).
     pub time: f64,
     /// Maximum velocity magnitude on all faces (m/s).
     pub max_velocity: f64,
@@ -435,7 +447,9 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         tolerance: model.time.tolerance,
     };
     let mut eddy = eddy_viscosity_field(&mesh, model, &u, &v);
-    check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
+    if !model.time.adaptive {
+        check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
+    }
 
     let mut u_star = u.clone();
     let mut v_star = v.clone();
@@ -460,11 +474,21 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
     let mut force_samples: Vec<Vec<ForceSample>> = vec![Vec::new(); model.obstacles.len()];
     let probe_cells = locate_probes(&mesh, model)?;
     let mut probe_samples: Vec<Vec<ProbeSample>> = vec![Vec::new(); model.probes.len()];
+    let mut simulated_time = 0.0;
+    let mut dt_sum = 0.0;
+    let mut dt_min = f64::INFINITY;
+    let mut dt_max = 0.0_f64;
+    let mut last_dt = model.time.dt;
 
     for step in 1..=steps {
         u_previous.copy_from_slice(&u);
         v_previous.copy_from_slice(&v);
         eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+        let dt = if model.time.adaptive {
+            adaptive_dt(&mesh, model, &u, &v, eddy.as_deref())
+        } else {
+            model.time.dt
+        };
 
         match model.time.scheme {
             TimeScheme::Euler => momentum_euler(
@@ -474,6 +498,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 &v,
                 &p,
                 eddy.as_deref(),
+                dt,
                 &mut u_star,
                 &mut v_star,
                 &mut du,
@@ -486,6 +511,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 &v,
                 &p,
                 eddy.as_deref(),
+                dt,
                 &mut u_star,
                 &mut v_star,
             ),
@@ -499,20 +525,13 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
             &mut p,
             &divergence,
             model.fluid.density,
-            model.time.dt,
+            dt,
             &settings,
         )?;
 
         u.copy_from_slice(&u_star);
         v.copy_from_slice(&v_star);
-        project_velocity(
-            &mesh,
-            model.fluid.density,
-            model.time.dt,
-            &p,
-            &mut u,
-            &mut v,
-        );
+        project_velocity(&mesh, model.fluid.density, dt, &p, &mut u, &mut v);
         mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
 
         if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
@@ -523,7 +542,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 model.thermal.as_ref(),
                 model.fluid.density,
                 model.convection,
-                model.time.dt,
+                dt,
                 &u,
                 &v,
                 field,
@@ -542,6 +561,12 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 "the solve produced NaN or Inf; reduce dt, refine the mesh or lower the boundary velocity",
             ));
         }
+
+        simulated_time += dt;
+        dt_sum += dt;
+        dt_min = dt_min.min(dt);
+        dt_max = dt_max.max(dt);
+        last_dt = dt;
 
         residual = velocity_residual(&u_previous, &v_previous, &u, &v);
         let sample = step % sample_stride == 0 || step == steps;
@@ -563,12 +588,12 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
             );
             append_probe_samples(
                 &mesh,
-                model,
                 &u,
                 &v,
                 &p,
                 temperature.as_deref(),
                 step,
+                simulated_time,
                 &probe_cells,
                 &mut probe_samples,
             );
@@ -602,8 +627,16 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         format: REPORT_FORMAT.to_string(),
         version: REPORT_VERSION,
         steps: completed,
-        dt: model.time.dt,
-        time: completed as f64 * model.time.dt,
+        dt: last_dt,
+        adaptive: model.time.adaptive,
+        average_dt: if completed > 0 {
+            dt_sum / completed as f64
+        } else {
+            last_dt
+        },
+        min_dt: if dt_min.is_finite() { dt_min } else { last_dt },
+        max_dt: dt_max,
+        time: simulated_time,
         max_velocity,
         min_pressure,
         max_pressure,
@@ -1023,13 +1056,13 @@ fn momentum_euler(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
+    dt: f64,
     u_star: &mut [f64],
     v_star: &mut [f64],
     du: &mut [f64],
     dv: &mut [f64],
 ) {
     momentum_derivative(mesh, model, u, v, p, eddy, du, dv);
-    let dt = model.time.dt;
     for index in 0..u.len() {
         u_star[index] = u[index] + dt * du[index];
     }
@@ -1048,10 +1081,10 @@ fn momentum_heun(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
+    dt: f64,
     u_star: &mut [f64],
     v_star: &mut [f64],
 ) {
-    let dt = model.time.dt;
     let mut u1 = u.to_vec();
     let mut v1 = v.to_vec();
     let mut du1 = vec![0.0; u.len()];
@@ -1334,16 +1367,7 @@ fn check_explicit_stability(
     eddy: Option<&[f64]>,
 ) -> Result<(), CfdError> {
     let mut report = CheckReport::new();
-    let boundary_speed = [
-        &model.boundaries.left,
-        &model.boundaries.right,
-        &model.boundaries.top,
-        &model.boundaries.bottom,
-    ]
-    .iter()
-    .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
-    .fold(0.0_f64, f64::max);
-    let max_speed = max_velocity(u, v).max(boundary_speed);
+    let max_speed = max_velocity(u, v).max(max_boundary_speed(model));
     let cfl = max_speed * model.time.dt / mesh.dx.min(mesh.dy);
     if cfl > 1.0 {
         report.push(Issue::error(
@@ -1385,6 +1409,66 @@ fn max_eddy_viscosity(eddy: Option<&[f64]>) -> f64 {
             .iter()
             .fold(0.0_f64, |maximum, value| maximum.max(*value))
     })
+}
+
+fn max_boundary_speed(model: &Model) -> f64 {
+    [
+        &model.boundaries.left,
+        &model.boundaries.right,
+        &model.boundaries.top,
+        &model.boundaries.bottom,
+    ]
+    .iter()
+    .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
+    .fold(0.0_f64, f64::max)
+}
+
+/// Thermal diffusivity of the configured passive scalar, if any.
+fn scalar_diffusivity(model: &Model) -> f64 {
+    let Some(config) = model.scalar.as_ref() else {
+        return 0.0;
+    };
+    if let Some(conductivity) = model
+        .thermal
+        .as_ref()
+        .and_then(|thermal| thermal.conductivity)
+        .filter(|value| *value > 0.0)
+    {
+        let capacity =
+            model.fluid.density * model.thermal.as_ref().map_or(0.0, |t| t.specific_heat);
+        if capacity.is_finite() && capacity > 0.0 {
+            return conductivity / capacity;
+        }
+    }
+    config.diffusivity
+}
+
+/// Largest explicit-stable step at the current velocity and eddy viscosity.
+///
+/// The convective limit uses the configured `targetCfl`; diffusion uses the
+/// classic `0.5·h²/ν` bound for the two-dimensional Laplacian and also accounts
+/// for the passive scalar. The configured `time.dt` is always an upper bound, so
+/// enabling adaptivity can only reduce a step.
+fn adaptive_dt(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64], eddy: Option<&[f64]>) -> f64 {
+    let max_speed = max_velocity(u, v).max(max_boundary_speed(model));
+    let cell_factor = 1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy);
+    let mut limit = f64::INFINITY;
+    if max_speed > 0.0 {
+        limit = limit.min(model.time.target_cfl * mesh.dx.min(mesh.dy) / max_speed);
+    }
+    let viscosity = model.fluid.viscosity + max_eddy_viscosity(eddy);
+    if viscosity > 0.0 {
+        limit = limit.min(0.5 / (viscosity * cell_factor));
+    }
+    let diffusivity = scalar_diffusivity(model);
+    if diffusivity > 0.0 {
+        limit = limit.min(0.5 / (diffusivity * cell_factor));
+    }
+    if limit.is_finite() && limit > 0.0 {
+        limit.min(model.time.dt)
+    } else {
+        model.time.dt
+    }
 }
 
 fn initial_temperature(mesh: &Mesh, config: &ScalarConfig) -> Vec<f64> {
@@ -2040,12 +2124,12 @@ fn locate_probes(mesh: &Mesh, model: &Model) -> Result<Vec<(usize, usize)>, CfdE
 #[allow(clippy::too_many_arguments)]
 fn append_probe_samples(
     mesh: &Mesh,
-    model: &Model,
     u: &[f64],
     v: &[f64],
     p: &[f64],
     temperature: Option<&[f64]>,
     step: usize,
+    time: f64,
     cells: &[(usize, usize)],
     samples: &mut [Vec<ProbeSample>],
 ) {
@@ -2054,7 +2138,7 @@ fn append_probe_samples(
         let (u_value, v_value) = mesh.cell_velocity(u, v, i, j);
         samples[index].push(ProbeSample {
             step,
-            time: step as f64 * model.time.dt,
+            time,
             u: u_value,
             v: v_value,
             speed: u_value.hypot(v_value),
@@ -2651,12 +2735,12 @@ mod tests {
         let mut samples = vec![Vec::new()];
         append_probe_samples(
             &mesh,
-            &model,
             &u,
             &v,
             &p,
-            Some(&temperature),
+            Some(temperature.as_slice()),
             3,
+            1.5,
             &cells,
             &mut samples,
         );

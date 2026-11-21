@@ -79,6 +79,10 @@ fn number(ctx: &CallContext, index: usize) -> Result<f64> {
     argument(ctx, index)?.as_f64()
 }
 
+fn boolean(ctx: &CallContext, index: usize) -> Result<bool> {
+    argument(ctx, index)?.as_bool()
+}
+
 fn optional_number(ctx: &CallContext, index: usize) -> Result<Option<f64>> {
     match ctx.args().get(index).copied() {
         Some(value) if !value.is_undefined()? => Ok(Some(value.as_f64()?)),
@@ -204,6 +208,18 @@ fn time_scheme_set(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;
     let scheme = text(&ctx, 1)?.parse::<TimeScheme>().map_err(fail)?;
     let summary = with_session(handle, |session| session.time_scheme_set(scheme))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Enables or disables adaptive time stepping of one session document.
+#[function]
+fn time_adaptive_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let enabled = boolean(&ctx, 1)?;
+    let target_cfl = optional_number(&ctx, 2)?;
+    let summary = with_session(handle, |session| {
+        session.time_adaptive_set(enabled, target_cfl)
+    })?;
     respond(&ctx, &json!(summary))
 }
 
@@ -387,6 +403,7 @@ register_module![
     fluid_set,
     time_set,
     time_scheme_set,
+    time_adaptive_set,
     boundary_set,
     boundary_profile_set,
     obstacle_add,

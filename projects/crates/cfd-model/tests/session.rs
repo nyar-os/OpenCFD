@@ -549,3 +549,35 @@ fn session_save_and_create_refuse_existing_file() {
         "mesh/invalid"
     );
 }
+
+#[test]
+fn session_adaptive_time_setting_round_trips() {
+    let directory = temporary_dir("adaptive");
+    let case = directory.join("case.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&case).expect("create");
+
+    let summary = session
+        .time_adaptive_set(true, Some(0.4))
+        .expect("enable adaptive");
+    assert!(summary.time.adaptive);
+    assert!((summary.time.target_cfl - 0.4).abs() < 1e-12);
+
+    let mut reopened = OpenCfd::new(OpenCfdOptions::default());
+    let summary = reopened.open(&case).expect("reopen");
+    assert!(summary.time.adaptive);
+    assert!((summary.time.target_cfl - 0.4).abs() < 1e-12);
+
+    let summary = reopened
+        .time_adaptive_set(false, None)
+        .expect("disable adaptive");
+    assert!(!summary.time.adaptive);
+    assert!((summary.time.target_cfl - 0.4).abs() < 1e-12);
+    assert_eq!(
+        reopened
+            .time_adaptive_set(true, Some(2.0))
+            .expect_err("target CFL above 1")
+            .code,
+        "time/invalid"
+    );
+}

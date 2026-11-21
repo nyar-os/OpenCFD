@@ -73,6 +73,41 @@ fn still_cavity_stays_at_rest_without_nan() {
 }
 
 #[test]
+fn adaptive_time_step_clamps_to_the_target_cfl() {
+    let mut model = mesh_model(20, 20);
+    model.time.dt = 0.05;
+    model.time.steps = 10;
+    model.time.pressure_iterations = 80;
+    model.time.adaptive = true;
+    model.time.target_cfl = 0.5;
+
+    let solution = solve(&model).expect("solve");
+    let report = &solution.report;
+    assert!(report.adaptive);
+    assert!(report.max_dt <= 0.05 + 1e-12);
+    assert!(report.min_dt > 0.0);
+    assert!(report.average_dt < 0.05, "adaptive did not reduce dt");
+    assert!(
+        (report.time - report.average_dt * report.steps as f64).abs() < 1e-12,
+        "time is not the sum of steps"
+    );
+    // Lid speed is 1 m/s and h = 1/20 m, so the target CFL 0.5 gives 0.025 s.
+    assert!(
+        (report.average_dt - 0.025).abs() < 1e-3,
+        "average dt = {}",
+        report.average_dt
+    );
+    assert!((report.time - 0.25).abs() < 1e-2);
+
+    let mut invalid = mesh_model(8, 8);
+    invalid.time.target_cfl = 1.5;
+    assert_eq!(
+        invalid.validate().expect_err("target CFL above 1").code,
+        "time/invalid"
+    );
+}
+
+#[test]
 fn lid_driven_cavity_develops_clockwise_flow() {
     let mut model = Model::new();
     model.mesh.nx = 24;
@@ -330,6 +365,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"timeSchemes\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"adaptiveTimeStep\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"probes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"wallShear\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"slipBoundary\": \"supported\""));

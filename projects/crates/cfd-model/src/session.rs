@@ -364,6 +364,24 @@ impl OpenCfd {
         })
     }
 
+    /// Enables or disables adaptive time stepping.
+    ///
+    /// When enabled, every step is reduced below `time.dt` as needed to satisfy
+    /// the convective CFL target (and the explicit diffusion bound). A
+    /// `target_cfl` outside `(0, 1]` is rejected by `validate`.
+    pub fn time_adaptive_set(
+        &mut self,
+        enabled: bool,
+        target_cfl: Option<f64>,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.time.adaptive = enabled;
+            if let Some(target) = target_cfl {
+                model.time.target_cfl = target;
+            }
+        })
+    }
+
     /// Sets one side's boundary kind, optional velocity components and outlet
     /// reference pressure.
     pub fn boundary_set(

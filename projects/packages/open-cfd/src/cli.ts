@@ -32,6 +32,7 @@ usage:
   open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   open-cfd time scheme set <file> --scheme euler|rk2
+  open-cfd time adaptive set <file> --cfl <n|off>
   open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
@@ -315,6 +316,39 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'time': {
+            if (rest[0] === 'adaptive') {
+                if (rest[1] !== 'set') {
+                    throw cliError(
+                        'cli/unknown-command',
+                        rest[1] === undefined
+                            ? '`time adaptive` needs the `set` subcommand'
+                            : `\`time adaptive\` subcommand \`${rest[1]}\` does not exist; only \`set\` is supported`,
+                    );
+                }
+                const parsed = parseArguments(rest.slice(2), ['--cfl']);
+                const file = positional(parsed, 0, 'time adaptive set <file> --cfl <n|off>');
+                const raw = requiredOption(parsed, '--cfl').trim();
+                const enabled = raw.toLowerCase() !== 'off';
+                const targetCfl = enabled ? Number(raw) : undefined;
+                if (
+                    enabled &&
+                    (targetCfl === undefined ||
+                        !Number.isFinite(targetCfl) ||
+                        targetCfl <= 0 ||
+                        targetCfl > 1)
+                ) {
+                    throw cliError(
+                        'cli/invalid-number',
+                        `--cfl must be a number in (0, 1] or \`off\`, got \`${raw}\``,
+                    );
+                }
+                const document = await session.open(file);
+                const summary = document.setTimeAdaptive({ enabled, targetCfl });
+                console.log(
+                    `time adaptive set: adaptive=${summary.time.adaptive}, targetCfl=${summary.time.targetCfl}`,
+                );
+                return 0;
+            }
             if (rest[0] === 'scheme') {
                 if (rest[1] !== 'set') {
                     throw cliError(

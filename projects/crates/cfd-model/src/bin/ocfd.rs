@@ -18,6 +18,7 @@ Usage:
   ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   ocfd time scheme set <file> --scheme euler|rk2
+  ocfd time adaptive set <file> --cfl <n|off>
   ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
@@ -192,13 +193,26 @@ fn time_command(args: &[String]) -> Result<i32, CfdError> {
                 "`time scheme` requires a subcommand; only set is supported",
             )),
         },
+        Some("adaptive") => match args.get(1).map(String::as_str) {
+            Some("set") => time_adaptive_set(&args[2..]),
+            Some(other) => Err(CfdError::new(
+                "cli/unknown-command",
+                format!("`time adaptive` has no subcommand `{other}`; only set is supported"),
+            )),
+            None => Err(CfdError::new(
+                "cli/missing-argument",
+                "`time adaptive` requires a subcommand; only set is supported",
+            )),
+        },
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`time` has no subcommand `{other}`; only set and scheme are supported"),
+            format!(
+                "`time` has no subcommand `{other}`; only set, scheme and adaptive are supported"
+            ),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`time` requires a subcommand; only set and scheme are supported",
+            "`time` requires a subcommand; only set, scheme and adaptive are supported",
         )),
     }
 }
@@ -236,6 +250,30 @@ fn time_set(args: &[String]) -> Result<i32, CfdError> {
         summary.time.steps,
         summary.time.pressure_iterations,
         summary.time.tolerance
+    );
+    Ok(0)
+}
+
+fn time_adaptive_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--cfl"], &[])?;
+    let file = positional(&parsed, 0, "time adaptive set <file> --cfl <n|off>")?;
+    let raw = required(&parsed, "--cfl")?;
+    let (enabled, target) = if raw.eq_ignore_ascii_case("off") {
+        (false, None)
+    } else {
+        let cfl = raw.parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-number",
+                format!("--cfl must be a number in (0, 1] or `off`, got `{raw}`"),
+            )
+        })?;
+        (true, Some(cfl))
+    };
+    let mut session = open_session(file)?;
+    let summary = session.time_adaptive_set(enabled, target)?;
+    println!(
+        "time adaptive set: adaptive={}, targetCfl={}",
+        summary.time.adaptive, summary.time.target_cfl
     );
     Ok(0)
 }
@@ -719,6 +757,12 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
         report.mass_balance.net,
         report.mass_balance.relative_error
     );
+    if report.adaptive {
+        eprintln!(
+            "adaptive step: averageDt={} s, minDt={} s, maxDt={} s",
+            report.average_dt, report.min_dt, report.max_dt
+        );
+    }
     let json = serde_json::to_string_pretty(&report).map_err(|error| {
         CfdError::new(
             "document/serialize",

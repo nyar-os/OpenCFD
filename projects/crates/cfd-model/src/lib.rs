@@ -76,6 +76,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "streamFunction": "supported",
     "convectionSchemes": "supported",
     "timeSchemes": "supported",
+    "adaptiveTimeStep": "supported",
     "probes": "supported",
     "wallShear": "supported",
     "slipBoundary": "supported",

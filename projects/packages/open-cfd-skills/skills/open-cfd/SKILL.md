@@ -16,8 +16,8 @@ legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV or force history CSV. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
 (`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
-boundary mass balance (`massBalance`), the selected `timeScheme` and the
-`terminationReason`. Compressible flow, three-dimensional flow, Boussinesq
+boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
+`averageDt`, `minDt`, `maxDt`) and the `terminationReason`. Compressible flow, three-dimensional flow, Boussinesq
 buoyancy, periodic boundaries, adaptive meshing and external format import are
 not implemented and report `capability/not-implemented`.
 
@@ -30,6 +30,7 @@ ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
 ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
 ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
 ocfd time scheme set <file> --scheme euler|rk2
+ocfd time adaptive set <file> --cfl <n|off>
 ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
 ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
@@ -85,7 +86,10 @@ rename. Confirm the path before running them.
   `contours` writes nine filled value bands plus marching-squares iso-lines and
   accepts the same `--field` names as `svg`, including `speed`.
 - Momentum time integration is `euler` (default) or `rk2`; both are explicit and
-  share the same CFL and diffusion stability guards.
+  share the same CFL and diffusion stability guards. Set `time.adaptive` with
+  `time.targetCfl` in `(0, 1]` (or `--cfl <n>` / `--cfl off`) to clamp every
+  step; `dt` remains the upper bound and the report adds `averageDt`, `minDt`
+  and `maxDt`.
 - Inlet profiles (`uniform`, `parabolic`, `powerLaw`) shape only the normal
   velocity of an `inlet` side.
 - `solve` stops early on the L2 norm of the velocity change when `--tolerance`
