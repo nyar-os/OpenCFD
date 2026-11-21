@@ -259,6 +259,14 @@ fn validate(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Measures the mesh quality of one session document.
+#[function]
+fn mesh_quality(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let report = with_session(handle, |session| session.mesh_quality())?;
+    respond(&ctx, &json!(report))
+}
+
 /// Appends one solid obstacle from a JSON request and returns the summary.
 #[function]
 fn obstacle_add(ctx: CallContext) -> Result<JsValue> {
@@ -448,6 +456,7 @@ register_module![
     pressure_gradient_set,
     reference_set,
     validate,
+    mesh_quality,
     solve,
     export,
     close

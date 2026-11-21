@@ -5,12 +5,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
-    export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout, solve,
-    solve_pressure, solve_with, solve_with_checkpoint, stream_function, transport_scalar,
-    vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme,
-    ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle,
-    PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution,
-    SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
+    export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout,
+    mesh_quality, solve, solve_pressure, solve_with, solve_with_checkpoint, stream_function,
+    transport_scalar, vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint,
+    ConvectionScheme, ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig,
+    Model, Obstacle, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal,
+    Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -2179,5 +2179,60 @@ fn checkpoint_rejects_a_different_mesh() {
             .expect_err("mesh mismatch")
             .code,
         "checkpoint/mismatch"
+    );
+}
+
+#[test]
+fn mesh_quality_reports_a_uniform_rectangular_mesh() {
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 10,
+        ny: 5,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let quality = mesh_quality(&mesh);
+    assert_eq!(quality.cells, 50);
+    assert_eq!(quality.fluid_cells, 50);
+    assert!((quality.dx - 0.1).abs() < 1e-12);
+    assert!((quality.dy - 0.2).abs() < 1e-12);
+    assert!((quality.min_aspect_ratio - 2.0).abs() < 1e-12);
+    assert!((quality.mean_aspect_ratio - 2.0).abs() < 1e-12);
+    assert!((quality.max_aspect_ratio - 2.0).abs() < 1e-12);
+    assert!(
+        quality.max_non_orthogonality < 1e-9,
+        "a Cartesian mesh is orthogonal, got {}",
+        quality.max_non_orthogonality
+    );
+    assert!(
+        quality.max_skewness < 1e-9,
+        "a uniform mesh is unskewed, got {}",
+        quality.max_skewness
+    );
+}
+
+#[test]
+fn mesh_quality_excludes_solids_and_is_reported_after_a_solve() {
+    let mut model = mesh_model(10, 10);
+    model.time.steps = 5;
+    model.obstacles.push(Obstacle::Rect {
+        id: String::new(),
+        x0: 0.2,
+        y0: 0.2,
+        x1: 0.4,
+        y1: 0.4,
+    });
+    let solution = solve(&model).expect("solve");
+    let quality = &solution.report.mesh_quality;
+    assert_eq!(quality.cells, 100);
+    assert!(
+        quality.fluid_cells < quality.cells,
+        "the obstacle must be excluded from the fluid cell count"
+    );
+    assert!((quality.max_aspect_ratio - 1.0).abs() < 1e-12);
+    assert_eq!(
+        solution.report.mesh_quality,
+        mesh_quality(&solution.mesh),
+        "the report must carry the measured mesh quality"
     );
 }

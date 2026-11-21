@@ -36,6 +36,7 @@ export interface NativeBinding {
     pressure_gradient_set(handle: number, dpdx: number, dpdy: number): string;
     reference_set(handle: number, velocity?: number, area?: number, length?: number): string;
     validate(handle: number): string;
+    mesh_quality(handle: number): string;
     solve(
         handle: number,
         steps?: number,

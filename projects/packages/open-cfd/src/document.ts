@@ -20,6 +20,7 @@ import type {
     ExportLayout,
     ExportReport,
     FluidSetRequest,
+    MeshQuality,
     MeshSetRequest,
     Obstacle,
     Probe,
@@ -177,6 +178,12 @@ export class CfdCase {
     validate(): CaseSummary {
         this.assertOpen();
         return this.adopt(service.validate(this.handle));
+    }
+
+    /** Measures the mesh quality of this case without solving it. */
+    meshQuality(): MeshQuality {
+        this.assertOpen();
+        return service.meshQuality(this.handle);
     }
 
     /** Solves the document and returns the report. */

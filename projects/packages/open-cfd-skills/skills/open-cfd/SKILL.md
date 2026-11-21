@@ -59,6 +59,7 @@ ocfd convection set <file> --scheme upwind|central|quick
 ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
+ocfd quality <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
 ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
 ```
@@ -84,6 +85,7 @@ rename. Confirm the path before running them.
 | create | Build a case from a brief | `ocfd validate` output and the saved `.ocfd` document |
 | edit | Change mesh, fluid, time, boundary, obstacle, reference or scheme settings | `ocfd validate` before and after |
 | validate | Check that a case is well formed | `ocfd validate` findings with codes |
+| quality | Read non-orthogonality, aspect ratio and skewness without solving | the printed JSON report |
 | solve | Integrate the case to a report | the solver report with residual/continuity history, mass balance and forces |
 | deliver | Write CSV, VTK, SVG or streamlines output | the exported file plus the solver report it came from |
 
@@ -127,8 +129,11 @@ rename. Confirm the path before running them.
 - `wall function set` evaluates the reported wall shear from the log law
   `u⁺ = (1/κ)ln(y⁺) + B` above `minYPlus`; momentum keeps its no-slip ghost and
   every wall side also reports `meanYPlus`.
-- `solve` stops early on the L2 norm of the velocity change when `--tolerance`
-  is given and reports `converged`, `steadyState`, `residual`,
+- `quality <file>` measures the mesh without solving and prints
+  `meshQuality`-shaped JSON: non-orthogonality in degrees, cell aspect-ratio
+  extremes and interior-face skewness. The mesh is uniform, so the values are
+  constant over the domain; a solid obstacle lowers `fluidCells` below `cells`.
+- `solve` stops early on the L2 norm of the velocity change when `--tolerance`  is given and reports `converged`, `steadyState`, `residual`,
   `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,
   `massBalance` and `forces` (with `cm` and the resolved reference quantities).
   `--restart` resumes from an `open-cfd-checkpoint` JSON document and

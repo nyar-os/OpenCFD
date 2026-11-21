@@ -18,11 +18,13 @@ use crate::export::{
     export_coefficients, export_contours, export_csv_with_layout, export_forces, export_residuals,
     export_streamlines, export_svg, export_vtk_with_layout, ExportField, ExportLayout,
 };
+use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
     MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, Side, ThermalConfig,
     TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
 };
+use crate::quality::{mesh_quality as measure_quality, MeshQuality};
 use crate::solver::{
     solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
 };
@@ -654,6 +656,17 @@ impl OpenCfd {
     /// Solves the current document and returns the report.
     pub fn solve(&self) -> Result<Report, CfdError> {
         Ok(solve(&self.model)?.report)
+    }
+
+    /// Measures the quality of the current document's mesh.
+    ///
+    /// The solid mask is applied first, so `fluidCells` and the aspect-ratio
+    /// extremes match the mesh the solver would build. No time stepping runs.
+    pub fn mesh_quality(&self) -> Result<MeshQuality, CfdError> {
+        self.model.validate()?;
+        let mut mesh = Mesh::new(&self.model.mesh)?;
+        mesh.apply_obstacles(&self.model.obstacles)?;
+        Ok(measure_quality(&mesh))
     }
 
     /// Solves with solve-time overrides and returns the report.

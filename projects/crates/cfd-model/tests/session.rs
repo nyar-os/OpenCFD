@@ -805,6 +805,32 @@ fn session_buoyancy_requires_scalar_and_round_trips_through_cli() {
 }
 
 #[test]
+fn session_and_cli_report_the_same_mesh_quality() {
+    let directory = temporary_dir("quality");
+    let path = directory.join("quality.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.mesh_set(10, 5, 1.0, 1.0).expect("mesh");
+    let quality = session.mesh_quality().expect("quality");
+    assert_eq!(quality.cells, 50);
+    assert_eq!(quality.fluid_cells, 50);
+    assert!((quality.max_aspect_ratio - 2.0).abs() < 1e-12);
+    assert!(quality.max_non_orthogonality < 1e-9);
+
+    let cli = text(&path);
+    let output = run_cli(&["quality", &cli]);
+    assert!(
+        output.status.success(),
+        "ocfd quality failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let decoded: serde_json::Value = serde_json::from_slice(&output.stdout).expect("quality JSON");
+    assert_eq!(decoded["cells"].as_u64(), Some(50));
+    assert_eq!(decoded["fluidCells"].as_u64(), Some(50));
+    assert!((decoded["maxAspectRatio"].as_f64().expect("ratio") - 2.0).abs() < 1e-12);
+}
+
+#[test]
 fn session_and_cli_restart_from_checkpoints() {
     let directory = temporary_dir("restart");
     let path = directory.join("restart.ocfd");

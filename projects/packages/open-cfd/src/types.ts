@@ -416,6 +416,23 @@ export interface WallShear {
     readonly frictionCoefficient: number;
 }
 
+/** Mesh quality metrics measured from the structured mesh. */
+export interface MeshQuality {
+    readonly cells: number;
+    readonly fluidCells: number;
+    readonly dx: number;
+    readonly dy: number;
+    readonly minAspectRatio: number;
+    readonly meanAspectRatio: number;
+    readonly maxAspectRatio: number;
+    /** Mean non-orthogonality angle in degrees. */
+    readonly meanNonOrthogonality: number;
+    /** Largest non-orthogonality angle in degrees. */
+    readonly maxNonOrthogonality: number;
+    readonly meanSkewness: number;
+    readonly maxSkewness: number;
+}
+
 /** Solve-time overrides accepted by `CfdCase.solve()`. */
 export interface SolveOptions {
     /** Steps to advance; overrides `time.steps`. */
@@ -451,6 +468,8 @@ export interface SolveReport {
     readonly minPressure: number;
     readonly maxPressure: number;
     readonly divergenceL2: number;
+    /** Quality metrics of the mesh the case was solved on. */
+    readonly meshQuality: MeshQuality;
     /** Net mass flow through the domain boundary. */
     readonly massBalance: MassBalance;
     /** Minimum vorticity over fluid cells in 1/s. */

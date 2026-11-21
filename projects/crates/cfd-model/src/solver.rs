@@ -8,6 +8,7 @@ use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
     TimeScheme, Turbulence, TurbulenceModel, WallFunction,
 };
+use crate::quality::{mesh_quality, MeshQuality};
 use crate::CfdError;
 
 /// Identifier stored in the `format` field of a solve report.
@@ -269,6 +270,9 @@ pub struct Report {
     pub max_pressure: f64,
     /// RMS of the discrete divergence after the final projection (1/s).
     pub divergence_l2: f64,
+    /// Quality metrics of the mesh the case was solved on.
+    #[serde(default)]
+    pub mesh_quality: MeshQuality,
     /// Net mass flow through the domain boundary.
     #[serde(default)]
     pub mass_balance: MassBalance,
@@ -699,6 +703,7 @@ pub fn solve_with_checkpoint(
     let divergence_l2 = rms(&divergence);
     let mass_balance = mass_balance(&mesh, &model.boundaries, model.fluid.density, &u, &v);
     let max_velocity = max_velocity(&u, &v);
+    let quality = mesh_quality(&mesh);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
     let vorticity_field = vorticity(&mesh, &u, &v);
     let stream_function_field = stream_function(&mesh, &u, &v);
@@ -729,6 +734,7 @@ pub fn solve_with_checkpoint(
         min_pressure,
         max_pressure,
         divergence_l2,
+        mesh_quality: quality,
         mass_balance,
         vorticity_min,
         vorticity_max,

@@ -20,6 +20,7 @@ import type {
     ExportLayout,
     ExportReport,
     FluidSetRequest,
+    MeshQuality,
     MeshSetRequest,
     Obstacle,
     OpenCfdCapabilities,
@@ -279,6 +280,11 @@ export function referenceSet(handle: number, request: ReferenceSetRequest): Case
 /** Validates one case and returns its summary. */
 export function validate(handle: number): CaseSummary {
     return decode<CaseSummary>(() => binding('validate').validate(handle));
+}
+
+/** Measures the mesh quality of one case without solving it. */
+export function meshQuality(handle: number): MeshQuality {
+    return decode<MeshQuality>(() => binding('mesh.quality').mesh_quality(handle));
 }
 
 /** Solves one case and returns the report. */

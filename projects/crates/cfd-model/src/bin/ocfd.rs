@@ -44,6 +44,7 @@ Usage:
   ocfd wall function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
   ocfd wall function clear <file>
   ocfd validate <file>
+  ocfd quality <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   ocfd capabilities
@@ -98,6 +99,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "heat" | "thermal" => heat_command(&args[1..]),
         "wall" => wall_command(&args[1..]),
         "validate" => validate(&args[1..]),
+        "quality" => quality(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "export" => export(&args[1..]),
         "compressible" => Err(not_implemented("compressible flow")),
@@ -923,6 +925,21 @@ fn validate(args: &[String]) -> Result<i32, CfdError> {
         summary.time.steps,
         summary.time.dt
     );
+    Ok(0)
+}
+
+fn quality(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "quality <file>")?;
+    let session = open_session(file)?;
+    let report = session.mesh_quality()?;
+    let json = serde_json::to_string_pretty(&report).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize the mesh quality report: {error}"),
+        )
+    })?;
+    println!("{json}");
     Ok(0)
 }
 

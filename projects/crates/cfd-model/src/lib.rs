@@ -24,6 +24,7 @@
 //! * CSV and legacy VTK field export at cell centres or mesh nodes;
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
+//! * mesh quality metrics (non-orthogonality, aspect ratio and skewness);
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet,
 //!   pressure-outlet and convective-outlet sides.
 //!
@@ -40,6 +41,7 @@ mod export;
 mod fields;
 mod mesh;
 mod model;
+mod quality;
 mod session;
 mod solver;
 
@@ -58,6 +60,7 @@ pub use crate::model::{
     ScalarConfig, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence,
     TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
 };
+pub use crate::quality::{mesh_quality, MeshQuality};
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
@@ -97,6 +100,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "inletProfiles": "supported",
     "momentCoefficients": "supported",
     "massBalance": "supported",
+    "meshQuality": "supported",
     "buoyancy": "supported",
     "compressible": "unsupported",
     "turbulence": "supported",
