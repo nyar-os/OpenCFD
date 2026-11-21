@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, InletProfile, Obstacle,
-    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions,
+    OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -195,6 +195,15 @@ fn time_set(ctx: CallContext) -> Result<JsValue> {
     let summary = with_session(handle, |session| {
         session.time_set(dt, steps, pressure_iterations, tolerance)
     })?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Sets the explicit time integration scheme of one session document.
+#[function]
+fn time_scheme_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let scheme = text(&ctx, 1)?.parse::<TimeScheme>().map_err(fail)?;
+    let summary = with_session(handle, |session| session.time_scheme_set(scheme))?;
     respond(&ctx, &json!(summary))
 }
 
@@ -377,6 +386,7 @@ register_module![
     mesh_set,
     fluid_set,
     time_set,
+    time_scheme_set,
     boundary_set,
     boundary_profile_set,
     obstacle_add,

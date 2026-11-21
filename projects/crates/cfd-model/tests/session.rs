@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     BoundaryKind, ConvectionScheme, ExportField, ExportFormat, InletProfile, Model, OpenCfd,
-    OpenCfdOptions, Probe, Side,
+    OpenCfdOptions, Probe, Side, TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -103,6 +103,35 @@ fn session_slip_and_outlet_pressure_round_trip() {
     );
     let cli_stored = Model::load(&cli_path).expect("load CLI document");
     assert_eq!(cli_stored.boundaries.right.pressure, 1.5);
+}
+
+#[test]
+fn session_time_scheme_round_trips_through_cli() {
+    let directory = temporary_dir("time-scheme");
+    let path = directory.join("scheme.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .time_scheme_set(TimeScheme::Rk2)
+        .expect("scheme set");
+    assert_eq!(summary.time.scheme, TimeScheme::Rk2);
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.time.scheme, TimeScheme::Rk2);
+
+    let cli_path = directory.join("cli-scheme.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&["time", "scheme", "set", &cli, "--scheme", "rk2"]);
+    assert!(
+        output.status.success(),
+        "ocfd time scheme set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(cli_stored.time.scheme, TimeScheme::Rk2);
+
+    let output = run_cli(&["time", "scheme", "set", &cli, "--scheme", "bogus"]);
+    assert!(!output.status.success(), "unknown scheme must be rejected");
 }
 
 #[test]

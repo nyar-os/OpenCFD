@@ -5,7 +5,7 @@ use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
-    Turbulence, TurbulenceModel,
+    TimeScheme, Turbulence, TurbulenceModel,
 };
 use crate::CfdError;
 
@@ -31,6 +31,11 @@ fn default_convection_name() -> String {
 /// Default termination reason for reports written before the field existed.
 fn default_termination_reason() -> String {
     "maxSteps".to_string()
+}
+
+/// Default time-scheme identifier for reports written before the field existed.
+fn default_time_scheme_name() -> String {
+    TimeScheme::Euler.as_str().to_string()
 }
 
 /// One sampled velocity residual.
@@ -275,6 +280,9 @@ pub struct Report {
     /// Convection scheme used by the run (`upwind`, `central` or `quick`).
     #[serde(default = "default_convection_name")]
     pub convection: String,
+    /// Time integration scheme used by the run (`euler` or `rk2`).
+    #[serde(default = "default_time_scheme_name")]
+    pub time_scheme: String,
     /// Turbulence model identifier (`none`, `constant` or `mixingLength`).
     #[serde(default = "default_turbulence_model_name")]
     pub turbulence_model: String,
@@ -431,6 +439,8 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
 
     let mut u_star = u.clone();
     let mut v_star = v.clone();
+    let mut du = vec![0.0; mesh.u_count()];
+    let mut dv = vec![0.0; mesh.v_count()];
     let mut u_previous = u.clone();
     let mut v_previous = v.clone();
     let mut last_stats = PressureStats {
@@ -456,16 +466,30 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         v_previous.copy_from_slice(&v);
         eddy = eddy_viscosity_field(&mesh, model, &u, &v);
 
-        momentum_step(
-            &mesh,
-            model,
-            &u,
-            &v,
-            &p,
-            eddy.as_deref(),
-            &mut u_star,
-            &mut v_star,
-        );
+        match model.time.scheme {
+            TimeScheme::Euler => momentum_euler(
+                &mesh,
+                model,
+                &u,
+                &v,
+                &p,
+                eddy.as_deref(),
+                &mut u_star,
+                &mut v_star,
+                &mut du,
+                &mut dv,
+            ),
+            TimeScheme::Rk2 => momentum_heun(
+                &mesh,
+                model,
+                &u,
+                &v,
+                &p,
+                eddy.as_deref(),
+                &mut u_star,
+                &mut v_star,
+            ),
+        }
         mesh.apply_velocity_boundaries(&model.boundaries, &mut u_star, &mut v_star);
 
         let divergence = mesh.divergence(&u_star, &v_star);
@@ -610,6 +634,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         probes,
         wall_shear: wall_shear_summary,
         convection: model.convection.as_str().to_string(),
+        time_scheme: model.time.scheme.as_str().to_string(),
         turbulence_model: model
             .turbulence
             .as_ref()
@@ -870,19 +895,18 @@ fn pressure_residual(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn momentum_step(
+fn momentum_derivative(
     mesh: &Mesh,
     model: &Model,
     u: &[f64],
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
-    u_star: &mut [f64],
-    v_star: &mut [f64],
+    du: &mut [f64],
+    dv: &mut [f64],
 ) {
     let nu = model.fluid.viscosity;
     let rho = model.fluid.density;
-    let dt = model.time.dt;
     let dx = mesh.dx;
     let dy = mesh.dy;
     let boundaries = &model.boundaries;
@@ -891,7 +915,7 @@ fn momentum_step(
         for i in 1..mesh.nx {
             let index = mesh.u_index(i, j);
             if !mesh.u_face_open(i, j) {
-                u_star[index] = 0.0;
+                du[index] = 0.0;
                 continue;
             }
             let centre = u[index];
@@ -934,8 +958,7 @@ fn momentum_step(
             let pressure_gradient =
                 (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i - 1, j)]) / dx;
             let effective = nu + u_face_eddy(mesh, eddy, i, j);
-            u_star[index] =
-                centre + dt * (-convection + effective * diffusion - pressure_gradient / rho);
+            du[index] = -convection + effective * diffusion - pressure_gradient / rho;
         }
     }
 
@@ -943,7 +966,7 @@ fn momentum_step(
         for i in 0..mesh.nx {
             let index = mesh.v_index(i, j);
             if !mesh.v_face_open(i, j) {
-                v_star[index] = 0.0;
+                dv[index] = 0.0;
                 continue;
             }
             let centre = v[index];
@@ -986,9 +1009,71 @@ fn momentum_step(
             let pressure_gradient =
                 (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i, j - 1)]) / dy;
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
-            v_star[index] =
-                centre + dt * (-convection + effective * diffusion - pressure_gradient / rho);
+            dv[index] = -convection + effective * diffusion - pressure_gradient / rho;
         }
+    }
+}
+
+/// Advances the tentative velocity with explicit Euler.
+#[allow(clippy::too_many_arguments)]
+fn momentum_euler(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+    u_star: &mut [f64],
+    v_star: &mut [f64],
+    du: &mut [f64],
+    dv: &mut [f64],
+) {
+    momentum_derivative(mesh, model, u, v, p, eddy, du, dv);
+    let dt = model.time.dt;
+    for index in 0..u.len() {
+        u_star[index] = u[index] + dt * du[index];
+    }
+    for index in 0..v.len() {
+        v_star[index] = v[index] + dt * dv[index];
+    }
+}
+
+/// Advances the tentative velocity with explicit second-order Runge-Kutta
+/// (Heun), keeping the pressure at its current value and projecting afterwards.
+#[allow(clippy::too_many_arguments)]
+fn momentum_heun(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+    u_star: &mut [f64],
+    v_star: &mut [f64],
+) {
+    let dt = model.time.dt;
+    let mut u1 = u.to_vec();
+    let mut v1 = v.to_vec();
+    let mut du1 = vec![0.0; u.len()];
+    let mut dv1 = vec![0.0; v.len()];
+    let mut du2 = vec![0.0; u.len()];
+    let mut dv2 = vec![0.0; v.len()];
+
+    momentum_derivative(mesh, model, u, v, p, eddy, &mut du1, &mut dv1);
+    for index in 0..u.len() {
+        u1[index] = u[index] + dt * du1[index];
+    }
+    for index in 0..v.len() {
+        v1[index] = v[index] + dt * dv1[index];
+    }
+    mesh.apply_velocity_boundaries(&model.boundaries, &mut u1, &mut v1);
+
+    momentum_derivative(mesh, model, &u1, &v1, p, eddy, &mut du2, &mut dv2);
+    for index in 0..u.len() {
+        u_star[index] = u[index] + 0.5 * dt * (du1[index] + du2[index]);
+    }
+    for index in 0..v.len() {
+        v_star[index] = v[index] + 0.5 * dt * (dv1[index] + dv2[index]);
     }
 }
 

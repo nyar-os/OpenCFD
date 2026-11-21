@@ -26,6 +26,7 @@ import type {
     ScalarSetRequest,
     SolveOptions,
     SolveReport,
+    TimeSchemeSetRequest,
     TimeSetRequest,
 } from './types.js';
 
@@ -72,6 +73,12 @@ export class CfdCase {
     setTime(request: TimeSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.timeSet(this.handle, request));
+    }
+
+    /** Sets the explicit time integration scheme and writes the document back. */
+    setTimeScheme(request: TimeSchemeSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.timeSchemeSet(this.handle, request));
     }
 
     /** Sets one boundary and writes the document back. */

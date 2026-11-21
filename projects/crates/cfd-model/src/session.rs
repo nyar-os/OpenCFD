@@ -19,8 +19,8 @@ use crate::export::{
 };
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
-    Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence,
-    TurbulenceModel,
+    Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeScheme, TimeSettings,
+    Turbulence, TurbulenceModel,
 };
 use crate::solver::{solve, solve_with, Report, SolveOptions};
 use crate::{CfdError, CAPABILITIES_JSON};
@@ -350,6 +350,13 @@ impl OpenCfd {
             if let Some(tolerance) = tolerance {
                 model.time.tolerance = tolerance;
             }
+        })
+    }
+
+    /// Sets the explicit time integration scheme and writes the document back.
+    pub fn time_scheme_set(&mut self, scheme: TimeScheme) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.time.scheme = scheme;
         })
     }
 

@@ -305,6 +305,7 @@ fn document_round_trip_and_defaults() {
     assert_eq!(value["units"], "m");
     assert_eq!(value["mesh"]["lengthX"], 2.0);
     assert_eq!(value["time"]["pressureIterations"], 40);
+    assert_eq!(value["time"]["scheme"], "euler");
     assert_eq!(value["boundaries"]["right"]["kind"], "outlet");
     assert_eq!(value["initial"]["velocity"][0], 0.1);
 
@@ -328,6 +329,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"timeSchemes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"probes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"wallShear\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"slipBoundary\": \"supported\""));
@@ -1146,6 +1148,49 @@ fn convection_scheme_changes_the_cavity_solution_and_stays_stable() {
     assert!(
         difference(&solutions[0], &solutions[2]) > 1e-4,
         "QUICK produced an identical velocity field to upwind"
+    );
+}
+
+#[test]
+fn time_schemes_are_stable_and_rk2_reduces_temporal_error() {
+    let mut model = Model::new();
+    model.mesh.nx = 16;
+    model.mesh.ny = 16;
+    model.fluid.viscosity = 0.02;
+    model.time.pressure_iterations = 200;
+    model.time.tolerance = 1e-6;
+
+    let run = |scheme: cfd_model::TimeScheme, dt: f64, steps: usize| {
+        let mut model = model.clone();
+        model.time.scheme = scheme;
+        model.time.dt = dt;
+        model.time.steps = steps;
+        solve(&model).expect("solve")
+    };
+
+    let reference = run(cfd_model::TimeScheme::Rk2, 0.00125, 160);
+    let error = |solution: &Solution| {
+        solution
+            .u
+            .iter()
+            .zip(reference.u.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max)
+    };
+
+    let euler = run(cfd_model::TimeScheme::Euler, 0.01, 20);
+    let rk2 = run(cfd_model::TimeScheme::Rk2, 0.01, 20);
+    assert_finite(&euler.u, "euler");
+    assert_finite(&rk2.u, "rk2");
+    assert_eq!(euler.report.time_scheme, "euler");
+    assert_eq!(rk2.report.time_scheme, "rk2");
+    assert!((euler.report.time - rk2.report.time).abs() < 1e-12);
+
+    let euler_error = error(&euler);
+    let rk2_error = error(&rk2);
+    assert!(
+        rk2_error < 0.5 * euler_error,
+        "RK2 error {rk2_error} should be well below Euler error {euler_error}"
     );
 }
 

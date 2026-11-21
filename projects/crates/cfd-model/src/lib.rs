@@ -43,7 +43,8 @@ pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, Probe, Reference, ScalarConfig, Side,
-    SideThermal, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel, Units, FORMAT, VERSION,
+    SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence, TurbulenceModel, Units,
+    FORMAT, VERSION,
 };
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
@@ -70,6 +71,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "vorticity": "supported",
     "streamFunction": "supported",
     "convectionSchemes": "supported",
+    "timeSchemes": "supported",
     "probes": "supported",
     "wallShear": "supported",
     "slipBoundary": "supported",

@@ -120,6 +120,43 @@ pub struct Reference {
     pub length: Option<f64>,
 }
 
+/// Time integration scheme of the explicit momentum step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TimeScheme {
+    /// Explicit Euler: one first-order forward step per time step.
+    #[default]
+    Euler,
+    /// Explicit second-order Runge-Kutta (Heun): two derivative evaluations
+    /// per step followed by the pressure projection.
+    Rk2,
+}
+
+impl TimeScheme {
+    /// Returns the identifier used in documents, reports and the CLI.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Euler => "euler",
+            Self::Rk2 => "rk2",
+        }
+    }
+}
+
+impl FromStr for TimeScheme {
+    type Err = CfdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "euler" => Ok(Self::Euler),
+            "rk2" | "heun" => Ok(Self::Rk2),
+            other => Err(CfdError::new(
+                "cli/invalid-time-scheme",
+                format!("unknown time scheme `{other}`; only euler or rk2 is supported"),
+            )),
+        }
+    }
+}
+
 /// Time integration settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +175,9 @@ pub struct TimeSettings {
     /// initial value.
     #[serde(default = "default_tolerance")]
     pub tolerance: f64,
+    /// Explicit time integration scheme of the momentum equation.
+    #[serde(default)]
+    pub scheme: TimeScheme,
 }
 
 impl Default for TimeSettings {
@@ -147,6 +187,7 @@ impl Default for TimeSettings {
             steps: default_steps(),
             pressure_iterations: default_pressure_iterations(),
             tolerance: default_tolerance(),
+            scheme: TimeScheme::default(),
         }
     }
 }

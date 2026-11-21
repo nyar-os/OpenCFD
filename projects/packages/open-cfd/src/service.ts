@@ -27,6 +27,7 @@ import type {
     ScalarSetRequest,
     SolveOptions,
     SolveReport,
+    TimeSchemeSetRequest,
     TimeSetRequest,
 } from './types.js';
 
@@ -123,6 +124,16 @@ export function timeSet(handle: number, request: TimeSetRequest): CaseSummary {
             request.pressureIterations,
             request.tolerance,
         ),
+    );
+}
+
+/** Sets the explicit time integration scheme and writes the document back. */
+export function timeSchemeSet(
+    handle: number,
+    request: TimeSchemeSetRequest,
+): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('time.scheme.set').time_scheme_set(handle, request.scheme),
     );
 }
 

@@ -44,6 +44,7 @@ export const errorCodes = [
     'cli/invalid-inlet-profile',
     'cli/invalid-obstacle-kind',
     'cli/invalid-convection-scheme',
+    'cli/invalid-time-scheme',
 ] as const;
 
 /** Union of {@link errorCodes}. */

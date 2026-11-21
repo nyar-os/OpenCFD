@@ -44,12 +44,17 @@ export interface Reference {
     readonly length?: number;
 }
 
+/** Explicit time integration scheme of the momentum equation. */
+export type TimeScheme = 'euler' | 'rk2';
+
 /** Time integration settings. */
 export interface TimeSettings {
     readonly dt: number;
     readonly steps: number;
     readonly pressureIterations: number;
     readonly tolerance: number;
+    /** Explicit time integration scheme. */
+    readonly scheme: TimeScheme;
 }
 
 /** Boundary kind of one side. */
@@ -377,6 +382,8 @@ export interface SolveReport {
     readonly wallShear: readonly WallShear[];
     /** Convection scheme used by the run. */
     readonly convection: string;
+    /** Time integration scheme used by the run. */
+    readonly timeScheme: TimeScheme;
 }
 
 /** Arguments of `CfdCase.setMesh()`. */
@@ -400,6 +407,11 @@ export interface TimeSetRequest {
     readonly pressureIterations: number;
     /** Relative pressure residual tolerance; omitted keeps the current value. */
     readonly tolerance?: number;
+}
+
+/** Arguments of `CfdCase.setTimeScheme()`. */
+export interface TimeSchemeSetRequest {
+    readonly scheme: TimeScheme;
 }
 
 /** Arguments of `CfdCase.setBoundary()`. */

@@ -6,7 +6,7 @@ use std::process;
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SideThermal, SolveOptions,
-    ThermalConfig, TurbulenceModel,
+    ThermalConfig, TimeScheme, TurbulenceModel,
 };
 
 const USAGE: &str = "\
@@ -17,6 +17,7 @@ Usage:
   ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
+  ocfd time scheme set <file> --scheme euler|rk2
   ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
@@ -76,7 +77,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "create" => create(&args[1..]),
         "mesh" => subcommand(args, "set", "mesh"),
         "fluid" => subcommand(args, "set", "fluid"),
-        "time" => subcommand(args, "set", "time"),
+        "time" => time_command(&args[1..]),
         "boundary" => boundary_command(&args[1..]),
         "obstacle" => obstacle_command(&args[1..]),
         "probe" => probe_command(&args[1..]),
@@ -103,7 +104,6 @@ fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CfdEr
         Some(action) if action == expected => match (group, action) {
             ("mesh", "set") => mesh_set(&args[2..]),
             ("fluid", "set") => fluid_set(&args[2..]),
-            ("time", "set") => time_set(&args[2..]),
             ("reference", "set") => reference_set(&args[2..]),
             _ => Err(CfdError::new(
                 "cli/unknown-command",
@@ -175,6 +175,41 @@ fn fluid_set(args: &[String]) -> Result<i32, CfdError> {
         "fluid set: rho={} kg/m3, mu={} Pa.s",
         summary.fluid.density, summary.fluid.viscosity
     );
+    Ok(0)
+}
+
+fn time_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => time_set(&args[1..]),
+        Some("scheme") => match args.get(1).map(String::as_str) {
+            Some("set") => time_scheme_set(&args[2..]),
+            Some(other) => Err(CfdError::new(
+                "cli/unknown-command",
+                format!("`time scheme` has no subcommand `{other}`; only set is supported"),
+            )),
+            None => Err(CfdError::new(
+                "cli/missing-argument",
+                "`time scheme` requires a subcommand; only set is supported",
+            )),
+        },
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`time` has no subcommand `{other}`; only set and scheme are supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`time` requires a subcommand; only set and scheme are supported",
+        )),
+    }
+}
+
+fn time_scheme_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--scheme"], &[])?;
+    let file = positional(&parsed, 0, "time scheme set <file> --scheme euler|rk2")?;
+    let scheme = required(&parsed, "--scheme")?.parse::<TimeScheme>()?;
+    let mut session = open_session(file)?;
+    let summary = session.time_scheme_set(scheme)?;
+    println!("time scheme set: {}", summary.time.scheme.as_str());
     Ok(0)
 }
 

@@ -21,6 +21,7 @@ import type {
     InletProfile,
     Obstacle,
     Side,
+    TimeScheme,
 } from './types.js';
 
 const USAGE = `open-cfd - OpenCFD two-dimensional incompressible Navier-Stokes solver
@@ -30,6 +31,7 @@ usage:
   open-cfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
+  open-cfd time scheme set <file> --scheme euler|rk2
   open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
@@ -53,6 +55,7 @@ exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom'];
 const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet', 'slip'];
 const INLET_PROFILES: readonly InletProfile[] = ['uniform', 'parabolic', 'powerLaw'];
+const TIME_SCHEMES: readonly TimeScheme[] = ['euler', 'rk2'];
 const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
 
 interface ParsedArguments {
@@ -164,8 +167,14 @@ function parseBoundaryKind(raw: string): BoundaryKind {
     return raw as BoundaryKind;
 }
 
-function parseInletProfile(raw: string): InletProfile {
-    if (!INLET_PROFILES.includes(raw as InletProfile)) {
+function parseTimeScheme(raw: string): TimeScheme {
+    if (!TIME_SCHEMES.includes(raw as TimeScheme)) {
+        throw cliError('cli/invalid-time-scheme', `unknown time scheme \`${raw}\`; use euler or rk2`);
+    }
+    return raw as TimeScheme;
+}
+
+function parseInletProfile(raw: string): InletProfile {    if (!INLET_PROFILES.includes(raw as InletProfile)) {
         throw cliError(
             'cli/invalid-inlet-profile',
             `unknown inlet profile \`${raw}\`; use uniform, parabolic or powerLaw`,
@@ -304,6 +313,23 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'time': {
+            if (rest[0] === 'scheme') {
+                if (rest[1] !== 'set') {
+                    throw cliError(
+                        'cli/unknown-command',
+                        rest[1] === undefined
+                            ? '`time scheme` needs the `set` subcommand'
+                            : `\`time scheme\` subcommand \`${rest[1]}\` does not exist; only \`set\` is supported`,
+                    );
+                }
+                const parsed = parseArguments(rest.slice(2), ['--scheme']);
+                const file = positional(parsed, 0, 'time scheme set <file> --scheme euler|rk2');
+                const scheme = parseTimeScheme(requiredOption(parsed, '--scheme'));
+                const document = await session.open(file);
+                const summary = document.setTimeScheme({ scheme });
+                console.log(`time scheme set: ${summary.time.scheme}`);
+                return 0;
+            }
             expectSet(rest, 'time');
             const parsed = parseArguments(rest.slice(1), [
                 '--dt',
