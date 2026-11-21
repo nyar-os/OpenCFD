@@ -175,44 +175,64 @@ impl Mesh {
     /// `u` is normal to the left and right sides and `v` is normal to the
     /// bottom and top sides. Walls and inlets prescribe the stored velocity;
     /// slip walls impose zero normal velocity; outlets copy the adjacent
-    /// interior face, a first-order zero-gradient condition. Tangential wall
-    /// velocities live half a cell inside the domain and are imposed through
-    /// ghost values in the momentum step, so they remain part of the projection
-    /// and keep the discrete divergence consistent at boundary cells. Every
-    /// face touching a solid cell is set to zero afterwards, which makes the
-    /// obstacle a no-slip, no-flux boundary.
+    /// interior face, a first-order zero-gradient condition. Periodic sides are
+    /// left untouched and mirrored afterwards, so both boundary faces of a
+    /// periodic axis hold the same physical value. Tangential wall velocities
+    /// live half a cell inside the domain and are imposed through ghost values
+    /// in the momentum step, so they remain part of the projection and keep the
+    /// discrete divergence consistent at boundary cells. Every face touching a
+    /// solid cell is set to zero afterwards, which makes the obstacle a no-slip,
+    /// no-flux boundary.
     pub fn apply_velocity_boundaries(&self, boundaries: &Boundaries, u: &mut [f64], v: &mut [f64]) {
         let ny = self.ny as f64;
         let nx = self.nx as f64;
         for j in 0..self.ny {
             let fraction = (j as f64 + 0.5) / ny;
-            u[self.u_index(0, j)] = normal_velocity(
-                &boundaries.left,
-                u[self.u_index(1, j)],
-                0,
-                boundaries.inlet_profiles.scale(Side::Left, fraction),
-            );
-            u[self.u_index(self.nx, j)] = normal_velocity(
-                &boundaries.right,
-                u[self.u_index(self.nx - 1, j)],
-                0,
-                boundaries.inlet_profiles.scale(Side::Right, fraction),
-            );
+            if !boundaries.is_periodic(Side::Left) {
+                u[self.u_index(0, j)] = normal_velocity(
+                    &boundaries.left,
+                    u[self.u_index(1, j)],
+                    0,
+                    boundaries.inlet_profiles.scale(Side::Left, fraction),
+                );
+            }
+            if !boundaries.is_periodic(Side::Right) {
+                u[self.u_index(self.nx, j)] = normal_velocity(
+                    &boundaries.right,
+                    u[self.u_index(self.nx - 1, j)],
+                    0,
+                    boundaries.inlet_profiles.scale(Side::Right, fraction),
+                );
+            }
         }
         for i in 0..self.nx {
             let fraction = (i as f64 + 0.5) / nx;
-            v[self.v_index(i, 0)] = normal_velocity(
-                &boundaries.bottom,
-                v[self.v_index(i, 1)],
-                1,
-                boundaries.inlet_profiles.scale(Side::Bottom, fraction),
-            );
-            v[self.v_index(i, self.ny)] = normal_velocity(
-                &boundaries.top,
-                v[self.v_index(i, self.ny - 1)],
-                1,
-                boundaries.inlet_profiles.scale(Side::Top, fraction),
-            );
+            if !boundaries.is_periodic(Side::Bottom) {
+                v[self.v_index(i, 0)] = normal_velocity(
+                    &boundaries.bottom,
+                    v[self.v_index(i, 1)],
+                    1,
+                    boundaries.inlet_profiles.scale(Side::Bottom, fraction),
+                );
+            }
+            if !boundaries.is_periodic(Side::Top) {
+                v[self.v_index(i, self.ny)] = normal_velocity(
+                    &boundaries.top,
+                    v[self.v_index(i, self.ny - 1)],
+                    1,
+                    boundaries.inlet_profiles.scale(Side::Top, fraction),
+                );
+            }
+        }
+        if boundaries.periodic_x() {
+            for j in 0..self.ny {
+                u[self.u_index(self.nx, j)] = u[self.u_index(0, j)];
+            }
+        }
+        if boundaries.periodic_y() {
+            for i in 0..self.nx {
+                v[self.v_index(i, self.ny)] = v[self.v_index(i, 0)];
+            }
         }
         self.zero_solid_faces(u, v);
     }
@@ -262,7 +282,7 @@ impl Mesh {
 /// the face position measured from the low corner of the side.
 fn normal_velocity(boundary: &Boundary, interior: f64, component: usize, scale: f64) -> f64 {
     match boundary.kind {
-        BoundaryKind::Outlet => interior,
+        BoundaryKind::Outlet | BoundaryKind::Periodic => interior,
         BoundaryKind::Slip => 0.0,
         BoundaryKind::Wall => boundary.velocity[component],
         BoundaryKind::Inlet => boundary.velocity[component] * scale,

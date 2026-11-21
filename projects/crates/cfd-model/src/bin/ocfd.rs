@@ -19,7 +19,7 @@ Usage:
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   ocfd time scheme set <file> --scheme euler|rk2
   ocfd time adaptive set <file> --cfl <n|off>
-  ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -329,7 +329,7 @@ fn boundary_set(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]",
+        "boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]",
     )?;
     let side = required(&parsed, "--side")?.parse::<Side>()?;
     let kind = required(&parsed, "--kind")?.parse::<BoundaryKind>()?;

@@ -531,7 +531,15 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
 
         u.copy_from_slice(&u_star);
         v.copy_from_slice(&v_star);
-        project_velocity(&mesh, model.fluid.density, dt, &p, &mut u, &mut v);
+        project_velocity(
+            &mesh,
+            &model.boundaries,
+            model.fluid.density,
+            dt,
+            &p,
+            &mut u,
+            &mut v,
+        );
         mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
 
         if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
@@ -610,7 +618,7 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
 
     let divergence = mesh.divergence(&u, &v);
     let divergence_l2 = rms(&divergence);
-    let mass_balance = mass_balance(&mesh, model.fluid.density, &u, &v);
+    let mass_balance = mass_balance(&mesh, &model.boundaries, model.fluid.density, &u, &v);
     let max_velocity = max_velocity(&u, &v);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
     let vorticity_field = vorticity(&mesh, &u, &v);
@@ -753,6 +761,8 @@ pub fn solve_pressure(
     let omega = 2.0 / (1.0 + (std::f64::consts::PI / largest_side).sin());
     let rhs_scale = density / dt;
     let denominator = 2.0 / (mesh.dx * mesh.dx) + 2.0 / (mesh.dy * mesh.dy);
+    let periodic_x = boundaries.periodic_x();
+    let periodic_y = boundaries.periodic_y();
     let initial_residual = pressure_residual(mesh, boundaries, pressure, divergence, rhs_scale);
     let threshold = settings.tolerance * initial_residual.max(1e-12);
     let mut history = Vec::with_capacity(settings.iterations);
@@ -767,7 +777,9 @@ pub fn solve_pressure(
                 }
                 let centre = pressure[index];
                 let west = if i == 0 {
-                    if boundaries.left.kind == BoundaryKind::Outlet {
+                    if periodic_x {
+                        pressure[mesh.pressure_index(mesh.nx - 1, j)]
+                    } else if boundaries.left.kind == BoundaryKind::Outlet {
                         boundaries.left.pressure
                     } else {
                         centre
@@ -778,7 +790,9 @@ pub fn solve_pressure(
                     pressure[index - 1]
                 };
                 let east = if i + 1 == mesh.nx {
-                    if boundaries.right.kind == BoundaryKind::Outlet {
+                    if periodic_x {
+                        pressure[mesh.pressure_index(0, j)]
+                    } else if boundaries.right.kind == BoundaryKind::Outlet {
                         boundaries.right.pressure
                     } else {
                         centre
@@ -789,7 +803,9 @@ pub fn solve_pressure(
                     pressure[index + 1]
                 };
                 let south = if j == 0 {
-                    if boundaries.bottom.kind == BoundaryKind::Outlet {
+                    if periodic_y {
+                        pressure[mesh.pressure_index(i, mesh.ny - 1)]
+                    } else if boundaries.bottom.kind == BoundaryKind::Outlet {
                         boundaries.bottom.pressure
                     } else {
                         centre
@@ -800,7 +816,9 @@ pub fn solve_pressure(
                     pressure[index - mesh.nx]
                 };
                 let north = if j + 1 == mesh.ny {
-                    if boundaries.top.kind == BoundaryKind::Outlet {
+                    if periodic_y {
+                        pressure[mesh.pressure_index(i, 0)]
+                    } else if boundaries.top.kind == BoundaryKind::Outlet {
                         boundaries.top.pressure
                     } else {
                         centre
@@ -867,6 +885,8 @@ fn pressure_residual(
     rhs_scale: f64,
 ) -> f64 {
     let mut maximum: f64 = 0.0;
+    let periodic_x = boundaries.periodic_x();
+    let periodic_y = boundaries.periodic_y();
     for j in 0..mesh.ny {
         for i in 0..mesh.nx {
             let index = mesh.pressure_index(i, j);
@@ -875,7 +895,9 @@ fn pressure_residual(
             }
             let centre = pressure[index];
             let west = if i == 0 {
-                if boundaries.left.kind == BoundaryKind::Outlet {
+                if periodic_x {
+                    pressure[mesh.pressure_index(mesh.nx - 1, j)]
+                } else if boundaries.left.kind == BoundaryKind::Outlet {
                     boundaries.left.pressure
                 } else {
                     centre
@@ -886,7 +908,9 @@ fn pressure_residual(
                 pressure[index - 1]
             };
             let east = if i + 1 == mesh.nx {
-                if boundaries.right.kind == BoundaryKind::Outlet {
+                if periodic_x {
+                    pressure[mesh.pressure_index(0, j)]
+                } else if boundaries.right.kind == BoundaryKind::Outlet {
                     boundaries.right.pressure
                 } else {
                     centre
@@ -897,7 +921,9 @@ fn pressure_residual(
                 pressure[index + 1]
             };
             let south = if j == 0 {
-                if boundaries.bottom.kind == BoundaryKind::Outlet {
+                if periodic_y {
+                    pressure[mesh.pressure_index(i, mesh.ny - 1)]
+                } else if boundaries.bottom.kind == BoundaryKind::Outlet {
                     boundaries.bottom.pressure
                 } else {
                     centre
@@ -908,7 +934,9 @@ fn pressure_residual(
                 pressure[index - mesh.nx]
             };
             let north = if j + 1 == mesh.ny {
-                if boundaries.top.kind == BoundaryKind::Outlet {
+                if periodic_y {
+                    pressure[mesh.pressure_index(i, 0)]
+                } else if boundaries.top.kind == BoundaryKind::Outlet {
                     boundaries.top.pressure
                 } else {
                     centre
@@ -943,29 +971,36 @@ fn momentum_derivative(
     let dx = mesh.dx;
     let dy = mesh.dy;
     let boundaries = &model.boundaries;
+    let periodic_x = boundaries.periodic_x();
+    let periodic_y = boundaries.periodic_y();
 
     for j in 0..mesh.ny {
-        for i in 1..mesh.nx {
+        let start = if periodic_x { 0 } else { 1 };
+        for i in start..mesh.nx {
             let index = mesh.u_index(i, j);
             if !mesh.u_face_open(i, j) {
                 du[index] = 0.0;
                 continue;
             }
             let centre = u[index];
-            let du_dx = u_convective_derivative(mesh, u, i, j, centre, model.convection);
+            let du_dx =
+                u_convective_derivative(mesh, u, i, j, centre, model.convection, periodic_x);
+            let west_face = if i == 0 { mesh.nx - 1 } else { i - 1 };
             let v_face = 0.25
-                * (v[mesh.v_index(i - 1, j)]
-                    + v[mesh.v_index(i - 1, j + 1)]
+                * (v[mesh.v_index(west_face, j)]
+                    + v[mesh.v_index(west_face, j + 1)]
                     + v[mesh.v_index(i, j)]
                     + v[mesh.v_index(i, j + 1)]);
             let dv_dy = 0.5
-                * ((v[mesh.v_index(i - 1, j + 1)] - v[mesh.v_index(i - 1, j)]) / dy
+                * ((v[mesh.v_index(west_face, j + 1)] - v[mesh.v_index(west_face, j)]) / dy
                     + (v[mesh.v_index(i, j + 1)] - v[mesh.v_index(i, j)]) / dy);
             let convection = centre * du_dx + v_face * dv_dy;
 
-            let below = if j == 0 {
+            let below = if periodic_y {
+                u[mesh.u_index(i, if j == 0 { mesh.ny - 1 } else { j - 1 })]
+            } else if j == 0 {
                 match boundaries.bottom.kind {
-                    BoundaryKind::Outlet => u[mesh.u_index(i, 1)],
+                    BoundaryKind::Outlet | BoundaryKind::Periodic => u[mesh.u_index(i, 1)],
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.bottom.velocity[0] - centre
@@ -974,9 +1009,13 @@ fn momentum_derivative(
             } else {
                 u[mesh.u_index(i, j - 1)]
             };
-            let above = if j + 1 == mesh.ny {
+            let above = if periodic_y {
+                u[mesh.u_index(i, if j + 1 == mesh.ny { 0 } else { j + 1 })]
+            } else if j + 1 == mesh.ny {
                 match boundaries.top.kind {
-                    BoundaryKind::Outlet => u[mesh.u_index(i, mesh.ny - 2)],
+                    BoundaryKind::Outlet | BoundaryKind::Periodic => {
+                        u[mesh.u_index(i, mesh.ny - 2)]
+                    }
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.top.velocity[0] - centre
@@ -985,17 +1024,29 @@ fn momentum_derivative(
             } else {
                 u[mesh.u_index(i, j + 1)]
             };
-            let diffusion = (u[mesh.u_index(i + 1, j)] - 2.0 * centre + u[mesh.u_index(i - 1, j)])
-                / (dx * dx)
+            let west = if i == 0 {
+                u[mesh.u_index(mesh.nx - 1, j)]
+            } else {
+                u[mesh.u_index(i - 1, j)]
+            };
+            let diffusion = (u[mesh.u_index(i + 1, j)] - 2.0 * centre + west) / (dx * dx)
                 + (above - 2.0 * centre + below) / (dy * dy);
-            let pressure_gradient =
-                (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i - 1, j)]) / dx;
+            let pressure_west = if i == 0 {
+                mesh.pressure_index(mesh.nx - 1, j)
+            } else {
+                mesh.pressure_index(i - 1, j)
+            };
+            let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_west]) / dx;
             let effective = nu + u_face_eddy(mesh, eddy, i, j);
             du[index] = -convection + effective * diffusion - pressure_gradient / rho;
         }
+        if periodic_x {
+            du[mesh.u_index(mesh.nx, j)] = du[mesh.u_index(0, j)];
+        }
     }
 
-    for j in 1..mesh.ny {
+    let start = if periodic_y { 0 } else { 1 };
+    for j in start..mesh.ny {
         for i in 0..mesh.nx {
             let index = mesh.v_index(i, j);
             if !mesh.v_face_open(i, j) {
@@ -1003,20 +1054,24 @@ fn momentum_derivative(
                 continue;
             }
             let centre = v[index];
-            let dv_dy = v_convective_derivative(mesh, v, i, j, centre, model.convection);
+            let dv_dy =
+                v_convective_derivative(mesh, v, i, j, centre, model.convection, periodic_y);
+            let south_face = if j == 0 { mesh.ny - 1 } else { j - 1 };
             let u_face = 0.25
                 * (u[mesh.u_index(i, j)]
                     + u[mesh.u_index(i + 1, j)]
-                    + u[mesh.u_index(i, j - 1)]
-                    + u[mesh.u_index(i + 1, j - 1)]);
+                    + u[mesh.u_index(i, south_face)]
+                    + u[mesh.u_index(i + 1, south_face)]);
             let du_dx = 0.5
                 * ((u[mesh.u_index(i + 1, j)] - u[mesh.u_index(i, j)]) / dx
-                    + (u[mesh.u_index(i + 1, j - 1)] - u[mesh.u_index(i, j - 1)]) / dx);
+                    + (u[mesh.u_index(i + 1, south_face)] - u[mesh.u_index(i, south_face)]) / dx);
             let convection = u_face * du_dx + centre * dv_dy;
 
-            let left = if i == 0 {
+            let left = if periodic_x {
+                v[mesh.v_index(if i == 0 { mesh.nx - 1 } else { i - 1 }, j)]
+            } else if i == 0 {
                 match boundaries.left.kind {
-                    BoundaryKind::Outlet => v[mesh.v_index(1, j)],
+                    BoundaryKind::Outlet | BoundaryKind::Periodic => v[mesh.v_index(1, j)],
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.left.velocity[1] - centre
@@ -1025,9 +1080,13 @@ fn momentum_derivative(
             } else {
                 v[mesh.v_index(i - 1, j)]
             };
-            let right = if i + 1 == mesh.nx {
+            let right = if periodic_x {
+                v[mesh.v_index(if i + 1 == mesh.nx { 0 } else { i + 1 }, j)]
+            } else if i + 1 == mesh.nx {
                 match boundaries.right.kind {
-                    BoundaryKind::Outlet => v[mesh.v_index(mesh.nx - 2, j)],
+                    BoundaryKind::Outlet | BoundaryKind::Periodic => {
+                        v[mesh.v_index(mesh.nx - 2, j)]
+                    }
                     BoundaryKind::Slip => centre,
                     BoundaryKind::Wall | BoundaryKind::Inlet => {
                         2.0 * boundaries.right.velocity[1] - centre
@@ -1036,13 +1095,31 @@ fn momentum_derivative(
             } else {
                 v[mesh.v_index(i + 1, j)]
             };
+            let south = if periodic_y && j == 0 {
+                v[mesh.v_index(i, mesh.ny - 1)]
+            } else {
+                v[mesh.v_index(i, j - 1)]
+            };
+            let north = if periodic_y && j + 1 == mesh.ny {
+                v[mesh.v_index(i, 0)]
+            } else {
+                v[mesh.v_index(i, j + 1)]
+            };
             let diffusion = (right - 2.0 * centre + left) / (dx * dx)
-                + (v[mesh.v_index(i, j + 1)] - 2.0 * centre + v[mesh.v_index(i, j - 1)])
-                    / (dy * dy);
-            let pressure_gradient =
-                (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i, j - 1)]) / dy;
+                + (north - 2.0 * centre + south) / (dy * dy);
+            let pressure_south = if j == 0 {
+                mesh.pressure_index(i, mesh.ny - 1)
+            } else {
+                mesh.pressure_index(i, j - 1)
+            };
+            let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_south]) / dy;
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
             dv[index] = -convection + effective * diffusion - pressure_gradient / rho;
+        }
+    }
+    if periodic_y {
+        for i in 0..mesh.nx {
+            dv[mesh.v_index(i, mesh.ny)] = dv[mesh.v_index(i, 0)];
         }
     }
 }
@@ -1121,33 +1198,61 @@ fn u_convective_derivative(
     j: usize,
     velocity: f64,
     scheme: ConvectionScheme,
+    periodic: bool,
 ) -> f64 {
     let dx = mesh.dx;
+    let value = |k: isize| {
+        let index = if periodic {
+            k.rem_euclid(mesh.nx as isize) as usize
+        } else {
+            k as usize
+        };
+        u[mesh.u_index(index, j)]
+    };
     let upwind = |velocity: f64| {
         if velocity >= 0.0 {
-            (u[mesh.u_index(i, j)] - u[mesh.u_index(i - 1, j)]) / dx
+            (value(i as isize) - value(i as isize - 1)) / dx
         } else {
-            (u[mesh.u_index(i + 1, j)] - u[mesh.u_index(i, j)]) / dx
+            (value(i as isize + 1) - value(i as isize)) / dx
         }
     };
-    let value = |k: usize| u[mesh.u_index(k, j)];
     match scheme {
         ConvectionScheme::Upwind => upwind(velocity),
-        ConvectionScheme::Central => (value(i + 1) - value(i - 1)) / (2.0 * mesh.dx),
+        ConvectionScheme::Central => {
+            (value(i as isize + 1) - value(i as isize - 1)) / (2.0 * mesh.dx)
+        }
         ConvectionScheme::Quick => {
-            if velocity >= 0.0 {
+            if periodic {
+                if velocity >= 0.0 {
+                    let east = 0.375 * value(i as isize + 1) + 0.75 * value(i as isize)
+                        - 0.125 * value(i as isize - 1);
+                    let west = 0.375 * value(i as isize) + 0.75 * value(i as isize - 1)
+                        - 0.125 * value(i as isize - 2);
+                    (east - west) / dx
+                } else {
+                    let east = 0.375 * value(i as isize) + 0.75 * value(i as isize + 1)
+                        - 0.125 * value(i as isize + 2);
+                    let west = 0.375 * value(i as isize - 1) + 0.75 * value(i as isize)
+                        - 0.125 * value(i as isize + 1);
+                    (east - west) / dx
+                }
+            } else if velocity >= 0.0 {
                 if i < 2 {
                     return upwind(velocity);
                 }
-                let east = 0.375 * value(i + 1) + 0.75 * value(i) - 0.125 * value(i - 1);
-                let west = 0.375 * value(i) + 0.75 * value(i - 1) - 0.125 * value(i - 2);
+                let east = 0.375 * value(i as isize + 1) + 0.75 * value(i as isize)
+                    - 0.125 * value(i as isize - 1);
+                let west = 0.375 * value(i as isize) + 0.75 * value(i as isize - 1)
+                    - 0.125 * value(i as isize - 2);
                 (east - west) / dx
             } else {
                 if i + 2 > mesh.nx {
                     return upwind(velocity);
                 }
-                let east = 0.375 * value(i) + 0.75 * value(i + 1) - 0.125 * value(i + 2);
-                let west = 0.375 * value(i - 1) + 0.75 * value(i) - 0.125 * value(i + 1);
+                let east = 0.375 * value(i as isize) + 0.75 * value(i as isize + 1)
+                    - 0.125 * value(i as isize + 2);
+                let west = 0.375 * value(i as isize - 1) + 0.75 * value(i as isize)
+                    - 0.125 * value(i as isize + 1);
                 (east - west) / dx
             }
         }
@@ -1162,33 +1267,61 @@ fn v_convective_derivative(
     j: usize,
     velocity: f64,
     scheme: ConvectionScheme,
+    periodic: bool,
 ) -> f64 {
     let dy = mesh.dy;
+    let value = |k: isize| {
+        let index = if periodic {
+            k.rem_euclid(mesh.ny as isize) as usize
+        } else {
+            k as usize
+        };
+        v[mesh.v_index(i, index)]
+    };
     let upwind = |velocity: f64| {
         if velocity >= 0.0 {
-            (v[mesh.v_index(i, j)] - v[mesh.v_index(i, j - 1)]) / dy
+            (value(j as isize) - value(j as isize - 1)) / dy
         } else {
-            (v[mesh.v_index(i, j + 1)] - v[mesh.v_index(i, j)]) / dy
+            (value(j as isize + 1) - value(j as isize)) / dy
         }
     };
-    let value = |k: usize| v[mesh.v_index(i, k)];
     match scheme {
         ConvectionScheme::Upwind => upwind(velocity),
-        ConvectionScheme::Central => (value(j + 1) - value(j - 1)) / (2.0 * mesh.dy),
+        ConvectionScheme::Central => {
+            (value(j as isize + 1) - value(j as isize - 1)) / (2.0 * mesh.dy)
+        }
         ConvectionScheme::Quick => {
-            if velocity >= 0.0 {
+            if periodic {
+                if velocity >= 0.0 {
+                    let north = 0.375 * value(j as isize + 1) + 0.75 * value(j as isize)
+                        - 0.125 * value(j as isize - 1);
+                    let south = 0.375 * value(j as isize) + 0.75 * value(j as isize - 1)
+                        - 0.125 * value(j as isize - 2);
+                    (north - south) / dy
+                } else {
+                    let north = 0.375 * value(j as isize) + 0.75 * value(j as isize + 1)
+                        - 0.125 * value(j as isize + 2);
+                    let south = 0.375 * value(j as isize - 1) + 0.75 * value(j as isize)
+                        - 0.125 * value(j as isize + 1);
+                    (north - south) / dy
+                }
+            } else if velocity >= 0.0 {
                 if j < 2 {
                     return upwind(velocity);
                 }
-                let north = 0.375 * value(j + 1) + 0.75 * value(j) - 0.125 * value(j - 1);
-                let south = 0.375 * value(j) + 0.75 * value(j - 1) - 0.125 * value(j - 2);
+                let north = 0.375 * value(j as isize + 1) + 0.75 * value(j as isize)
+                    - 0.125 * value(j as isize - 1);
+                let south = 0.375 * value(j as isize) + 0.75 * value(j as isize - 1)
+                    - 0.125 * value(j as isize - 2);
                 (north - south) / dy
             } else {
                 if j + 2 > mesh.ny {
                     return upwind(velocity);
                 }
-                let north = 0.375 * value(j) + 0.75 * value(j + 1) - 0.125 * value(j + 2);
-                let south = 0.375 * value(j - 1) + 0.75 * value(j) - 0.125 * value(j + 1);
+                let north = 0.375 * value(j as isize) + 0.75 * value(j as isize + 1)
+                    - 0.125 * value(j as isize + 2);
+                let south = 0.375 * value(j as isize - 1) + 0.75 * value(j as isize)
+                    - 0.125 * value(j as isize + 1);
                 (north - south) / dy
             }
         }
@@ -1333,28 +1466,56 @@ fn eddy_stats(mesh: &Mesh, eddy: Option<&[f64]>) -> (f64, f64, f64) {
     }
 }
 
-fn project_velocity(mesh: &Mesh, density: f64, dt: f64, p: &[f64], u: &mut [f64], v: &mut [f64]) {
+fn project_velocity(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    density: f64,
+    dt: f64,
+    p: &[f64],
+    u: &mut [f64],
+    v: &mut [f64],
+) {
     let factor = dt / density;
+    let periodic_x = boundaries.periodic_x();
+    let periodic_y = boundaries.periodic_y();
     for j in 0..mesh.ny {
-        for i in 1..mesh.nx {
+        let start = if periodic_x { 0 } else { 1 };
+        for i in start..mesh.nx {
             let index = mesh.u_index(i, j);
             if !mesh.u_face_open(i, j) {
                 u[index] = 0.0;
                 continue;
             }
-            u[index] -= factor * (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i - 1, j)])
-                / mesh.dx;
+            let west = if i == 0 {
+                mesh.pressure_index(mesh.nx - 1, j)
+            } else {
+                mesh.pressure_index(i - 1, j)
+            };
+            u[index] -= factor * (p[mesh.pressure_index(i, j)] - p[west]) / mesh.dx;
+        }
+        if periodic_x {
+            u[mesh.u_index(mesh.nx, j)] = u[mesh.u_index(0, j)];
         }
     }
-    for j in 1..mesh.ny {
+    let start = if periodic_y { 0 } else { 1 };
+    for j in start..mesh.ny {
         for i in 0..mesh.nx {
             let index = mesh.v_index(i, j);
             if !mesh.v_face_open(i, j) {
                 v[index] = 0.0;
                 continue;
             }
-            v[index] -= factor * (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i, j - 1)])
-                / mesh.dy;
+            let south = if j == 0 {
+                mesh.pressure_index(i, mesh.ny - 1)
+            } else {
+                mesh.pressure_index(i, j - 1)
+            };
+            v[index] -= factor * (p[mesh.pressure_index(i, j)] - p[south]) / mesh.dy;
+        }
+    }
+    if periodic_y {
+        for i in 0..mesh.nx {
+            v[mesh.v_index(i, mesh.ny)] = v[mesh.v_index(i, 0)];
         }
     }
 }
@@ -2589,10 +2750,17 @@ fn max_velocity(u: &[f64], v: &[f64]) -> f64 {
 
 /// Integrates the mass flux through the four domain sides.
 ///
-/// Solid obstacles are interior and contribute no boundary flux. The outward
+/// Solid obstacles are interior and contribute no boundary flux. Periodic sides
+/// carry no net exchange with the outside, so they are skipped. The outward
 /// normal is `+x` on the right, `-x` on the left, `+y` on the top and `-y` on
 /// the bottom, so the signs below match `outflow - inflow`.
-fn mass_balance(mesh: &Mesh, density: f64, u: &[f64], v: &[f64]) -> MassBalance {
+fn mass_balance(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    density: f64,
+    u: &[f64],
+    v: &[f64],
+) -> MassBalance {
     let mut inflow = 0.0;
     let mut outflow = 0.0;
     let mut accumulate = |flux: f64| {
@@ -2602,13 +2770,25 @@ fn mass_balance(mesh: &Mesh, density: f64, u: &[f64], v: &[f64]) -> MassBalance 
             inflow -= flux;
         }
     };
-    for j in 0..mesh.ny {
-        accumulate(-u[mesh.u_index(0, j)] * mesh.dy);
-        accumulate(u[mesh.u_index(mesh.nx, j)] * mesh.dy);
+    if !boundaries.is_periodic(Side::Left) {
+        for j in 0..mesh.ny {
+            accumulate(-u[mesh.u_index(0, j)] * mesh.dy);
+        }
     }
-    for i in 0..mesh.nx {
-        accumulate(-v[mesh.v_index(i, 0)] * mesh.dx);
-        accumulate(v[mesh.v_index(i, mesh.ny)] * mesh.dx);
+    if !boundaries.is_periodic(Side::Right) {
+        for j in 0..mesh.ny {
+            accumulate(u[mesh.u_index(mesh.nx, j)] * mesh.dy);
+        }
+    }
+    if !boundaries.is_periodic(Side::Bottom) {
+        for i in 0..mesh.nx {
+            accumulate(-v[mesh.v_index(i, 0)] * mesh.dx);
+        }
+    }
+    if !boundaries.is_periodic(Side::Top) {
+        for i in 0..mesh.nx {
+            accumulate(v[mesh.v_index(i, mesh.ny)] * mesh.dx);
+        }
     }
     let inflow = inflow * density;
     let outflow = outflow * density;
@@ -2657,10 +2837,12 @@ mod tests {
         let i = 4;
         let j = 2;
         let exact = 2.0 * i as f64 * mesh.dx;
-        let upwind = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Upwind);
-        let central = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Central);
-        let quick = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Quick);
-        let quick_reverse = u_convective_derivative(&mesh, &u, i, j, -1.0, ConvectionScheme::Quick);
+        let upwind = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Upwind, false);
+        let central =
+            u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Central, false);
+        let quick = u_convective_derivative(&mesh, &u, i, j, 1.0, ConvectionScheme::Quick, false);
+        let quick_reverse =
+            u_convective_derivative(&mesh, &u, i, j, -1.0, ConvectionScheme::Quick, false);
         assert!((central - exact).abs() < 1e-12, "central {central}");
         assert!((quick - exact).abs() < 1e-12, "QUICK {quick}");
         assert!(
@@ -2681,9 +2863,11 @@ mod tests {
         }
         let j = 3;
         let exact = 2.0 * j as f64 * mesh.dy;
-        let central = v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Central);
-        let quick = v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Quick);
-        let quick_reverse = v_convective_derivative(&mesh, &v, 2, j, -1.0, ConvectionScheme::Quick);
+        let central =
+            v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Central, false);
+        let quick = v_convective_derivative(&mesh, &v, 2, j, 1.0, ConvectionScheme::Quick, false);
+        let quick_reverse =
+            v_convective_derivative(&mesh, &v, 2, j, -1.0, ConvectionScheme::Quick, false);
         assert!((central - exact).abs() < 1e-12, "central {central}");
         assert!((quick - exact).abs() < 1e-12, "QUICK {quick}");
         assert!(
@@ -2702,8 +2886,8 @@ mod tests {
                 u[mesh.u_index(i, j)] = x * x;
             }
         }
-        let upwind = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Upwind);
-        let quick = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Quick);
+        let upwind = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Upwind, false);
+        let quick = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Quick, false);
         assert_eq!(upwind, quick);
     }
 

@@ -9,7 +9,7 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 
 The two-dimensional incompressible document core is executable. The CLI and SDK
 create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
-`euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure and
+`euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure, periodic sides and
 parabolic/power-law inlet profiles), obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
@@ -18,7 +18,7 @@ contains point monitor time series (`probes`), wall shear/friction summaries
 (`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
 `averageDt`, `minDt`, `maxDt`) and the `terminationReason`. Compressible flow, three-dimensional flow, Boussinesq
-buoyancy, periodic boundaries, adaptive meshing and external format import are
+buoyancy, adaptive meshing and external format import are
 not implemented and report `capability/not-implemented`.
 
 Only these commands are executable today:
@@ -31,7 +31,7 @@ ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
 ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
 ocfd time scheme set <file> --scheme euler|rk2
 ocfd time adaptive set <file> --cfl <n|off>
-ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
 ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -82,7 +82,8 @@ rename. Confirm the path before running them.
   there is no coupled buoyancy.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals` and `forces` are
   the only export targets. `inp` and `openfoam` reject with
-  `capability/not-implemented`; periodic boundaries are not implemented.
+  `capability/not-implemented`. Periodic sides must come in opposite pairs and
+  are excluded from the boundary mass balance.
   `contours` writes nine filled value bands plus marching-squares iso-lines and
   accepts the same `--field` names as `svg`, including `speed`.
 - Momentum time integration is `euler` (default) or `rk2`; both are explicit and
@@ -106,7 +107,8 @@ rename. Confirm the path before running them.
   capability matrix.
 - Report the exact command, revision and export path used.
 - Do not invent mesh refinement, turbulence models or boundary types outside the
-  implemented commands; `slip` and outlet `pressure` are the supported additions.
+  implemented commands; `slip`, outlet `pressure` and paired `periodic` sides are
+  the supported boundary additions.
 
 ## Safety
 

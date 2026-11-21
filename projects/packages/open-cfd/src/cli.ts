@@ -33,7 +33,7 @@ usage:
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   open-cfd time scheme set <file> --scheme euler|rk2
   open-cfd time adaptive set <file> --cfl <n|off>
-  open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -54,7 +54,7 @@ exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
 `;
 
 const SIDES: readonly Side[] = ['left', 'right', 'top', 'bottom'];
-const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet', 'slip'];
+const BOUNDARY_KINDS: readonly BoundaryKind[] = ['wall', 'inlet', 'outlet', 'slip', 'periodic'];
 const INLET_PROFILES: readonly InletProfile[] = ['uniform', 'parabolic', 'powerLaw'];
 const TIME_SCHEMES: readonly TimeScheme[] = ['euler', 'rk2'];
 const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
@@ -163,7 +163,7 @@ function parseSide(raw: string): Side {
 
 function parseBoundaryKind(raw: string): BoundaryKind {
     if (!BOUNDARY_KINDS.includes(raw as BoundaryKind)) {
-        throw cliError('cli/invalid-boundary-kind', `unknown boundary kind \`${raw}\`; use wall, inlet, outlet or slip`);
+        throw cliError('cli/invalid-boundary-kind', `unknown boundary kind \`${raw}\`; use wall, inlet, outlet, slip or periodic`);
     }
     return raw as BoundaryKind;
 }
@@ -431,7 +431,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]',
+                'boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]',
             );
             const side = parseSide(requiredOption(parsed, '--side'));
             const kind = parseBoundaryKind(requiredOption(parsed, '--kind'));

@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_contours, export_csv, export_forces, export_residuals, export_streamlines, export_svg,
     export_vtk, solve, solve_pressure, solve_with, stream_function, transport_scalar, vorticity,
-    Boundary, BoundaryKind, ConvectionScheme, ExportField, InletProfile, Mesh, Model, Obstacle,
-    PressureSettings, Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON,
-    VERSION,
+    Boundaries, Boundary, BoundaryKind, ConvectionScheme, ExportField, InitialField, InletProfile,
+    Mesh, MeshConfig, Model, Obstacle, PressureSettings, Probe, Reference, ScalarConfig, Solution,
+    SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -375,7 +375,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"massBalance\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamlines\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"contours\": \"supported\""));
-    assert!(CAPABILITIES_JSON.contains("\"periodic\": \"unsupported\""));
+    assert!(CAPABILITIES_JSON.contains("\"periodic\": \"supported\""));
 }
 
 #[test]
@@ -1432,5 +1432,90 @@ fn parabolic_inlet_conserves_the_discrete_mask_flow() {
     assert_eq!(
         invalid.validate().expect_err("zero exponent").code,
         "boundary/invalid"
+    );
+}
+
+#[test]
+fn periodic_boundaries_must_come_in_opposite_pairs() {
+    let mut model = mesh_model(8, 8);
+    model.boundaries.left.kind = BoundaryKind::Periodic;
+    assert_eq!(
+        model.validate().expect_err("unpaired periodic").code,
+        "boundary/invalid"
+    );
+
+    model.boundaries.right.kind = BoundaryKind::Periodic;
+    model.validate().expect("paired periodic boundaries");
+}
+
+#[test]
+fn periodic_sides_copy_the_opposite_boundary_face() {
+    let mut boundaries = Boundaries::default();
+    boundaries.left.kind = BoundaryKind::Periodic;
+    boundaries.right.kind = BoundaryKind::Periodic;
+    boundaries.bottom.kind = BoundaryKind::Periodic;
+    boundaries.top.kind = BoundaryKind::Periodic;
+    assert!(boundaries.periodic_x());
+    assert!(boundaries.periodic_y());
+
+    let mesh = Mesh::new(&MeshConfig {
+        nx: 6,
+        ny: 4,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        u[mesh.u_index(0, j)] = 1.0;
+        u[mesh.u_index(mesh.nx, j)] = -1.0;
+    }
+    for i in 0..mesh.nx {
+        v[mesh.v_index(i, 0)] = 0.5;
+        v[mesh.v_index(i, mesh.ny)] = -0.5;
+    }
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    for j in 0..mesh.ny {
+        assert_eq!(u[mesh.u_index(0, j)], u[mesh.u_index(mesh.nx, j)]);
+    }
+    for i in 0..mesh.nx {
+        assert_eq!(v[mesh.v_index(i, 0)], v[mesh.v_index(i, mesh.ny)]);
+    }
+}
+
+#[test]
+fn periodic_channel_conserves_flow_and_excludes_wrapped_sides() {
+    let mut model = mesh_model(16, 12);
+    model.boundaries.left.kind = BoundaryKind::Periodic;
+    model.boundaries.right.kind = BoundaryKind::Periodic;
+    model.boundaries.top = Boundary::wall();
+    model.boundaries.bottom = Boundary::wall();
+    model.initial = Some(InitialField {
+        velocity: [0.4, 0.0],
+    });
+    model.time.steps = 20;
+    model.time.pressure_iterations = 40;
+
+    let solution = solve(&model).expect("periodic solve");
+    assert_finite(&solution.u, "u");
+    assert_finite(&solution.v, "v");
+    assert_finite(&solution.p, "p");
+    let balance = solution.report.mass_balance;
+    assert_eq!(balance.inflow, 0.0);
+    assert_eq!(balance.outflow, 0.0);
+    assert_eq!(balance.net, 0.0);
+    assert_eq!(balance.relative_error, 0.0);
+    let mesh = &solution.mesh;
+    for j in 0..mesh.ny {
+        assert!(
+            (solution.u[mesh.u_index(0, j)] - solution.u[mesh.u_index(mesh.nx, j)]).abs() < 1e-12,
+            "periodic face {j} is not wrapped"
+        );
+    }
+    assert!(
+        solution.report.max_velocity > 0.05,
+        "the initial streamwise flow should persist, got {}",
+        solution.report.max_velocity
     );
 }

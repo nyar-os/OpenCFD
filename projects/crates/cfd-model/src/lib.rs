@@ -81,6 +81,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "wallShear": "supported",
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
+    "periodic": "supported",
     "inletProfiles": "supported",
     "momentCoefficients": "supported",
     "massBalance": "supported",
@@ -98,7 +99,6 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "streamlines": "supported",
     "history": "supported",
     "contours": "supported",
-    "periodic": "unsupported",
     "inp": "unsupported",
     "openfoam": "unsupported"
   }

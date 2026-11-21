@@ -62,7 +62,7 @@ export interface TimeSettings {
 }
 
 /** Boundary kind of one side. */
-export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'slip';
+export type BoundaryKind = 'wall' | 'inlet' | 'outlet' | 'slip' | 'periodic';
 
 /** Normal-velocity shape of an inlet side. */
 export type InletProfile = 'uniform' | 'parabolic' | 'powerLaw';

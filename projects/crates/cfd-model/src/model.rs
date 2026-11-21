@@ -260,6 +260,9 @@ pub enum BoundaryKind {
     Outlet,
     /// Free-slip wall: zero normal velocity and zero tangential gradient.
     Slip,
+    /// Periodic side: the opposite side of the same axis copies this boundary
+    /// face, so flow leaves one side and re-enters the other.
+    Periodic,
 }
 
 impl BoundaryKind {
@@ -270,6 +273,7 @@ impl BoundaryKind {
             Self::Inlet => "inlet",
             Self::Outlet => "outlet",
             Self::Slip => "slip",
+            Self::Periodic => "periodic",
         }
     }
 }
@@ -283,10 +287,11 @@ impl FromStr for BoundaryKind {
             "inlet" => Ok(Self::Inlet),
             "outlet" => Ok(Self::Outlet),
             "slip" | "freeSlip" | "free-slip" | "free_slip" => Ok(Self::Slip),
+            "periodic" => Ok(Self::Periodic),
             other => Err(CfdError::new(
                 "cli/invalid-boundary-kind",
                 format!(
-                    "unknown boundary kind `{other}`; only wall, inlet, outlet or slip is supported"
+                    "unknown boundary kind `{other}`; only wall, inlet, outlet, slip or periodic is supported"
                 ),
             )),
         }
@@ -533,6 +538,21 @@ impl Boundaries {
             Side::Top => &mut self.top,
             Side::Bottom => &mut self.bottom,
         }
+    }
+
+    /// Whether one side is periodic.
+    pub fn is_periodic(&self, side: Side) -> bool {
+        self.get(side).kind == BoundaryKind::Periodic
+    }
+
+    /// Whether both x sides are periodic, so `u` wraps in x.
+    pub fn periodic_x(&self) -> bool {
+        self.is_periodic(Side::Left) && self.is_periodic(Side::Right)
+    }
+
+    /// Whether both y sides are periodic, so `v` wraps in y.
+    pub fn periodic_y(&self) -> bool {
+        self.is_periodic(Side::Top) && self.is_periodic(Side::Bottom)
     }
 }
 
@@ -1213,6 +1233,19 @@ impl Model {
                 "boundary/invalid",
                 "boundaries.inletProfiles.exponent must be a finite positive number",
             ));
+        }
+        for (low, high, low_name, high_name) in [
+            (Side::Left, Side::Right, "left", "right"),
+            (Side::Bottom, Side::Top, "bottom", "top"),
+        ] {
+            if self.boundaries.is_periodic(low) != self.boundaries.is_periodic(high) {
+                report.push(Issue::error(
+                    "boundary/invalid",
+                    format!(
+                        "periodic boundaries must come in pairs; {low_name} and {high_name} must both be periodic or both be non-periodic"
+                    ),
+                ));
+            }
         }
         if let Some(initial) = &self.initial {
             if !initial.velocity.iter().all(|value| value.is_finite()) {
