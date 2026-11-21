@@ -494,7 +494,8 @@ pub struct Boundaries {
 }
 
 /// Names of the four domain sides, used by the CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Side {
     /// Left side (`x = 0`).
     Left,
@@ -569,6 +570,119 @@ impl Boundaries {
     /// Whether both y sides are periodic, so `v` wraps in y.
     pub fn periodic_y(&self) -> bool {
         self.is_periodic(Side::Top) && self.is_periodic(Side::Bottom)
+    }
+}
+
+/// Piecewise linear time series of one boundary value.
+///
+/// `times` must be finite, strictly increasing and the same length as `values`.
+/// [`Self::sample`] interpolates linearly between two samples and clamps to the
+/// first or last value outside the stored range, so a run never extrapolates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeSeries {
+    /// Sample times in seconds.
+    pub times: Vec<f64>,
+    /// Sample values at `times`.
+    pub values: Vec<f64>,
+}
+
+impl TimeSeries {
+    /// Checks that both arrays are non-empty, equal length, finite and that the
+    /// times are strictly increasing.
+    pub fn validate(&self) -> Result<(), CfdError> {
+        if self.times.is_empty() || self.values.is_empty() {
+            return Err(CfdError::new(
+                "transient/invalid",
+                "a time series needs at least one sample",
+            ));
+        }
+        if self.times.len() != self.values.len() {
+            return Err(CfdError::new(
+                "transient/invalid",
+                "a time series needs the same number of times and values",
+            ));
+        }
+        if !self.times.iter().all(|value| value.is_finite())
+            || !self.values.iter().all(|value| value.is_finite())
+        {
+            return Err(CfdError::new(
+                "transient/invalid",
+                "time series times and values must be finite",
+            ));
+        }
+        if self.times.windows(2).any(|window| window[1] <= window[0]) {
+            return Err(CfdError::new(
+                "transient/invalid",
+                "time series times must be strictly increasing",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Value at `time`, linearly interpolated and clamped at both ends.
+    ///
+    /// The series must pass [`Self::validate`] first; an empty series returns
+    /// zero so the solver cannot panic on a malformed document.
+    pub fn sample(&self, time: f64) -> f64 {
+        let last = match self.times.len().checked_sub(1) {
+            Some(last) if last < self.values.len() => last,
+            _ => return 0.0,
+        };
+        if !time.is_finite() || time <= self.times[0] {
+            return self.values[0];
+        }
+        if time >= self.times[last] {
+            return self.values[last];
+        }
+        let upper = self.times.partition_point(|sample| *sample <= time);
+        let lower = upper - 1;
+        let span = self.times[upper] - self.times[lower];
+        if span <= 0.0 {
+            self.values[upper]
+        } else {
+            let fraction = (time - self.times[lower]) / span;
+            self.values[lower] + fraction * (self.values[upper] - self.values[lower])
+        }
+    }
+}
+
+/// Time-series boundary drive of one domain side.
+///
+/// Each optional series replaces the corresponding stored boundary value at the
+/// current physical time: `u` and `v` drive the prescribed velocity on an inlet
+/// or moving wall, and `pressure` drives the outlet reference pressure. At
+/// least one series must be present. The first entry in document order owns a
+/// duplicated side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransientInlet {
+    /// Side the series drives.
+    pub side: Side,
+    /// X velocity time series (m/s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub u: Option<TimeSeries>,
+    /// Y velocity time series (m/s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v: Option<TimeSeries>,
+    /// Outlet reference pressure time series (Pa).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pressure: Option<TimeSeries>,
+}
+
+impl TransientInlet {
+    /// Checks that every series is well formed and at least one exists.
+    pub fn validate(&self) -> Result<(), CfdError> {
+        if self.u.is_none() && self.v.is_none() && self.pressure.is_none() {
+            return Err(CfdError::new(
+                "transient/invalid",
+                "a transient inlet needs at least one of u, v or pressure",
+            ));
+        }
+        for series in [&self.u, &self.v, &self.pressure].into_iter().flatten() {
+            series.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -1297,6 +1411,9 @@ pub struct Model {
     /// Volumetric scalar sources and sinks over rectangular regions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scalar_sources: Vec<ScalarSource>,
+    /// Time-series boundary drives, applied at the current physical time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transient_inlets: Vec<TransientInlet>,
     /// Optional passive scalar (temperature) transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -1344,6 +1461,7 @@ impl Model {
             porous: Vec::new(),
             probes: Vec::new(),
             scalar_sources: Vec::new(),
+            transient_inlets: Vec::new(),
             scalar: None,
             turbulence: None,
             thermal: None,
@@ -1576,6 +1694,23 @@ impl Model {
                 "scalar/invalid",
                 "scalar sources require scalar transport to be configured",
             ));
+        }
+        for (position, transient) in self.transient_inlets.iter().enumerate() {
+            if let Err(error) = transient.validate() {
+                report.push(Issue::error(error.code, error.message));
+            }
+            if self.transient_inlets[..position]
+                .iter()
+                .any(|earlier| earlier.side == transient.side)
+            {
+                report.push(Issue::error(
+                    "transient/invalid",
+                    format!(
+                        "side `{}` has more than one transient inlet entry",
+                        transient.side.as_str()
+                    ),
+                ));
+            }
         }
         if let Some(scalar) = &self.scalar {
             if !scalar.diffusivity.is_finite() || scalar.diffusivity < 0.0 {

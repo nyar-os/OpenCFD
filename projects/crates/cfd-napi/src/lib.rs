@@ -18,7 +18,7 @@ use std::sync::{Mutex, MutexGuard};
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, ScalarSource, Side, SolveOptions,
-    TimeScheme, TurbulenceModel,
+    TimeScheme, TransientInlet, TurbulenceModel,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -350,6 +350,36 @@ fn scalar_source_clear(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Adds or replaces one transient inlet time series and returns the summary.
+#[function]
+fn transient_inlet_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let request = text(&ctx, 1)?;
+    let inlet = serde_json::from_str::<TransientInlet>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the transient inlet request: {error}"
+        ))
+    })?;
+    let summary = with_session(handle, |session| session.transient_inlet_set(inlet))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Returns the transient inlet time series of one session document.
+#[function]
+fn transient_inlet_list(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let inlets = with_session(handle, |session| Ok(session.transient_inlet_list()))?;
+    respond(&ctx, &json!(inlets))
+}
+
+/// Removes every transient inlet time series and returns the summary.
+#[function]
+fn transient_inlet_clear(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let summary = with_session(handle, |session| session.transient_inlet_clear())?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Configures passive scalar transport and returns the summary.
 #[function]
 fn scalar_set(ctx: CallContext) -> Result<JsValue> {
@@ -500,6 +530,9 @@ register_module![
     scalar_source_add,
     scalar_source_list,
     scalar_source_clear,
+    transient_inlet_set,
+    transient_inlet_list,
+    transient_inlet_clear,
     turbulence_set,
     buoyancy_set,
     convection_set,

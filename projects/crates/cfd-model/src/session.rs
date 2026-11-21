@@ -22,7 +22,8 @@ use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
     MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, ScalarSource, Side,
-    ThermalConfig, TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
+    ThermalConfig, TimeScheme, TimeSettings, TransientInlet, Turbulence, TurbulenceModel,
+    WallFunction,
 };
 use crate::particles::{
     export_particles as write_particles, ParticleConfig, DEFAULT_PARTICLE_STEPS,
@@ -158,6 +159,8 @@ pub struct CaseSummary {
     pub probes: Vec<Probe>,
     /// Volumetric scalar sources in document order.
     pub scalar_sources: Vec<ScalarSource>,
+    /// Time-series boundary drives in document order.
+    pub transient_inlets: Vec<TransientInlet>,
     /// Optional passive scalar transport settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -194,6 +197,7 @@ impl CaseSummary {
             porous: model.porous.clone(),
             probes: model.probes.clone(),
             scalar_sources: model.scalar_sources.clone(),
+            transient_inlets: model.transient_inlets.clone(),
             scalar: model.scalar.clone(),
             turbulence: model.turbulence.clone(),
             thermal: model.thermal.clone(),
@@ -571,6 +575,27 @@ impl OpenCfd {
     /// Removes every volumetric scalar source and writes the document back.
     pub fn scalar_source_clear(&mut self) -> Result<CaseSummary, CfdError> {
         self.edit(|model| model.scalar_sources.clear())
+    }
+
+    /// Adds or replaces the transient drive of one side and writes the document
+    /// back. A second entry for the same side replaces the first.
+    pub fn transient_inlet_set(&mut self, inlet: TransientInlet) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model
+                .transient_inlets
+                .retain(|existing| existing.side != inlet.side);
+            model.transient_inlets.push(inlet);
+        })
+    }
+
+    /// Returns the transient inlet drives in document order.
+    pub fn transient_inlet_list(&self) -> Vec<TransientInlet> {
+        self.model.transient_inlets.clone()
+    }
+
+    /// Removes every transient inlet drive and writes the document back.
+    pub fn transient_inlet_clear(&mut self) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| model.transient_inlets.clear())
     }
 
     /// Configures passive scalar transport and writes the document back.

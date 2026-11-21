@@ -33,6 +33,9 @@ export interface NativeBinding {
     scalar_source_add(handle: number, requestJson: string): string;
     scalar_source_list(handle: number): string;
     scalar_source_clear(handle: number): string;
+    transient_inlet_set(handle: number, requestJson: string): string;
+    transient_inlet_list(handle: number): string;
+    transient_inlet_clear(handle: number): string;
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
     turbulence_set(
         handle: number,

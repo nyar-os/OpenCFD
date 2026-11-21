@@ -11,7 +11,8 @@ use cfd_model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField,
     ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig,
     ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, ScalarSource,
-    SideThermal, Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
+    Side, SideThermal, Solution, SolveOptions, ThermalConfig, TimeSeries, TransientInlet,
+    WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -2633,4 +2634,93 @@ fn scalar_source_validates_geometry_time_and_scalar_transport() {
             .code,
         "scalar/invalid"
     );
+}
+
+#[test]
+fn time_series_interpolates_clamps_and_rejects_malformed_samples() {
+    let series = TimeSeries {
+        times: vec![0.0, 1.0, 2.0],
+        values: vec![0.0, 2.0, 4.0],
+    };
+    assert!((series.sample(-1.0) - 0.0).abs() < 1e-12);
+    assert!((series.sample(0.5) - 1.0).abs() < 1e-12);
+    assert!((series.sample(1.25) - 2.5).abs() < 1e-12);
+    assert!((series.sample(10.0) - 4.0).abs() < 1e-12);
+
+    let duplicate = TimeSeries {
+        times: vec![0.0, 1.0, 1.0],
+        values: vec![0.0, 1.0, 2.0],
+    };
+    assert_eq!(
+        duplicate.validate().expect_err("duplicate times").code,
+        "transient/invalid"
+    );
+    let mismatched = TimeSeries {
+        times: vec![0.0, 1.0],
+        values: vec![1.0],
+    };
+    assert_eq!(
+        mismatched.validate().expect_err("mismatched lengths").code,
+        "transient/invalid"
+    );
+    let empty = TimeSeries {
+        times: Vec::new(),
+        values: Vec::new(),
+    };
+    assert_eq!(
+        empty.validate().expect_err("empty series").code,
+        "transient/invalid"
+    );
+}
+
+#[test]
+fn transient_inlet_drives_velocity_and_reports_its_history() {
+    let mut model = mesh_model(12, 12);
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.time.dt = 0.01;
+    model.time.steps = 10;
+    model.transient_inlets = vec![TransientInlet {
+        side: Side::Left,
+        u: Some(TimeSeries {
+            times: vec![0.0, 0.1],
+            values: vec![0.0, 1.0],
+        }),
+        v: None,
+        pressure: None,
+    }];
+
+    let solution = solve(&model).expect("transient inlet solve");
+    assert_eq!(solution.report.inlet_history.len(), 1);
+    let report = &solution.report.inlet_history[0];
+    assert_eq!(report.side, "left");
+    assert_eq!(report.history.len(), 10);
+    assert!((report.history[0].u - 0.1).abs() < 1e-9);
+    assert!((report.history[9].u - 1.0).abs() < 1e-9);
+    assert!(
+        (solution.u[solution.mesh.u_index(1, 6)] - 1.0).abs() < 0.2,
+        "left-column velocity {} should follow the time series",
+        solution.u[solution.mesh.u_index(1, 6)]
+    );
+
+    let mut duplicate = model.clone();
+    duplicate.transient_inlets.push(TransientInlet {
+        side: Side::Left,
+        pressure: Some(TimeSeries {
+            times: vec![0.0],
+            values: vec![0.0],
+        }),
+        u: None,
+        v: None,
+    });
+    let error = duplicate.validate().expect_err("duplicate side");
+    assert_eq!(error.code, "transient/invalid");
 }

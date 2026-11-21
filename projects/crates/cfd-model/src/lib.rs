@@ -27,6 +27,8 @@
 //! * boundary mass balance, sampled continuity residuals, vorticity, stream
 //!   function and point probe time series;
 //! * per-outlet flow allocation for domains with more than one outlet;
+//! * time-series-driven transient inlet velocity and outlet pressure with
+//!   linear interpolation, end clamping and sampled inlet histories;
 //! * mesh quality metrics (non-orthogonality, aspect ratio and skewness);
 //! * Lagrangian particle tracing exported as time-accurate trajectories;
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet,
@@ -62,8 +64,9 @@ pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
-    ScalarConfig, ScalarSource, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings,
-    Turbulence, TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
+    ScalarConfig, ScalarSource, Side, SideThermal, ThermalConfig, TimeScheme, TimeSeries,
+    TimeSettings, TransientInlet, Turbulence, TurbulenceModel, Units, WallFunction, FORMAT,
+    VERSION,
 };
 pub use crate::particles::{
     export_particles, trace_particles, trace_solution_particles, ParticleConfig, ParticleSample,
@@ -75,10 +78,10 @@ pub use crate::session::{
 };
 pub use crate::solver::{
     outlet_flows, solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar,
-    transport_thermal, ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, OutletFlow,
-    PorousSummary, PressureSettings, PressureStats, ProbeSample, ProbeSeries, Report,
-    ResidualSample, ScalarSourceSummary, Solution, SolveOptions, WallShear, REPORT_FORMAT,
-    REPORT_VERSION,
+    transport_thermal, ForceSample, InletHistory, InletSample, MassBalance, ObstacleForce,
+    ObstacleNusselt, OutletFlow, PorousSummary, PressureSettings, PressureStats, ProbeSample,
+    ProbeSeries, Report, ResidualSample, ScalarSourceSummary, Solution, SolveOptions, WallShear,
+    REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -109,6 +112,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "periodic": "supported",
     "pressureDriven": "supported",
     "inletProfiles": "supported",
+    "transientInlets": "supported",
     "momentCoefficients": "supported",
     "massBalance": "supported",
     "meshQuality": "supported",

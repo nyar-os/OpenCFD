@@ -34,6 +34,7 @@ import type {
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
+    TransientInlet,
     TurbulenceSetRequest,
 } from './types.js';
 
@@ -186,6 +187,24 @@ export class CfdCase {
     clearScalarSources(): CaseSummary {
         this.assertOpen();
         return this.adopt(service.scalarSourceClear(this.handle));
+    }
+
+    /** Adds or replaces one transient inlet time series and writes the document back. */
+    setTransientInlet(inlet: TransientInlet): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.transientInletSet(this.handle, inlet));
+    }
+
+    /** Returns the transient inlet time series in document order. */
+    listTransientInlets(): readonly TransientInlet[] {
+        this.assertOpen();
+        return service.transientInletList(this.handle);
+    }
+
+    /** Removes every transient inlet time series and writes the document back. */
+    clearTransientInlets(): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.transientInletClear(this.handle));
     }
 
     /** Configures the eddy-viscosity turbulence model and writes the document back. */

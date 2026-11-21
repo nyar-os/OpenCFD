@@ -7,7 +7,7 @@ use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
     PorousRegion, Probe, ScalarSource, Side, SideThermal, SolveOptions, ThermalConfig, TimeScheme,
-    TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
+    TimeSeries, TransientInlet, TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
 };
 
 const USAGE: &str = "\
@@ -30,6 +30,9 @@ Usage:
   ocfd probe add <file> --x <m> --y <m> [--id <name>]
   ocfd probe list <file>
   ocfd probe clear <file>
+  ocfd inlet series set <file> --side left|right|top|bottom [--u <t:v,...>] [--v <t:v,...>] [--pressure <t:v,...>]
+  ocfd inlet series list <file>
+  ocfd inlet series clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   ocfd scalar source add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --rate <unit/s> [--start <s>] [--ramp <s>] [--id <name>]
   ocfd scalar source list <file>
@@ -94,6 +97,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "obstacle" => obstacle_command(&args[1..]),
         "porous" => porous_command(&args[1..]),
         "probe" => probe_command(&args[1..]),
+        "inlet" => inlet_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
         "buoyancy" => subcommand(args, "set", "buoyancy"),
         "convection" => convection_command(&args[1..]),
@@ -671,6 +675,119 @@ fn probe_clear(args: &[String]) -> Result<i32, CfdError> {
     session.probe_clear()?;
     println!("cleared all probes");
     Ok(0)
+}
+
+fn inlet_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("series") => match args.get(1).map(String::as_str) {
+            Some("set") => inlet_series_set(&args[2..]),
+            Some("list") => inlet_series_list(&args[2..]),
+            Some("clear") => inlet_series_clear(&args[2..]),
+            Some(other) => Err(CfdError::new(
+                "cli/unknown-command",
+                format!("`inlet series` has no subcommand `{other}`; use set, list or clear"),
+            )),
+            None => Err(CfdError::new(
+                "cli/missing-argument",
+                "`inlet series` requires a subcommand; use set, list or clear",
+            )),
+        },
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`inlet` has no subcommand `{other}`; only series is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`inlet` requires a subcommand; only series is supported",
+        )),
+    }
+}
+
+fn inlet_series_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--side", "--u", "--v", "--pressure"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "inlet series set <file> --side left|right|top|bottom [--u <t:v,...>] [--v <t:v,...>] [--pressure <t:v,...>]",
+    )?;
+    let side = required(&parsed, "--side")?.parse::<Side>()?;
+    let u = parsed
+        .options
+        .get("--u")
+        .map(|value| parse_series(value))
+        .transpose()?;
+    let v = parsed
+        .options
+        .get("--v")
+        .map(|value| parse_series(value))
+        .transpose()?;
+    let pressure = parsed
+        .options
+        .get("--pressure")
+        .map(|value| parse_series(value))
+        .transpose()?;
+    let mut session = open_session(file)?;
+    let summary = session.transient_inlet_set(TransientInlet {
+        side,
+        u,
+        v,
+        pressure,
+    })?;
+    println!(
+        "transient inlet set: side={} ({} entries)",
+        side.as_str(),
+        summary.transient_inlets.len()
+    );
+    Ok(0)
+}
+
+fn inlet_series_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "inlet series list <file>")?;
+    let session = open_session(file)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&session.transient_inlet_list())
+            .unwrap_or_else(|_| "[]".to_string())
+    );
+    Ok(0)
+}
+
+fn inlet_series_clear(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "inlet series clear <file>")?;
+    let mut session = open_session(file)?;
+    session.transient_inlet_clear()?;
+    println!("cleared all transient inlets");
+    Ok(0)
+}
+
+fn parse_series(value: &str) -> Result<TimeSeries, CfdError> {
+    let mut times = Vec::new();
+    let mut values = Vec::new();
+    for pair in value.split(',').filter(|pair| !pair.is_empty()) {
+        let (time, sample) = pair.split_once(':').ok_or_else(|| {
+            CfdError::new(
+                "cli/invalid-time-series",
+                format!("time-series sample `{pair}` must use `time:value`"),
+            )
+        })?;
+        times.push(time.parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-time-series",
+                format!("time-series time `{time}` is not a number"),
+            )
+        })?);
+        values.push(sample.parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-time-series",
+                format!("time-series value `{sample}` is not a number"),
+            )
+        })?);
+    }
+    let series = TimeSeries { times, values };
+    series.validate()?;
+    Ok(series)
 }
 
 fn scalar_command(args: &[String]) -> Result<i32, CfdError> {

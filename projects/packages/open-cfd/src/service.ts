@@ -35,6 +35,7 @@ import type {
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
+    TransientInlet,
     TurbulenceSetRequest,
 } from './types.js';
 
@@ -239,6 +240,27 @@ export function scalarSourceList(handle: number): readonly ScalarSource[] {
 export function scalarSourceClear(handle: number): CaseSummary {
     return decode<CaseSummary>(() =>
         binding('scalar.source.clear').scalar_source_clear(handle),
+    );
+}
+
+/** Adds or replaces one transient inlet time series and writes the document back. */
+export function transientInletSet(handle: number, inlet: TransientInlet): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('inlet.series.set').transient_inlet_set(handle, JSON.stringify(inlet)),
+    );
+}
+
+/** Returns the transient inlet time series in document order. */
+export function transientInletList(handle: number): readonly TransientInlet[] {
+    return decode<readonly TransientInlet[]>(() =>
+        binding('inlet.series.list').transient_inlet_list(handle),
+    );
+}
+
+/** Removes every transient inlet time series and writes the document back. */
+export function transientInletClear(handle: number): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('inlet.series.clear').transient_inlet_clear(handle),
     );
 }
 

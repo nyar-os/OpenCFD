@@ -58,6 +58,32 @@ pub struct PorousSummary {
     pub mean_drag: f64,
 }
 
+/// One sampled boundary value of a transient inlet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InletSample {
+    /// One-based solve step of the sample.
+    pub step: usize,
+    /// Physical time of the sample in seconds.
+    pub time: f64,
+    /// X velocity driven on the side in m/s.
+    pub u: f64,
+    /// Y velocity driven on the side in m/s.
+    pub v: f64,
+    /// Pressure driven on the side in Pa.
+    pub pressure: f64,
+}
+
+/// Sampled history of one transient inlet side.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InletHistory {
+    /// Side driven by the time series.
+    pub side: String,
+    /// Boundary values at every recorded sample.
+    pub history: Vec<InletSample>,
+}
+
 /// Per-region scalar source summary.
 ///
 /// `cells` counts the fluid cells whose centre lies inside the region,
@@ -408,6 +434,9 @@ pub struct Report {
     /// Per-region scalar source summary, in document order.
     #[serde(default)]
     pub scalar_sources: Vec<ScalarSourceSummary>,
+    /// Time-series inlet histories, in document order.
+    #[serde(default)]
+    pub inlet_history: Vec<InletHistory>,
     /// Whether Boussinesq buoyancy coupled the temperature field to momentum.
     #[serde(default)]
     pub buoyancy: bool,
@@ -568,7 +597,6 @@ pub fn solve_with_checkpoint(
             u.fill(initial.velocity[0]);
             v.fill(initial.velocity[1]);
         }
-        mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
         let temperature = model
             .scalar
             .as_ref()
@@ -577,6 +605,8 @@ pub fn solve_with_checkpoint(
     };
     let start_step = checkpoint.map_or(0, |state| state.steps);
     let mut simulated_time = checkpoint.map_or(0.0, |state| state.time);
+    let initial_boundaries = transient_boundaries(model, simulated_time);
+    mesh.apply_velocity_boundaries(&initial_boundaries, &mut u, &mut v);
 
     let settings = PressureSettings {
         iterations: model.time.pressure_iterations,
@@ -620,6 +650,7 @@ pub fn solve_with_checkpoint(
     let mut force_samples: Vec<Vec<ForceSample>> = vec![Vec::new(); model.obstacles.len()];
     let probe_cells = locate_probes(&mesh, model)?;
     let mut probe_samples: Vec<Vec<ProbeSample>> = vec![Vec::new(); model.probes.len()];
+    let mut inlet_samples: Vec<Vec<InletSample>> = vec![Vec::new(); model.transient_inlets.len()];
     let mut dt_sum = 0.0;
     let mut dt_min = f64::INFINITY;
     let mut dt_max = 0.0_f64;
@@ -644,11 +675,13 @@ pub fn solve_with_checkpoint(
         } else {
             model.time.dt
         };
+        let step_boundaries = transient_boundaries(model, simulated_time);
 
         match model.time.scheme {
             TimeScheme::Euler => momentum_euler(
                 &mesh,
                 model,
+                &step_boundaries,
                 &u,
                 &v,
                 &p,
@@ -664,6 +697,7 @@ pub fn solve_with_checkpoint(
             TimeScheme::Rk2 => momentum_heun(
                 &mesh,
                 model,
+                &step_boundaries,
                 &u,
                 &v,
                 &p,
@@ -675,12 +709,12 @@ pub fn solve_with_checkpoint(
                 &mut v_star,
             ),
         }
-        mesh.apply_velocity_boundaries(&model.boundaries, &mut u_star, &mut v_star);
+        mesh.apply_velocity_boundaries(&step_boundaries, &mut u_star, &mut v_star);
 
         let divergence = mesh.divergence(&u_star, &v_star);
         last_stats = solve_pressure(
             &mesh,
-            &model.boundaries,
+            &step_boundaries,
             &mut p,
             &divergence,
             model.fluid.density,
@@ -692,16 +726,16 @@ pub fn solve_with_checkpoint(
         v.copy_from_slice(&v_star);
         project_velocity(
             &mesh,
-            &model.boundaries,
+            &step_boundaries,
             model.fluid.density,
             dt,
             &p,
             &mut u,
             &mut v,
         );
-        mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
+        mesh.apply_velocity_boundaries(&step_boundaries, &mut u, &mut v);
         mesh.apply_convective_outlets(
-            &model.boundaries,
+            &step_boundaries,
             &u_previous,
             &v_previous,
             &mut u,
@@ -712,7 +746,7 @@ pub fn solve_with_checkpoint(
         if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
             transport_thermal_with_sources(
                 &mesh,
-                &model.boundaries,
+                &step_boundaries,
                 config,
                 model.thermal.as_ref(),
                 model.fluid.density,
@@ -791,6 +825,18 @@ pub fn solve_with_checkpoint(
                 &probe_cells,
                 &mut probe_samples,
             );
+            let sampled_boundaries = transient_boundaries(model, simulated_time);
+            for (transient, history) in model.transient_inlets.iter().zip(inlet_samples.iter_mut())
+            {
+                let boundary = sampled_boundaries.get(transient.side);
+                history.push(InletSample {
+                    step,
+                    time: simulated_time,
+                    u: boundary.velocity[0],
+                    v: boundary.velocity[1],
+                    pressure: boundary.pressure,
+                });
+            }
         }
 
         if let Some(tolerance) = options.tolerance {
@@ -804,8 +850,9 @@ pub fn solve_with_checkpoint(
 
     let divergence = mesh.divergence(&u, &v);
     let divergence_l2 = rms(&divergence);
-    let mass_balance = mass_balance(&mesh, &model.boundaries, model.fluid.density, &u, &v);
-    let outlets = outlet_flows(&mesh, &model.boundaries, model.fluid.density, &u, &v);
+    let final_boundaries = transient_boundaries(model, simulated_time);
+    let mass_balance = mass_balance(&mesh, &final_boundaries, model.fluid.density, &u, &v);
+    let outlets = outlet_flows(&mesh, &final_boundaries, model.fluid.density, &u, &v);
     let max_velocity = max_velocity(&u, &v);
     let quality = mesh_quality(&mesh);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
@@ -830,6 +877,15 @@ pub fn solve_with_checkpoint(
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
     let porous_summary = porous_summary(&mesh, model, &porous, &u, &v);
     let scalar_source_summary = scalar_source_summary(&mesh, model, simulated_time);
+    let inlet_history = model
+        .transient_inlets
+        .iter()
+        .zip(inlet_samples)
+        .map(|(transient, history)| InletHistory {
+            side: transient.side.as_str().to_string(),
+            history,
+        })
+        .collect();
 
     let report = Report {
         format: REPORT_FORMAT.to_string(),
@@ -895,6 +951,7 @@ pub fn solve_with_checkpoint(
         nusselt,
         porous: porous_summary,
         scalar_sources: scalar_source_summary,
+        inlet_history,
         buoyancy: model
             .buoyancy
             .as_ref()
@@ -1296,6 +1353,7 @@ fn porous_rate(model: &Model, max_speed: f64) -> f64 {
 fn momentum_derivative(
     mesh: &Mesh,
     model: &Model,
+    boundaries: &Boundaries,
     u: &[f64],
     v: &[f64],
     p: &[f64],
@@ -1309,7 +1367,6 @@ fn momentum_derivative(
     let rho = model.fluid.density;
     let dx = mesh.dx;
     let dy = mesh.dy;
-    let boundaries = &model.boundaries;
     let periodic_x = boundaries.periodic_x();
     let periodic_y = boundaries.periodic_y();
     let (source_x, source_y) = model.pressure_gradient.map_or((0.0, 0.0), |gradient| {
@@ -1539,6 +1596,7 @@ fn momentum_derivative(
 fn momentum_euler(
     mesh: &Mesh,
     model: &Model,
+    boundaries: &Boundaries,
     u: &[f64],
     v: &[f64],
     p: &[f64],
@@ -1551,7 +1609,19 @@ fn momentum_euler(
     du: &mut [f64],
     dv: &mut [f64],
 ) {
-    momentum_derivative(mesh, model, u, v, p, temperature, eddy, porous, du, dv);
+    momentum_derivative(
+        mesh,
+        model,
+        boundaries,
+        u,
+        v,
+        p,
+        temperature,
+        eddy,
+        porous,
+        du,
+        dv,
+    );
     for index in 0..u.len() {
         u_star[index] = u[index] + dt * du[index];
     }
@@ -1566,6 +1636,7 @@ fn momentum_euler(
 fn momentum_heun(
     mesh: &Mesh,
     model: &Model,
+    boundaries: &Boundaries,
     u: &[f64],
     v: &[f64],
     p: &[f64],
@@ -1586,6 +1657,7 @@ fn momentum_heun(
     momentum_derivative(
         mesh,
         model,
+        boundaries,
         u,
         v,
         p,
@@ -1601,11 +1673,12 @@ fn momentum_heun(
     for index in 0..v.len() {
         v1[index] = v[index] + dt * dv1[index];
     }
-    mesh.apply_velocity_boundaries(&model.boundaries, &mut u1, &mut v1);
+    mesh.apply_velocity_boundaries(boundaries, &mut u1, &mut v1);
 
     momentum_derivative(
         mesh,
         model,
+        boundaries,
         &u1,
         &v1,
         p,
@@ -2285,7 +2358,7 @@ fn max_eddy_viscosity(eddy: Option<&[f64]>) -> f64 {
 }
 
 fn max_boundary_speed(model: &Model) -> f64 {
-    [
+    let static_speed = [
         &model.boundaries.left,
         &model.boundaries.right,
         &model.boundaries.top,
@@ -2293,7 +2366,35 @@ fn max_boundary_speed(model: &Model) -> f64 {
     ]
     .iter()
     .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
-    .fold(0.0_f64, f64::max)
+    .fold(0.0_f64, f64::max);
+    let series_speed = model
+        .transient_inlets
+        .iter()
+        .flat_map(|transient| [&transient.u, &transient.v])
+        .flatten()
+        .flat_map(|series| series.values.iter())
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    static_speed.max(series_speed)
+}
+
+/// Copy of the stored boundaries with every transient series evaluated at
+/// physical time `time`.
+fn transient_boundaries(model: &Model, time: f64) -> Boundaries {
+    let mut boundaries = model.boundaries.clone();
+    for transient in &model.transient_inlets {
+        let boundary = boundaries.get_mut(transient.side);
+        if let Some(series) = &transient.u {
+            boundary.velocity[0] = series.sample(time);
+        }
+        if let Some(series) = &transient.v {
+            boundary.velocity[1] = series.sample(time);
+        }
+        if let Some(series) = &transient.pressure {
+            boundary.pressure = series.sample(time);
+        }
+    }
+    boundaries
 }
 
 /// Thermal diffusivity of the configured passive scalar, if any.

@@ -145,6 +145,40 @@ export interface ScalarConfig {
     readonly inletValue: number;
 }
 
+/** Piecewise linear time series; sampled and clamped at both ends. */
+export interface TimeSeries {
+    /** Strictly increasing sample times in seconds. */
+    readonly times: readonly number[];
+    /** Values at `times`. */
+    readonly values: readonly number[];
+}
+
+/** Time-series drive of one domain side. */
+export interface TransientInlet {
+    readonly side: Side;
+    /** X velocity series in m/s. */
+    readonly u?: TimeSeries;
+    /** Y velocity series in m/s. */
+    readonly v?: TimeSeries;
+    /** Outlet reference pressure series in Pa. */
+    readonly pressure?: TimeSeries;
+}
+
+/** One sampled transient inlet value. */
+export interface InletSample {
+    readonly step: number;
+    readonly time: number;
+    readonly u: number;
+    readonly v: number;
+    readonly pressure: number;
+}
+
+/** Sampled history of one transient inlet side. */
+export interface InletHistory {
+    readonly side: Side;
+    readonly history: readonly InletSample[];
+}
+
 /** Volumetric scalar source or sink over an axis-aligned rectangle. */
 export interface ScalarSource {
     /** Stable identifier; omitted means `source-N` in document order. */
@@ -309,6 +343,8 @@ export interface CaseSummary {
     readonly probes: readonly Probe[];
     /** Volumetric scalar sources in document order. */
     readonly scalarSources: readonly ScalarSource[];
+    /** Time-series boundary drives in document order. */
+    readonly transientInlets: readonly TransientInlet[];
     /** Passive scalar settings, when configured. */
     readonly scalar?: ScalarConfig;
     /** Eddy-viscosity turbulence settings, when configured. */
@@ -552,6 +588,8 @@ export interface SolveReport {
     readonly porous: readonly PorousSummary[];
     /** Scalar source summary in document order. */
     readonly scalarSources: readonly ScalarSourceSummary[];
+    /** Transient inlet histories in document order. */
+    readonly inletHistory: readonly InletHistory[];
     /** Point monitor time series in document order. */
     readonly probes: readonly ProbeSeries[];
     /** Wall shear and friction summary of every wall side. */

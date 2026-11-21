@@ -26,8 +26,9 @@ coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), per-outlet flow allocation (`outlets`),
 the selected `timeScheme`, adaptive-step statistics (`adaptive`,
 `averageDt`, `minDt`, `maxDt`), the `terminationReason`, whether Boussinesq
-buoyancy was applied (`buoyancy`), and rectangular scalar sources with their
-applied rate (`scalarSources`). Compressible flow, three-dimensional flow,
+buoyancy was applied (`buoyancy`), rectangular scalar sources with their
+applied rate (`scalarSources`), and sampled transient inlet histories
+(`inletHistory`). Compressible flow, three-dimensional flow,
 adaptive meshing and external format import are
 not implemented and report `capability/not-implemented`.
 
@@ -51,6 +52,9 @@ ocfd porous list <file>
 ocfd probe add <file> --x <m> --y <m> [--id <name>]
 ocfd probe list <file>
 ocfd probe clear <file>
+ocfd inlet series set <file> --side left|right|top|bottom [--u <t:v,...>] [--v <t:v,...>] [--pressure <t:v,...>]
+ocfd inlet series list <file>
+ocfd inlet series clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd scalar source add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --rate <unit/s> [--start <s>] [--ramp <s>] [--id <name>]
 ocfd scalar source list <file>
@@ -119,6 +123,15 @@ rename. Confirm the path before running them.
   `scalarSources` report entry with `id`, `cells`, `rate` and `appliedRate`.
   The source is explicit, so a very large rate paired with a large `--dt` can
   overshoot and should be reduced or resolved with a smaller step.
+- `inlet series set` drives one side's `u`, `v` and/or `pressure` from
+  comma-separated `time:value` pairs, e.g. `--u 0:0,0.5:1,1:0`. Times must be
+  strictly increasing and values finite; samples are linearly interpolated and
+  clamped to the first/last value outside the stored range, so the run never
+  extrapolates. The effective boundary is rebuilt at the start of every step,
+  the CFL check uses the largest absolute series velocity, and the report adds
+  an `inletHistory` entry per side with `step`, `time`, `u`, `v` and `pressure`.
+- `inlet series clear` removes every transient drive and restores the stored
+  static boundary values.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces`,
   `coefficients` and `particles` are
   the only export targets. `inp` and `openfoam` reject with
