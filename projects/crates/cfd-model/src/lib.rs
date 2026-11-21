@@ -6,14 +6,17 @@
 //! * constant density and constant dynamic viscosity (laminar);
 //! * a structured Cartesian mesh with staggered pressure and velocity;
 //! * first-order explicit time stepping with the Chorin projection method;
-//! * solid rectangle and circle obstacles with force coefficients;
+//! * solid rectangle and circle obstacles with drag, lift and moment
+//!   coefficients and configurable reference quantities;
 //! * passive scalar (temperature) transport with explicit advection-diffusion;
 //! * optional eddy-viscosity turbulence (constant or mixing-length);
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
-//! * SVG previews of the pressure and temperature fields;
-//! * lid-driven cavity and Couette-like channel cases with wall, inlet and
-//!   outlet sides.
+//! * SVG previews of cell-centred fields and traced streamlines;
+//! * boundary mass balance, sampled continuity residuals, vorticity, stream
+//!   function and point probe time series;
+//! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet and
+//!   pressure-outlet sides.
 //!
 //! Compressibility, heat coupling with buoyancy, three-dimensional grids,
 //! adaptive meshing and external format import are **not** implemented. See
@@ -84,6 +87,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "vtk": "supported",
     "svg": "supported",
     "streamlines": "supported",
+    "contours": "unsupported",
+    "periodic": "unsupported",
     "inp": "unsupported",
     "openfoam": "unsupported"
   }

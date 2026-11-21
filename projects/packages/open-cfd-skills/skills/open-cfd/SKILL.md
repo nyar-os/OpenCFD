@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary, obstacle, passive scalar, turbulence or thermal settings, solver reports, or CSV, VTK and SVG output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip and pressure outlets), obstacle, passive scalar, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -8,13 +8,16 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 ## Status
 
 The two-dimensional incompressible document core is executable. The CLI and SDK
-create and reopen one `.ocfd` case, edit mesh, fluid, time, boundary, obstacle,
-passive scalar, turbulence and thermal settings, validate it, solve it and export
-CSV, legacy ASCII VTK or SVG. The solve report also contains point monitor time
-series (`probes`) and wall shear/friction summaries (`wallShear`). Compressible
-flow, three-dimensional flow,
-Boussinesq buoyancy, coupled heat transfer, adaptive meshing and external format
-import are not implemented and report `capability/not-implemented`.
+create and reopen one `.ocfd` case, edit mesh, fluid, time, boundary (including
+free-slip walls and outlet pressure), obstacle, force/moment reference, passive
+scalar, turbulence and thermal settings, validate it, solve it and export CSV,
+legacy ASCII VTK, SVG field previews or SVG streamlines. The solve report also
+contains point monitor time series (`probes`), wall shear/friction summaries
+(`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
+boundary mass balance (`massBalance`). Compressible flow, three-dimensional flow,
+Boussinesq buoyancy, periodic boundaries, contour export, adaptive meshing and
+external format import are not implemented and report
+`capability/not-implemented`.
 
 Only these commands are executable today:
 
@@ -24,7 +27,7 @@ ocfd create <file.ocfd>
 ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
 ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
 ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
-ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]
+ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|slip [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
@@ -34,9 +37,11 @@ ocfd probe clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
 ocfd heat set <file> [thermal options]
+ocfd convection set <file> --scheme upwind|central|quick
+ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -58,10 +63,10 @@ rename. Confirm the path before running them.
 | Route | Intent | Minimum evidence |
 |-------|--------|------------------|
 | create | Build a case from a brief | `ocfd validate` output and the saved `.ocfd` document |
-| edit | Change mesh, fluid, time, boundary or obstacle settings | `ocfd validate` before and after |
+| edit | Change mesh, fluid, time, boundary, obstacle, reference or scheme settings | `ocfd validate` before and after |
 | validate | Check that a case is well formed | `ocfd validate` findings with codes |
-| solve | Integrate the case to a report | the solver report with residual history and forces |
-| deliver | Write CSV, VTK or SVG output | the exported file plus the solver report it came from |
+| solve | Integrate the case to a report | the solver report with residual/continuity history, mass balance and forces |
+| deliver | Write CSV, VTK, SVG or streamlines output | the exported file plus the solver report it came from |
 
 ## Solver and export limits
 
@@ -70,11 +75,14 @@ rename. Confirm the path before running them.
 - Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
 - Heat transfer uses the implemented passive scalar and thermal configuration;
   there is no coupled buoyancy.
-- `csv`, `vtk` and `svg` are the only export targets. `inp` and `openfoam`
-  reject with `capability/not-implemented`.
+- `csv`, `vtk`, `svg` and `streamlines` are the only export targets. `inp` and
+  `openfoam` reject with `capability/not-implemented`; periodic boundaries and
+  contour export are not implemented.
 - `solve` stops early on the L2 norm of the velocity change when `--tolerance`
   is given and reports `converged`, `steadyState`, `residual`,
-  `residualHistory` and `forces`.
+  `residualHistory` (with `continuity`), `massBalance` and `forces` (with
+  `cm` and the resolved reference quantities). It prints the JSON report on
+  stdout and a one-line summary on stderr.
 
 ## Hard rules
 
@@ -84,7 +92,7 @@ rename. Confirm the path before running them.
   capability matrix.
 - Report the exact command, revision and export path used.
 - Do not invent mesh refinement, turbulence models or boundary types outside the
-  implemented commands.
+  implemented commands; `slip` and outlet `pressure` are the supported additions.
 
 ## Safety
 

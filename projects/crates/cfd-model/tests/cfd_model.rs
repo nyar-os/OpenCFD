@@ -329,6 +329,13 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"probes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"wallShear\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"slipBoundary\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"pressureOutlet\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"momentCoefficients\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"massBalance\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"streamlines\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"periodic\": \"unsupported\""));
+    assert!(CAPABILITIES_JSON.contains("\"contours\": \"unsupported\""));
 }
 
 #[test]
