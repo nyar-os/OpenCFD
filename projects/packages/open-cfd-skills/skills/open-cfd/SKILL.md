@@ -10,7 +10,9 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 The two-dimensional incompressible document core is executable. The CLI and SDK
 create and reopen one `.ocfd` case, edit mesh, fluid, time, boundary, obstacle,
 passive scalar, turbulence and thermal settings, validate it, solve it and export
-CSV, legacy ASCII VTK or SVG. Compressible flow, three-dimensional flow,
+CSV, legacy ASCII VTK or SVG. The solve report also contains point monitor time
+series (`probes`) and wall shear/friction summaries (`wallShear`). Compressible
+flow, three-dimensional flow,
 Boussinesq buoyancy, coupled heat transfer, adaptive meshing and external format
 import are not implemented and report `capability/not-implemented`.
 
@@ -26,15 +28,18 @@ ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
+ocfd probe add <file> --x <m> --y <m> [--id <name>]
+ocfd probe list <file>
+ocfd probe clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
 ocfd heat set <file> [thermal options]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg [--field pressure|temperature] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
 ```
 
-Every editing command except `capabilities`, `validate`, `obstacle list`, `solve`
+Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
 and `export` rewrites the input document in place through a temporary file and a
 rename. Confirm the path before running them.
 
