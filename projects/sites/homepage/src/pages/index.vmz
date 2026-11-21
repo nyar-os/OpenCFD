@@ -1,0 +1,629 @@
+<template>
+    <SiteShell page="home">
+        <section class="hero">
+            <div class="hero__copy">
+                <span class="tag">In development · no public release</span>
+                <h1>
+                    Two-dimensional flow that stays verifiable —<br />from case to residual.
+                </h1>
+                <p class="hero__sub">
+                    OpenCFD is a narrowly scoped, verifiable incompressible
+                    Navier-Stokes solver. One Rust session owns the `.ocfd`
+                    document, validation, the staggered-mesh solve and field
+                    export; the CLI and the TypeScript SDK are thin wrappers over
+                    the same core. Cavity and channel cases, solid obstacles,
+                    passive scalar transport and steady-state detection work
+                    today. Three-dimensional flow, compressible flow, Boussinesq
+                    buoyancy and adaptive meshing are explicitly unsupported.
+                </p>
+                <div class="hero__cta">
+                    <Link to="FeaturesPage" class="btn btn--primary">
+                        See what works
+                    </Link>
+                    <Link to="RoadmapPage" class="btn btn--ghost">
+                        Read the roadmap
+                    </Link>
+                </div>
+            </div>
+
+            <div class="solver-frame" aria-hidden="true">
+                <div class="sf-titlebar">
+                    <span class="sf-mark">O</span>
+                    <span class="sf-name">ocfd</span>
+                    <span class="sf-doc">demo.ocfd</span>
+                    <span class="sf-rev">preview</span>
+                </div>
+                <div class="sf-toolbar">
+                    <span class="sf-block sf-block--wide"></span>
+                    <span class="sf-block"></span>
+                    <span class="sf-block"></span>
+                    <span class="sf-block"></span>
+                    <span class="sf-block sf-block--wide"></span>
+                </div>
+                <div class="sf-body">
+                    <div class="sf-rail">
+                        <span class="sf-rail-head">Case</span>
+                        <span class="sf-rail-item">mesh 24×24</span>
+                        <span class="sf-rail-item">Re 100</span>
+                        <span class="sf-rail-item">dt 0.01</span>
+                        <span class="sf-rail-item">steps 200</span>
+                        <span class="sf-rail-head">Export</span>
+                        <span class="sf-rail-item">CSV</span>
+                        <span class="sf-rail-item">VTK</span>
+                        <span class="sf-rail-item">SVG</span>
+                    </div>
+                    <div class="sf-canvas">
+                        <div class="sf-terminal">
+                            <span class="sf-prompt">$ ocfd solve demo.ocfd --tolerance 1e-4</span>
+                            <span class="sf-line">steps              <b>200</b></span>
+                            <span class="sf-line">maxVelocity        <b>0.8352</b></span>
+                            <span class="sf-line">minPressure        <b>-0.1866</b></span>
+                            <span class="sf-line">maxPressure        <b>0.4767</b></span>
+                            <span class="sf-line">divergenceL2       <b>3.48e-4</b></span>
+                            <span class="sf-line">pressureIterations <b>37</b></span>
+                            <span class="sf-ok">converged: true</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="sf-status">
+                    <span>exit 0</span>
+                    <span>open-cfd-report</span>
+                    <span class="sf-chip">Rust session core</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>What works today</h2>
+                <span class="chip chip--available">verified in the workspace</span>
+            </div>
+            <div class="grid-3">
+                <article class="card work-card">
+                    <span class="status-dot status-dot--on"></span>
+                    <h3>Case document</h3>
+                    <ul>
+                        <li>Create and open UTF-8 `.ocfd` JSON cases</li>
+                        <li>Mesh, fluid, time, boundaries and initial state</li>
+                        <li>Rectangular and circular solid obstacles</li>
+                        <li>Passive scalar (temperature) transport</li>
+                        <li>Structural validation with stable error codes</li>
+                        <li>Atomic save through the session API</li>
+                    </ul>
+                </article>
+                <article class="card work-card">
+                    <span class="status-dot status-dot--on"></span>
+                    <h3>Working solver</h3>
+                    <ul>
+                        <li>Staggered MAC mesh with a solid-cell mask</li>
+                        <li>Upwind convection and central diffusion</li>
+                        <li>SOR pressure Poisson solve</li>
+                        <li>Steady-state velocity detection and early stop</li>
+                        <li>Obstacle force coefficients <code>Cd</code> and <code>Cl</code></li>
+                        <li>CFL and diffusion stability guards</li>
+                    </ul>
+                </article>
+                <article class="card work-card">
+                    <span class="status-dot status-dot--off"></span>
+                    <h3>Not yet</h3>
+                    <ul>
+                        <li>Three-dimensional flow</li>
+                        <li>Compressible flow</li>
+                        <li>Boussinesq buoyancy and coupled heat transfer</li>
+                        <li>Body-fitted, adaptive or moving meshes</li>
+                        <li>External format import such as OpenFOAM</li>
+                        <li>Graphical interface</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Pillars</h2>
+                <span class="chip">one implementation</span>
+            </div>
+            <div class="pillars">
+                <article class="pillar">
+                    <span class="pillar__index">01</span>
+                    <h2>One case model</h2>
+                    <p>
+                        The document format, editor, validator and solver read the
+                        same `.ocfd` structure. The CLI, the Node-API addon and the
+                        TypeScript SDK do not duplicate solver logic.
+                    </p>
+                </article>
+                <article class="pillar">
+                    <span class="pillar__index">02</span>
+                    <h2>Measured, not implied</h2>
+                    <p>
+                        Every report carries steps, residuals, pressure iterations
+                        and divergence. Unsupported capabilities return
+                        <code>capability/not-implemented</code> instead of a silent
+                        approximation.
+                    </p>
+                </article>
+                <article class="pillar">
+                    <span class="pillar__index">03</span>
+                    <h2>Agent authoring</h2>
+                    <p>
+                        A skill checks the capability matrix, runs the declared
+                        commands and reports the residual it actually measured. A
+                        file suffix is never treated as proof of a result.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Workflow</h2>
+                <span class="chip chip--declared">declared, then solved</span>
+            </div>
+            <ol class="flow">
+                <li class="flow-step">
+                    <span class="flow-index">01</span>
+                    <h3>Declare the case</h3>
+                    <p>Create an `.ocfd` case and set the mesh, fluid, time step and four boundary sides.</p>
+                    <span class="chip chip--available">available</span>
+                </li>
+                <li class="flow-step">
+                    <span class="flow-index">02</span>
+                    <h3>Validate</h3>
+                    <p>Check units, mesh size, finite values, obstacle bounds and boundary velocities before solving.</p>
+                    <span class="chip chip--available">available</span>
+                </li>
+                <li class="flow-step">
+                    <span class="flow-index">03</span>
+                    <h3>Solve</h3>
+                    <p>Advance the momentum prediction and pressure projection, then report residual and convergence.</p>
+                    <span class="chip chip--available">available</span>
+                </li>
+                <li class="flow-step">
+                    <span class="flow-index">04</span>
+                    <h3>Export</h3>
+                    <p>Write cell-centred CSV, legacy ASCII VTK or an SVG pressure/temperature field.</p>
+                    <span class="chip chip--available">available</span>
+                </li>
+            </ol>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Exchange matrix</h2>
+                <span class="chip chip--declared">measured, not inferred</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Format</th>
+                            <th>Read</th>
+                            <th>Write</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="row in formatRows()" :key="row.name">
+                            <td class="name">{{ row.name }}</td>
+                            <td class="state">{{ row.readState }}</td>
+                            <td class="state">{{ row.writeState }}</td>
+                            <td>
+                                <span class="chip" :class="statusClass(row)">
+                                    {{ row.status }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="matrix-note">`.ocfd` is the only native case format. CSV and legacy ASCII VTK are written after a solve; pressure and temperature SVG are visual exports. OpenFOAM, Abaqus and other external formats return <code>capability/not-implemented</code>.</p>
+        </section>
+
+        <section class="band">
+            <span class="tag">In development</span>
+            <h2>The solver core is real. The interface is the terminal.</h2>
+            <p>
+                Create, edit, validate, solve and export a two-dimensional case
+                today, then inspect the residual and convergence fields in the
+                report. There is no graphical viewport: open the exported VTK in
+                ParaView. Turbulence, Boussinesq buoyancy, coupled heat transfer
+                and three-dimensional flow remain unsupported and are labelled
+                as such.
+            </p>
+        </section>
+
+        <section class="cta-band">
+            <div>
+                <h2>Follow the build</h2>
+                <p>The roadmap states exactly which gates have passed and which are still planned.</p>
+            </div>
+            <div class="cta-band__actions">
+                <Link to="FeaturesPage" class="btn btn--primary">
+                    Explore features
+                </Link>
+                <Link to="RoadmapPage" class="btn btn--ghost">
+                    Read the roadmap
+                </Link>
+            </div>
+        </section>
+    </SiteShell>
+</template>
+
+<style>
+.hero {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 48px;
+    align-items: center;
+    padding: 40px 0 8px;
+}
+
+.hero h1 {
+    margin: 16px 0 18px;
+    font-size: 36px;
+}
+
+.hero__sub {
+    max-width: 560px;
+    margin: 0 0 26px;
+    color: var(--cfd-muted);
+    font-size: 16px;
+}
+
+.hero__cta {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.solver-frame {
+    position: relative;
+    border: 1px solid var(--cfd-line);
+    border-radius: calc(var(--cfd-radius) + 2px);
+    background: var(--cfd-surface);
+    box-shadow: var(--cfd-shadow);
+    overflow: hidden;
+}
+
+.sf-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--cfd-line);
+    background: var(--cfd-surface-2);
+}
+
+.sf-mark {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: var(--cfd-accent);
+    color: var(--cfd-on-accent);
+    font-family: var(--cfd-mono);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.sf-name {
+    font-family: var(--cfd-mono);
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.sf-doc {
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sf-rev {
+    padding: 1px 6px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 999px;
+    background: var(--cfd-surface);
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 7px;
+    text-transform: uppercase;
+}
+
+.sf-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--cfd-line);
+    background: var(--cfd-surface);
+}
+
+.sf-block {
+    width: 24px;
+    height: 13px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 3px;
+    background: var(--cfd-surface-2);
+}
+
+.sf-block--wide {
+    width: 46px;
+}
+
+.sf-body {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    min-height: 196px;
+}
+
+.sf-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 9px;
+    border-right: 1px solid var(--cfd-line);
+    background: var(--cfd-surface-2);
+}
+
+.sf-rail-head {
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 7px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.sf-rail-item {
+    padding: 3px 4px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 3px;
+    background: var(--cfd-surface);
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 8px;
+}
+
+.sf-canvas {
+    padding: 12px 14px;
+    background: #10161a;
+}
+
+.sf-terminal {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-family: var(--cfd-mono);
+    font-size: 9px;
+    line-height: 1.5;
+    color: #c9d6dd;
+}
+
+.sf-prompt {
+    color: #6fd3e3;
+    margin-bottom: 3px;
+}
+
+.sf-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.sf-line b {
+    color: #f1f7f8;
+    font-weight: 600;
+}
+
+.sf-ok {
+    margin-top: 4px;
+    color: #7fe0a8;
+}
+
+.sf-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--cfd-line);
+    background: var(--cfd-surface);
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 7px;
+}
+
+.sf-chip {
+    margin-left: auto;
+    padding: 1px 6px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 999px;
+}
+
+.work-card {
+    padding-top: 20px;
+}
+
+.pillars {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.pillar {
+    padding: 26px 22px;
+    border: 1px solid var(--cfd-line);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+}
+
+.pillar__index {
+    color: var(--cfd-accent);
+    font-family: var(--cfd-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+}
+
+.pillar h2 {
+    margin: 8px 0 10px;
+    font-size: 18px;
+}
+
+.pillar p {
+    margin: 0;
+    color: var(--cfd-muted);
+    font-size: 14px;
+}
+
+.flow {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.flow-step {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 20px 18px;
+    border: 1px solid var(--cfd-line);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+}
+
+.flow-index {
+    color: var(--cfd-accent);
+    font-family: var(--cfd-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+}
+
+.flow-step h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.flow-step p {
+    flex: 1;
+    margin: 0 0 6px;
+    color: var(--cfd-muted);
+    font-size: 13px;
+}
+
+.matrix-note {
+    margin: 12px 0 0;
+    color: var(--cfd-muted);
+    font-size: 13px;
+}
+
+.cta-band {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 20px;
+    padding: 26px;
+    border: 1px solid var(--cfd-accent);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+}
+
+.cta-band h2 {
+    margin: 0 0 4px;
+    font-size: 19px;
+}
+
+.cta-band p {
+    margin: 0;
+    color: var(--cfd-muted);
+    font-size: 14px;
+}
+
+.cta-band__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+@media (max-width: 900px) {
+    .hero {
+        grid-template-columns: 1fr;
+        gap: 32px;
+    }
+
+    .hero h1 {
+        font-size: 30px;
+    }
+
+    .pillars,
+    .flow {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .hero h1 {
+        font-size: 26px;
+    }
+
+    .pillars,
+    .flow {
+        grid-template-columns: 1fr;
+    }
+
+    .solver-frame {
+        max-width: 100%;
+    }
+
+    .sf-body {
+        grid-template-columns: 78px minmax(0, 1fr);
+    }
+}
+</style>
+
+<script client>
+const FORMATS = ["ocfd", "csv", "vtk", "svg", "openfoam", "inp"];
+
+export default class IndexPage {
+    static meta() {
+        return {
+            title: "OpenCFD — verifiable two-dimensional incompressible flow",
+            description:
+                "OpenCFD keeps one case model with working create, edit, validate, solve and CSV/VTK/SVG export for two-dimensional incompressible flow, while 3D, compressible flow and buoyancy stay clearly marked as unsupported.",
+        };
+    }
+
+    formatRows() {
+        const declared = {
+            ocfd: { readState: "supported", writeState: "supported" },
+            csv: { readState: "unsupported", writeState: "supported" },
+            vtk: { readState: "unsupported", writeState: "supported" },
+            svg: { readState: "unsupported", writeState: "supported" },
+        };
+        return FORMATS.map((name) => {
+            const row =
+                declared[name] || { readState: "unsupported", writeState: "unsupported" };
+            const status =
+                row.readState === "supported" && row.writeState === "supported"
+                    ? "read + write"
+                    : row.writeState === "supported"
+                      ? "write only"
+                      : "unsupported";
+            return Object.assign({ name, status }, row);
+        });
+    }
+
+    statusClass(row) {
+        return row.status === "unsupported" ? "chip chip--blocked" : "chip chip--available";
+    }
+}
+</script>

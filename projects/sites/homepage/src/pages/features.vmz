@@ -1,0 +1,288 @@
+<template>
+    <SiteShell page="features">
+        <div class="page-head">
+            <h1>Features</h1>
+            <p class="lead">
+                One case model behind validation, solving and exchange. Create
+                and edit an `.ocfd` case, solve a two-dimensional incompressible
+                flow, inspect residuals and forces, and export the field today.
+                Three-dimensional flow, compressible flow, buoyancy and external
+                import are labelled as unsupported instead of being implied by a
+                suffix.
+            </p>
+            <div class="head-tags">
+                <span class="chip chip--available">solver core available</span>
+                <span class="chip chip--blocked">no graphical viewport</span>
+            </div>
+        </div>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Contracts</h2>
+                <span class="chip chip--available">available</span>
+            </div>
+            <div class="grid-2">
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Session API</h3>
+                    <p>
+                        <code>OpenCfd</code> owns create, open, edit, validate,
+                        solve, export and save. The CLI, the Node-API addon and the
+                        TypeScript SDK call the same Rust session, so they cannot
+                        drift into separate solvers.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Atomic writes</h3>
+                    <p>
+                        Every edit validates and writes the `.ocfd` file through a
+                        temporary file plus rename. CSV, VTK and SVG export use the
+                        same atomic write path, so a failed solve cannot leave a
+                        half-written result.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--available">available</span>
+                    <h3>Stable error codes</h3>
+                    <p>
+                        Failures carry a code such as <code>mesh/invalid</code>,
+                        <code>solver/unstable</code> or
+                        <code>capability/not-implemented</code>. The exit code is
+                        <code>1</code> for input or IO errors and <code>2</code>
+                        for an unsupported capability.
+                    </p>
+                </article>
+                <article class="card">
+                    <span class="chip chip--declared">measured</span>
+                    <h3>Capability matrix</h3>
+                    <p>
+                        <code>ocfd capabilities</code> prints the machine-readable
+                        matrix from one source of truth. A route is only described
+                        as available when its report or export exists in this
+                        build.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Feature areas</h2>
+                <span class="chip chip--blocked">read the status</span>
+            </div>
+            <div class="grid-3">
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Case document</h3>
+                    <p>
+                        `.ocfd` cases are UTF-8 JSON with camelCase fields. A
+                        minimal file declares only <code>format</code> and
+                        <code>version</code>; mesh, fluid, time, boundaries and
+                        obstacles have documented defaults.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Mesh and boundaries</h3>
+                    <p>
+                        A uniform Cartesian mesh carries pressure at cell centres
+                        and velocity on staggered faces. Each of the four sides is
+                        a wall, inlet or outlet with an explicit velocity.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Solver</h3>
+                    <p>
+                        Momentum prediction uses first-order upwind convection,
+                        central diffusion and explicit Euler. An SOR pressure
+                        Poisson solve projects the velocity and removes divergence.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Obstacles and forces</h3>
+                    <p>
+                        Rectangular and circular obstacles are masked by cell
+                        centre. Pressure and viscous shear on solid faces produce
+                        per-obstacle <code>Cd</code> and <code>Cl</code> in the
+                        report.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Residuals and convergence</h3>
+                    <p>
+                        Each step reports the L2 norm of the velocity change. With
+                        <code>--tolerance</code> the solve stops at steady state and
+                        records the sampled history, pressure residual and
+                        iteration count.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">available</span>
+                    <h3>Exchange</h3>
+                    <p>
+                        After a solve, write cell-centred
+                        <code>x,y,pressure,u,v,magnitude,temperature</code> CSV,
+                        legacy ASCII <code>STRUCTURED_POINTS</code> VTK, or an SVG
+                        pressure/temperature field.
+                    </p>
+                </article>
+                <article class="feature">
+                    <span class="chip chip--available">executable</span>
+                    <h3>Agent skills</h3>
+                    <p>
+                        The skill document lists the real commands and the real
+                        limits. It never presents 3D, compressible flow, buoyancy or
+                        external import as executable.
+                    </p>
+                </article>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Command surface</h2>
+                <span class="chip">today</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Surface</th>
+                            <th>Today</th>
+                            <th>Behaviour</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">CLI</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Creates, edits, validates, solves and exports cases. Editing commands save the file in place.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">SDK</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td><code>new OpenCFD()</code> returns a session; documents expose mesh, fluid, time, boundary, obstacle, scalar, validate, solve and export methods.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Node-API</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>A thin native wrapper over the same session; the SDK resolves the platform addon from the package name.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Skills</td>
+                            <td><span class="chip chip--available">executable</span></td>
+                            <td>Records routing rules and the exact commands that work in this build.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Capability honesty</h2>
+                <span class="chip chip--declared">measured</span>
+            </div>
+            <p>
+                The capability matrix reports two-dimensional cavity and channel
+                cases, obstacles, passive scalar transport, convergence detection,
+                `.ocfd` read/write and CSV/VTK/SVG export as supported. It reports
+                compressible flow, turbulence, coupled heat transfer,
+                three-dimensional flow and external import as
+                <code>capability/not-implemented</code>. A request for those
+                routes fails; it is not approximated silently.
+            </p>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Current state</h2>
+                <span class="chip chip--available">inspectable</span>
+            </div>
+            <div class="grid-2">
+                <article class="card">
+                    <span class="status-dot status-dot--on"></span>
+                    <h3>In place</h3>
+                    <ul>
+                        <li>Case document and atomic `.ocfd` persistence</li>
+                        <li>Mesh, fluid, time, boundary and obstacle editing</li>
+                        <li>Passive scalar (temperature) transport</li>
+                        <li>Staggered solver with pressure projection</li>
+                        <li>Steady-state detection and residual history</li>
+                        <li>Obstacle force coefficients</li>
+                        <li>CSV, VTK and SVG export</li>
+                        <li>CLI and SDK on the same Rust core</li>
+                    </ul>
+                </article>
+                <article class="card">
+                    <span class="status-dot status-dot--off"></span>
+                    <h3>Not implemented</h3>
+                    <ul>
+                        <li>Three-dimensional and axisymmetric flow</li>
+                        <li>Compressible flow</li>
+                        <li>Boussinesq buoyancy and coupled heat transfer</li>
+                        <li>Body-fitted, adaptive and moving meshes</li>
+                        <li>External case import such as OpenFOAM</li>
+                        <li>Graphical viewport</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <p class="cta-line">
+            Curious what is already settled?
+            <Link to="RoadmapPage">
+                Read the roadmap
+            </Link>
+        </p>
+    </SiteShell>
+</template>
+
+<style>
+.head-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.feature {
+    padding: 20px 18px;
+    border: 1px solid var(--cfd-line);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+}
+
+.feature h3 {
+    margin: 9px 0 7px;
+    font-size: 16px;
+}
+
+.feature p {
+    margin: 0;
+    color: var(--cfd-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 900px) {
+    .feature {
+        padding: 18px 16px;
+    }
+}
+</style>
+
+<script client>
+export default class FeaturesPage {
+    static meta() {
+        return {
+            title: "Features — OpenCFD",
+            description:
+                "The working OpenCFD case document, staggered solver, obstacles, residuals and CSV/VTK/SVG export, with 3D, compressible flow and buoyancy clearly marked as unsupported.",
+        };
+    }
+}
+</script>

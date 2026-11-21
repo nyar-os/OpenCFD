@@ -1,0 +1,1828 @@
+use boost_check::{CheckReport, Issue};
+use serde::{Deserialize, Serialize};
+
+use crate::mesh::Mesh;
+use crate::model::{
+    Boundaries, BoundaryKind, Model, ScalarConfig, Side, ThermalConfig, Turbulence, TurbulenceModel,
+};
+use crate::CfdError;
+
+/// Identifier stored in the `format` field of a solve report.
+pub const REPORT_FORMAT: &str = "open-cfd-report";
+
+/// Version of the solve report understood by this build.
+pub const REPORT_VERSION: u32 = 1;
+
+/// Upper bound on the number of samples kept in a residual or force history.
+const MAX_HISTORY: usize = 1000;
+
+/// Default turbulence identifier for reports written before the field existed.
+fn default_turbulence_model_name() -> String {
+    TurbulenceModel::None.as_str().to_string()
+}
+
+/// One sampled velocity residual.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResidualSample {
+    /// One-based time step of the sample.
+    pub step: usize,
+    /// L2 norm of the velocity change at this step.
+    pub residual: f64,
+}
+
+/// One sampled force coefficient.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceSample {
+    /// One-based time step of the sample.
+    pub step: usize,
+    /// Total force in x (N).
+    pub fx: f64,
+    /// Total force in y (N).
+    pub fy: f64,
+    /// Drag coefficient `2 Fx / (rho U² D)`.
+    pub cd: f64,
+    /// Lift coefficient `2 Fy / (rho U² D)`.
+    pub cl: f64,
+}
+
+/// Force report of one obstacle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObstacleForce {
+    /// Stable obstacle identifier.
+    pub id: String,
+    /// Obstacle kind (`rect` or `circle`).
+    pub kind: String,
+    /// Total pressure plus viscous force in x (N).
+    pub fx: f64,
+    /// Total pressure plus viscous force in y (N).
+    pub fy: f64,
+    /// Drag coefficient.
+    pub cd: f64,
+    /// Lift coefficient.
+    pub cl: f64,
+    /// Force history sampled every `checkEvery` steps (bounded).
+    pub history: Vec<ForceSample>,
+}
+
+/// Surface heat-transfer summary of one obstacle.
+///
+/// `meanHeatFlux` is the area-averaged flux from the obstacle surface into the
+/// fluid (W/m²). `nusselt` is `q̅ · D / (k · ΔT)` with `ΔT` measured from
+/// `referenceTemperature` (or the mean fluid temperature when omitted).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObstacleNusselt {
+    /// Stable obstacle identifier.
+    pub id: String,
+    /// Obstacle kind (`rect` or `circle`).
+    pub kind: String,
+    /// Area-averaged surface heat flux into the fluid (W/m²).
+    pub mean_heat_flux: f64,
+    /// Area-averaged surface temperature (K).
+    pub wall_temperature: f64,
+    /// Reference temperature used for `ΔT` (K).
+    pub reference_temperature: f64,
+    /// Nusselt number `q̅·D/(k·ΔT)`.
+    pub nusselt: f64,
+}
+
+/// Summary of a completed simulation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    /// Report format tag; always [`REPORT_FORMAT`].
+    pub format: String,
+    /// Report version; always [`REPORT_VERSION`].
+    pub version: u32,
+    /// Number of time steps that were actually advanced.
+    pub steps: usize,
+    /// Time step `dt` (s).
+    pub dt: f64,
+    /// Simulated physical time `steps * dt` (s).
+    pub time: f64,
+    /// Maximum velocity magnitude on all faces (m/s).
+    pub max_velocity: f64,
+    /// Minimum cell-centred pressure of fluid cells (Pa).
+    pub min_pressure: f64,
+    /// Maximum cell-centred pressure of fluid cells (Pa).
+    pub max_pressure: f64,
+    /// RMS of the discrete divergence after the final projection (1/s).
+    pub divergence_l2: f64,
+    /// Run convergence. With a steady-state tolerance it reports whether the
+    /// velocity stopped changing; without one it reports the pressure solve.
+    pub converged: bool,
+    /// Whether the velocity change fell below the requested tolerance.
+    pub steady_state: bool,
+    /// Final L2 norm of the per-step velocity change.
+    pub residual: f64,
+    /// Velocity residuals sampled every `checkEvery` steps (bounded).
+    pub residual_history: Vec<ResidualSample>,
+    /// Whether the final pressure solve reduced its residual below
+    /// `tolerance × max(initial residual, 1e-12)`.
+    pub pressure_converged: bool,
+    /// SOR sweeps used by the final pressure solve.
+    pub pressure_iterations: usize,
+    /// Final maximum absolute pressure-Poisson residual (Pa/m²).
+    pub pressure_residual: f64,
+    /// Initial residual of the final pressure solve (Pa/m²).
+    pub pressure_residual_initial: f64,
+    /// Per-obstacle forces and coefficients, in document order.
+    pub forces: Vec<ObstacleForce>,
+    /// Turbulence model identifier (`none`, `constant` or `mixingLength`).
+    #[serde(default = "default_turbulence_model_name")]
+    pub turbulence_model: String,
+    /// Minimum eddy viscosity over fluid cells (m²/s).
+    #[serde(default)]
+    pub eddy_viscosity_min: f64,
+    /// Maximum eddy viscosity over fluid cells (m²/s).
+    #[serde(default)]
+    pub eddy_viscosity_max: f64,
+    /// Mean eddy viscosity over fluid cells (m²/s).
+    #[serde(default)]
+    pub eddy_viscosity_mean: f64,
+    /// Per-obstacle Nusselt numbers, when a thermal configuration is present.
+    #[serde(default)]
+    pub nusselt: Vec<ObstacleNusselt>,
+}
+
+/// A solved velocity, pressure and optional scalar field with its report.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Solution {
+    /// Mesh the field belongs to.
+    pub mesh: Mesh,
+    /// X-face velocity values.
+    pub u: Vec<f64>,
+    /// Y-face velocity values.
+    pub v: Vec<f64>,
+    /// Cell-centred pressure values.
+    pub p: Vec<f64>,
+    /// Cell-centred passive scalar, when the case configures one.
+    pub temperature: Option<Vec<f64>>,
+    /// Cell-centred eddy viscosity, when a turbulence model is active.
+    pub eddy_viscosity: Option<Vec<f64>>,
+    /// Simulation report.
+    pub report: Report,
+}
+
+/// Solve-time overrides.
+///
+/// The document still owns the defaults. `steps` and `tolerance` are optional
+/// one-shot overrides for the CLI and SDK; `check_every` controls how often the
+/// steady-state residual is sampled and tested. A `tolerance` enables early
+/// stopping on the velocity residual; without it the run always uses `steps`
+/// and reports pressure convergence in `Report::converged`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SolveOptions {
+    /// Number of steps to advance; overrides `time.steps`.
+    pub steps: Option<usize>,
+    /// Steady-state tolerance on the L2 velocity change.
+    pub tolerance: Option<f64>,
+    /// Resume the steady-state check every this many steps.
+    pub check_every: Option<usize>,
+}
+
+impl SolveOptions {
+    fn validate(&self) -> Result<(), CfdError> {
+        if self.steps == Some(0) {
+            return Err(CfdError::new(
+                "solver/invalid",
+                "steps must be greater than 0",
+            ));
+        }
+        if let Some(tolerance) = self.tolerance {
+            if !tolerance.is_finite() || tolerance <= 0.0 {
+                return Err(CfdError::new(
+                    "solver/invalid",
+                    "convergence tolerance must be a finite positive number",
+                ));
+            }
+        }
+        if self.check_every == Some(0) {
+            return Err(CfdError::new(
+                "solver/invalid",
+                "checkEvery must be an integer greater than 0",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Iteration controls for the pressure Poisson solver.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PressureSettings {
+    /// Maximum number of SOR sweeps.
+    pub iterations: usize,
+    /// Residual tolerance relative to the initial residual of the solve.
+    pub tolerance: f64,
+}
+
+/// Diagnostics returned by [`solve_pressure`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PressureStats {
+    /// Number of sweeps actually performed.
+    pub iterations: usize,
+    /// Residual before the first sweep.
+    pub initial_residual: f64,
+    /// Residual after the last sweep.
+    pub residual: f64,
+    /// Residual after every sweep, in order.
+    pub history: Vec<f64>,
+    /// Whether `residual <= tolerance`.
+    pub converged: bool,
+}
+
+/// Advances an incompressible case and returns the final field.
+///
+/// The scheme is a first-order Chorin projection on a staggered mesh: explicit
+/// upwind convection plus explicit central diffusion produce a tentative
+/// velocity, an SOR pressure Poisson solve enforces continuity, and the
+/// pressure gradient corrects the velocity. Solid cells block all adjacent
+/// faces, contribute zero divergence and are excluded from the pressure
+/// unknowns.
+pub fn solve(model: &Model) -> Result<Solution, CfdError> {
+    solve_with(model, &SolveOptions::default())
+}
+
+/// Advances a case with solve-time overrides and returns the final field.
+///
+/// See [`solve`] for the numerical scheme. When `options.tolerance` is set the
+/// run stops as soon as the L2 norm of the velocity change at a checked step is
+/// at most that tolerance.
+pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, CfdError> {
+    model.validate()?;
+    options.validate()?;
+    let mut mesh = Mesh::new(&model.mesh)?;
+    mesh.apply_obstacles(&model.obstacles)?;
+    let steps = options.steps.unwrap_or(model.time.steps);
+
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    let mut p = vec![0.0; mesh.pressure_count()];
+
+    if let Some(initial) = &model.initial {
+        u.fill(initial.velocity[0]);
+        v.fill(initial.velocity[1]);
+    }
+    mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
+
+    let mut temperature = model
+        .scalar
+        .as_ref()
+        .map(|config| initial_temperature(&mesh, config));
+
+    let settings = PressureSettings {
+        iterations: model.time.pressure_iterations,
+        tolerance: model.time.tolerance,
+    };
+    let mut eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+    check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
+
+    let mut u_star = u.clone();
+    let mut v_star = v.clone();
+    let mut u_previous = u.clone();
+    let mut v_previous = v.clone();
+    let mut last_stats = PressureStats {
+        iterations: 0,
+        initial_residual: 0.0,
+        residual: 0.0,
+        history: Vec::new(),
+        converged: true,
+    };
+
+    let check_every = options.check_every.unwrap_or(1);
+    let sample_stride = check_every.max(steps.div_ceil(MAX_HISTORY));
+    let mut completed = steps;
+    let mut residual = 0.0;
+    let mut steady_state = false;
+    let mut residual_history = Vec::new();
+    let mut force_samples: Vec<Vec<ForceSample>> = vec![Vec::new(); model.obstacles.len()];
+
+    for step in 1..=steps {
+        u_previous.copy_from_slice(&u);
+        v_previous.copy_from_slice(&v);
+        eddy = eddy_viscosity_field(&mesh, model, &u, &v);
+
+        momentum_step(
+            &mesh,
+            model,
+            &u,
+            &v,
+            &p,
+            eddy.as_deref(),
+            &mut u_star,
+            &mut v_star,
+        );
+        mesh.apply_velocity_boundaries(&model.boundaries, &mut u_star, &mut v_star);
+
+        let divergence = mesh.divergence(&u_star, &v_star);
+        last_stats = solve_pressure(
+            &mesh,
+            &model.boundaries,
+            &mut p,
+            &divergence,
+            model.fluid.density,
+            model.time.dt,
+            &settings,
+        )?;
+
+        u.copy_from_slice(&u_star);
+        v.copy_from_slice(&v_star);
+        project_velocity(
+            &mesh,
+            model.fluid.density,
+            model.time.dt,
+            &p,
+            &mut u,
+            &mut v,
+        );
+        mesh.apply_velocity_boundaries(&model.boundaries, &mut u, &mut v);
+
+        if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
+            transport_thermal(
+                &mesh,
+                &model.boundaries,
+                config,
+                model.thermal.as_ref(),
+                model.fluid.density,
+                model.time.dt,
+                &u,
+                &v,
+                field,
+            )?;
+        }
+
+        if !u
+            .iter()
+            .chain(v.iter())
+            .chain(p.iter())
+            .chain(temperature.iter().flat_map(|field| field.iter()))
+            .all(|value| value.is_finite())
+        {
+            return Err(CfdError::new(
+                "solver/non-finite",
+                "the solve produced NaN or Inf; reduce dt, refine the mesh or lower the boundary velocity",
+            ));
+        }
+
+        residual = velocity_residual(&u_previous, &v_previous, &u, &v);
+        let sample = step % sample_stride == 0 || step == steps;
+        if sample {
+            residual_history.push(ResidualSample { step, residual });
+            append_force_samples(
+                &mesh,
+                model,
+                &u,
+                &v,
+                &p,
+                eddy.as_deref(),
+                step,
+                &mut force_samples,
+            );
+        }
+
+        if let Some(tolerance) = options.tolerance {
+            if step % check_every == 0 && residual <= tolerance {
+                steady_state = true;
+                completed = step;
+                break;
+            }
+        }
+    }
+
+    let divergence = mesh.divergence(&u, &v);
+    let divergence_l2 = rms(&divergence);
+    let max_velocity = max_velocity(&u, &v);
+    let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
+    let forces = build_forces(&mesh, model, &u, &v, &p, eddy.as_deref(), &force_samples);
+    let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
+    let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
+
+    let report = Report {
+        format: REPORT_FORMAT.to_string(),
+        version: REPORT_VERSION,
+        steps: completed,
+        dt: model.time.dt,
+        time: completed as f64 * model.time.dt,
+        max_velocity,
+        min_pressure,
+        max_pressure,
+        divergence_l2,
+        converged: if options.tolerance.is_some() {
+            steady_state
+        } else {
+            last_stats.converged
+        },
+        steady_state,
+        residual,
+        residual_history,
+        pressure_converged: last_stats.converged,
+        pressure_iterations: last_stats.iterations,
+        pressure_residual: last_stats.residual,
+        pressure_residual_initial: last_stats.initial_residual,
+        forces,
+        turbulence_model: model
+            .turbulence
+            .as_ref()
+            .map_or("none", |turbulence| turbulence.model.as_str())
+            .to_string(),
+        eddy_viscosity_min: eddy_min,
+        eddy_viscosity_max: eddy_max,
+        eddy_viscosity_mean: eddy_mean,
+        nusselt,
+    };
+    Ok(Solution {
+        mesh,
+        u,
+        v,
+        p,
+        temperature,
+        eddy_viscosity: eddy,
+        report,
+    })
+}
+
+/// Solves the pressure Poisson equation `∇²p = (rho / dt) · div(u*)` in place.
+///
+/// Successive over-relaxation is used, with the relaxation factor derived from
+/// the largest grid side. Wall and inlet sides are homogeneous Neumann
+/// boundaries (the ghost value copies the adjacent cell); outlet sides are
+/// homogeneous Dirichlet boundaries. Solid cells are not unknowns and are held
+/// at zero pressure; a solid neighbour acts as a zero-flux face. In a fully
+/// closed domain the null-space mean is removed after the sweeps, which does
+/// not change the pressure gradient used for the velocity correction.
+///
+/// `settings.tolerance` is relative to the initial residual of this solve:
+/// convergence requires `residual <= tolerance × max(initial, 1e-12)`.
+pub fn solve_pressure(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    pressure: &mut [f64],
+    divergence: &[f64],
+    density: f64,
+    dt: f64,
+    settings: &PressureSettings,
+) -> Result<PressureStats, CfdError> {
+    if !density.is_finite() || density <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "density must be a finite positive number",
+        ));
+    }
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "dt must be a finite positive number",
+        ));
+    }
+    if settings.iterations == 0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "pressure iteration count must be greater than 0",
+        ));
+    }
+    if !settings.tolerance.is_finite() || settings.tolerance <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "pressure residual tolerance must be a finite positive number",
+        ));
+    }
+    if pressure.len() != mesh.pressure_count() || divergence.len() != mesh.pressure_count() {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "pressure or divergence array length does not match the mesh",
+        ));
+    }
+
+    for (index, value) in pressure.iter_mut().enumerate() {
+        if mesh.solid[index] {
+            *value = 0.0;
+        }
+    }
+
+    let largest_side = mesh.nx.max(mesh.ny) as f64;
+    let omega = 2.0 / (1.0 + (std::f64::consts::PI / largest_side).sin());
+    let rhs_scale = density / dt;
+    let denominator = 2.0 / (mesh.dx * mesh.dx) + 2.0 / (mesh.dy * mesh.dy);
+    let initial_residual = pressure_residual(mesh, boundaries, pressure, divergence, rhs_scale);
+    let threshold = settings.tolerance * initial_residual.max(1e-12);
+    let mut history = Vec::with_capacity(settings.iterations);
+    let mut residual = initial_residual;
+
+    for _ in 0..settings.iterations {
+        for j in 0..mesh.ny {
+            for i in 0..mesh.nx {
+                let index = mesh.pressure_index(i, j);
+                if mesh.solid[index] {
+                    continue;
+                }
+                let centre = pressure[index];
+                let west = if i == 0 {
+                    if boundaries.left.kind == BoundaryKind::Outlet {
+                        0.0
+                    } else {
+                        centre
+                    }
+                } else if mesh.solid[index - 1] {
+                    centre
+                } else {
+                    pressure[index - 1]
+                };
+                let east = if i + 1 == mesh.nx {
+                    if boundaries.right.kind == BoundaryKind::Outlet {
+                        0.0
+                    } else {
+                        centre
+                    }
+                } else if mesh.solid[index + 1] {
+                    centre
+                } else {
+                    pressure[index + 1]
+                };
+                let south = if j == 0 {
+                    if boundaries.bottom.kind == BoundaryKind::Outlet {
+                        0.0
+                    } else {
+                        centre
+                    }
+                } else if mesh.solid[index - mesh.nx] {
+                    centre
+                } else {
+                    pressure[index - mesh.nx]
+                };
+                let north = if j + 1 == mesh.ny {
+                    if boundaries.top.kind == BoundaryKind::Outlet {
+                        0.0
+                    } else {
+                        centre
+                    }
+                } else if mesh.solid[index + mesh.nx] {
+                    centre
+                } else {
+                    pressure[index + mesh.nx]
+                };
+                let target = ((west + east) / (mesh.dx * mesh.dx)
+                    + (south + north) / (mesh.dy * mesh.dy)
+                    - rhs_scale * divergence[index])
+                    / denominator;
+                pressure[index] += omega * (target - centre);
+            }
+        }
+        residual = pressure_residual(mesh, boundaries, pressure, divergence, rhs_scale);
+        history.push(residual);
+        if residual <= threshold {
+            break;
+        }
+    }
+
+    if !has_dirichlet_pressure(boundaries) {
+        let mut sum = 0.0;
+        let mut count = 0;
+        for (index, value) in pressure.iter().enumerate() {
+            if !mesh.solid[index] {
+                sum += value;
+                count += 1;
+            }
+        }
+        if count > 0 {
+            let mean = sum / count as f64;
+            for (index, value) in pressure.iter_mut().enumerate() {
+                if !mesh.solid[index] {
+                    *value -= mean;
+                }
+            }
+        }
+    }
+
+    Ok(PressureStats {
+        iterations: history.len(),
+        initial_residual,
+        residual,
+        history,
+        converged: residual <= threshold,
+    })
+}
+
+fn has_dirichlet_pressure(boundaries: &Boundaries) -> bool {
+    boundaries.left.kind == BoundaryKind::Outlet
+        || boundaries.right.kind == BoundaryKind::Outlet
+        || boundaries.top.kind == BoundaryKind::Outlet
+        || boundaries.bottom.kind == BoundaryKind::Outlet
+}
+
+fn pressure_residual(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    pressure: &[f64],
+    divergence: &[f64],
+    rhs_scale: f64,
+) -> f64 {
+    let mut maximum: f64 = 0.0;
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                continue;
+            }
+            let centre = pressure[index];
+            let west = if i == 0 {
+                if boundaries.left.kind == BoundaryKind::Outlet {
+                    0.0
+                } else {
+                    centre
+                }
+            } else if mesh.solid[index - 1] {
+                centre
+            } else {
+                pressure[index - 1]
+            };
+            let east = if i + 1 == mesh.nx {
+                if boundaries.right.kind == BoundaryKind::Outlet {
+                    0.0
+                } else {
+                    centre
+                }
+            } else if mesh.solid[index + 1] {
+                centre
+            } else {
+                pressure[index + 1]
+            };
+            let south = if j == 0 {
+                if boundaries.bottom.kind == BoundaryKind::Outlet {
+                    0.0
+                } else {
+                    centre
+                }
+            } else if mesh.solid[index - mesh.nx] {
+                centre
+            } else {
+                pressure[index - mesh.nx]
+            };
+            let north = if j + 1 == mesh.ny {
+                if boundaries.top.kind == BoundaryKind::Outlet {
+                    0.0
+                } else {
+                    centre
+                }
+            } else if mesh.solid[index + mesh.nx] {
+                centre
+            } else {
+                pressure[index + mesh.nx]
+            };
+            let laplacian = (west - 2.0 * centre + east) / (mesh.dx * mesh.dx)
+                + (south - 2.0 * centre + north) / (mesh.dy * mesh.dy);
+            let residual = (laplacian - rhs_scale * divergence[index]).abs();
+            maximum = maximum.max(residual);
+        }
+    }
+    maximum
+}
+
+#[allow(clippy::too_many_arguments)]
+fn momentum_step(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+    u_star: &mut [f64],
+    v_star: &mut [f64],
+) {
+    let nu = model.fluid.viscosity;
+    let rho = model.fluid.density;
+    let dt = model.time.dt;
+    let dx = mesh.dx;
+    let dy = mesh.dy;
+    let boundaries = &model.boundaries;
+
+    for j in 0..mesh.ny {
+        for i in 1..mesh.nx {
+            let index = mesh.u_index(i, j);
+            if !mesh.u_face_open(i, j) {
+                u_star[index] = 0.0;
+                continue;
+            }
+            let centre = u[index];
+            let du_dx = if centre >= 0.0 {
+                (centre - u[mesh.u_index(i - 1, j)]) / dx
+            } else {
+                (u[mesh.u_index(i + 1, j)] - centre) / dx
+            };
+            let v_face = 0.25
+                * (v[mesh.v_index(i - 1, j)]
+                    + v[mesh.v_index(i - 1, j + 1)]
+                    + v[mesh.v_index(i, j)]
+                    + v[mesh.v_index(i, j + 1)]);
+            let dv_dy = 0.5
+                * ((v[mesh.v_index(i - 1, j + 1)] - v[mesh.v_index(i - 1, j)]) / dy
+                    + (v[mesh.v_index(i, j + 1)] - v[mesh.v_index(i, j)]) / dy);
+            let convection = centre * du_dx + v_face * dv_dy;
+
+            let below = if j == 0 {
+                if boundaries.bottom.kind == BoundaryKind::Outlet {
+                    u[mesh.u_index(i, 1)]
+                } else {
+                    2.0 * boundaries.bottom.velocity[0] - centre
+                }
+            } else {
+                u[mesh.u_index(i, j - 1)]
+            };
+            let above = if j + 1 == mesh.ny {
+                if boundaries.top.kind == BoundaryKind::Outlet {
+                    u[mesh.u_index(i, mesh.ny - 2)]
+                } else {
+                    2.0 * boundaries.top.velocity[0] - centre
+                }
+            } else {
+                u[mesh.u_index(i, j + 1)]
+            };
+            let diffusion = (u[mesh.u_index(i + 1, j)] - 2.0 * centre + u[mesh.u_index(i - 1, j)])
+                / (dx * dx)
+                + (above - 2.0 * centre + below) / (dy * dy);
+            let pressure_gradient =
+                (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i - 1, j)]) / dx;
+            let effective = nu + u_face_eddy(mesh, eddy, i, j);
+            u_star[index] =
+                centre + dt * (-convection + effective * diffusion - pressure_gradient / rho);
+        }
+    }
+
+    for j in 1..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.v_index(i, j);
+            if !mesh.v_face_open(i, j) {
+                v_star[index] = 0.0;
+                continue;
+            }
+            let centre = v[index];
+            let dv_dy = if centre >= 0.0 {
+                (centre - v[mesh.v_index(i, j - 1)]) / dy
+            } else {
+                (v[mesh.v_index(i, j + 1)] - centre) / dy
+            };
+            let u_face = 0.25
+                * (u[mesh.u_index(i, j)]
+                    + u[mesh.u_index(i + 1, j)]
+                    + u[mesh.u_index(i, j - 1)]
+                    + u[mesh.u_index(i + 1, j - 1)]);
+            let du_dx = 0.5
+                * ((u[mesh.u_index(i + 1, j)] - u[mesh.u_index(i, j)]) / dx
+                    + (u[mesh.u_index(i + 1, j - 1)] - u[mesh.u_index(i, j - 1)]) / dx);
+            let convection = u_face * du_dx + centre * dv_dy;
+
+            let left = if i == 0 {
+                if boundaries.left.kind == BoundaryKind::Outlet {
+                    v[mesh.v_index(1, j)]
+                } else {
+                    2.0 * boundaries.left.velocity[1] - centre
+                }
+            } else {
+                v[mesh.v_index(i - 1, j)]
+            };
+            let right = if i + 1 == mesh.nx {
+                if boundaries.right.kind == BoundaryKind::Outlet {
+                    v[mesh.v_index(mesh.nx - 2, j)]
+                } else {
+                    2.0 * boundaries.right.velocity[1] - centre
+                }
+            } else {
+                v[mesh.v_index(i + 1, j)]
+            };
+            let diffusion = (right - 2.0 * centre + left) / (dx * dx)
+                + (v[mesh.v_index(i, j + 1)] - 2.0 * centre + v[mesh.v_index(i, j - 1)])
+                    / (dy * dy);
+            let pressure_gradient =
+                (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i, j - 1)]) / dy;
+            let effective = nu + v_face_eddy(mesh, eddy, i, j);
+            v_star[index] =
+                centre + dt * (-convection + effective * diffusion - pressure_gradient / rho);
+        }
+    }
+}
+
+fn eddy_viscosity_field(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Option<Vec<f64>> {
+    let turbulence = model.turbulence.as_ref()?;
+    match turbulence.model {
+        TurbulenceModel::None => None,
+        TurbulenceModel::Constant => {
+            let mut field = vec![turbulence.nu_t; mesh.pressure_count()];
+            for (index, value) in field.iter_mut().enumerate() {
+                if mesh.solid[index] {
+                    *value = 0.0;
+                }
+            }
+            Some(field)
+        }
+        TurbulenceModel::MixingLength => Some(mixing_length_field(mesh, turbulence, u, v)),
+    }
+}
+
+fn mixing_length_field(mesh: &Mesh, turbulence: &Turbulence, u: &[f64], v: &[f64]) -> Vec<f64> {
+    let length_squared = turbulence.mixing_length * turbulence.mixing_length;
+    let mut field = vec![0.0; mesh.pressure_count()];
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                continue;
+            }
+            let du_dx = cell_gradient(mesh, u, v, i, j, Gradient::UDx);
+            let du_dy = cell_gradient(mesh, u, v, i, j, Gradient::UDy);
+            let dv_dx = cell_gradient(mesh, u, v, i, j, Gradient::VDx);
+            let dv_dy = cell_gradient(mesh, u, v, i, j, Gradient::VDy);
+            let strain =
+                (2.0 * (du_dx * du_dx + dv_dy * dv_dy) + (du_dy + dv_dx) * (du_dy + dv_dx)).sqrt();
+            field[index] = length_squared * strain;
+        }
+    }
+    field
+}
+
+#[derive(Clone, Copy)]
+enum Gradient {
+    UDx,
+    UDy,
+    VDx,
+    VDy,
+}
+
+fn cell_gradient(mesh: &Mesh, u: &[f64], v: &[f64], i: usize, j: usize, kind: Gradient) -> f64 {
+    let component = |ci: usize, cj: usize| {
+        let (ux, uy) = mesh.cell_velocity(u, v, ci, cj);
+        match kind {
+            Gradient::UDx | Gradient::UDy => ux,
+            Gradient::VDx | Gradient::VDy => uy,
+        }
+    };
+    let horizontal = matches!(kind, Gradient::UDx | Gradient::VDx);
+    if horizontal {
+        if i == 0 {
+            (component(1, j) - component(0, j)) / mesh.dx
+        } else if i + 1 == mesh.nx {
+            (component(mesh.nx - 1, j) - component(mesh.nx - 2, j)) / mesh.dx
+        } else {
+            (component(i + 1, j) - component(i - 1, j)) / (2.0 * mesh.dx)
+        }
+    } else if j == 0 {
+        (component(i, 1) - component(i, 0)) / mesh.dy
+    } else if j + 1 == mesh.ny {
+        (component(i, mesh.ny - 1) - component(i, mesh.ny - 2)) / mesh.dy
+    } else {
+        (component(i, j + 1) - component(i, j - 1)) / (2.0 * mesh.dy)
+    }
+}
+
+fn u_face_eddy(mesh: &Mesh, eddy: Option<&[f64]>, i: usize, j: usize) -> f64 {
+    let Some(field) = eddy else {
+        return 0.0;
+    };
+    let mut sum = 0.0;
+    let mut count = 0;
+    if i > 0 && !mesh.is_solid(i - 1, j) {
+        sum += field[mesh.pressure_index(i - 1, j)];
+        count += 1;
+    }
+    if i < mesh.nx && !mesh.is_solid(i, j) {
+        sum += field[mesh.pressure_index(i, j)];
+        count += 1;
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+fn v_face_eddy(mesh: &Mesh, eddy: Option<&[f64]>, i: usize, j: usize) -> f64 {
+    let Some(field) = eddy else {
+        return 0.0;
+    };
+    let mut sum = 0.0;
+    let mut count = 0;
+    if j > 0 && !mesh.is_solid(i, j - 1) {
+        sum += field[mesh.pressure_index(i, j - 1)];
+        count += 1;
+    }
+    if j < mesh.ny && !mesh.is_solid(i, j) {
+        sum += field[mesh.pressure_index(i, j)];
+        count += 1;
+    }
+    if count == 0 {
+        0.0
+    } else {
+        sum / count as f64
+    }
+}
+
+fn eddy_stats(mesh: &Mesh, eddy: Option<&[f64]>) -> (f64, f64, f64) {
+    let Some(field) = eddy else {
+        return (0.0, 0.0, 0.0);
+    };
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut sum = 0.0;
+    let mut count = 0;
+    for (index, value) in field.iter().enumerate() {
+        if mesh.solid[index] {
+            continue;
+        }
+        min = min.min(*value);
+        max = max.max(*value);
+        sum += *value;
+        count += 1;
+    }
+    if count == 0 || !min.is_finite() || !max.is_finite() {
+        (0.0, 0.0, 0.0)
+    } else {
+        (min, max, sum / count as f64)
+    }
+}
+
+fn project_velocity(mesh: &Mesh, density: f64, dt: f64, p: &[f64], u: &mut [f64], v: &mut [f64]) {
+    let factor = dt / density;
+    for j in 0..mesh.ny {
+        for i in 1..mesh.nx {
+            let index = mesh.u_index(i, j);
+            if !mesh.u_face_open(i, j) {
+                u[index] = 0.0;
+                continue;
+            }
+            u[index] -= factor * (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i - 1, j)])
+                / mesh.dx;
+        }
+    }
+    for j in 1..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.v_index(i, j);
+            if !mesh.v_face_open(i, j) {
+                v[index] = 0.0;
+                continue;
+            }
+            v[index] -= factor * (p[mesh.pressure_index(i, j)] - p[mesh.pressure_index(i, j - 1)])
+                / mesh.dy;
+        }
+    }
+}
+
+fn check_explicit_stability(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    eddy: Option<&[f64]>,
+) -> Result<(), CfdError> {
+    let mut report = CheckReport::new();
+    let boundary_speed = [
+        &model.boundaries.left,
+        &model.boundaries.right,
+        &model.boundaries.top,
+        &model.boundaries.bottom,
+    ]
+    .iter()
+    .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
+    .fold(0.0_f64, f64::max);
+    let max_speed = max_velocity(u, v).max(boundary_speed);
+    let cfl = max_speed * model.time.dt / mesh.dx.min(mesh.dy);
+    if cfl > 1.0 {
+        report.push(Issue::error(
+            "solver/unstable",
+            format!(
+                "explicit convection is unstable: CFL = {cfl:.3} > 1; reduce dt or refine the mesh"
+            ),
+        ));
+    }
+    let diffusion_number = (model.fluid.viscosity + max_eddy_viscosity(eddy))
+        * model.time.dt
+        * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
+    if diffusion_number > 0.5 {
+        report.push(Issue::error(
+            "solver/unstable",
+            format!("explicit diffusion is unstable: nu·dt·(1/dx²+1/dy²) = {diffusion_number:.3} > 0.5; reduce dt, refine the mesh or lower the eddy viscosity"),
+        ));
+    }
+    if let Some(scalar) = &model.scalar {
+        let scalar_number = scalar.diffusivity
+            * model.time.dt
+            * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
+        if scalar_number > 0.5 {
+            report.push(Issue::error(
+                "solver/unstable",
+                format!("explicit scalar diffusion is unstable: κ·dt·(1/dx²+1/dy²) = {scalar_number:.3} > 0.5; reduce dt, refine the mesh or lower diffusivity"),
+            ));
+        }
+    }
+    if let Some(issue) = report.issues.first() {
+        return Err(CfdError::new(issue.code.clone(), issue.message.clone()));
+    }
+    Ok(())
+}
+
+fn max_eddy_viscosity(eddy: Option<&[f64]>) -> f64 {
+    eddy.map_or(0.0, |field| {
+        field
+            .iter()
+            .fold(0.0_f64, |maximum, value| maximum.max(*value))
+    })
+}
+
+fn initial_temperature(mesh: &Mesh, config: &ScalarConfig) -> Vec<f64> {
+    let mut field = vec![config.initial; mesh.pressure_count()];
+    for (index, value) in field.iter_mut().enumerate() {
+        if mesh.solid[index] {
+            *value = 0.0;
+        }
+    }
+    field
+}
+
+/// Advances the passive scalar by one explicit advection-diffusion step.
+///
+/// The scheme mirrors the momentum step: first-order upwind advection and
+/// central diffusion on cell centres. Solid faces carry zero flux and solid
+/// cells hold no scalar value. Inlet faces use `config.inlet_value`; walls and
+/// outlets use a zero-gradient ghost. The explicit diffusion number is checked
+/// before updating and `solver/unstable` is returned when it exceeds `0.5`.
+pub fn transport_scalar(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    dt: f64,
+    u: &[f64],
+    v: &[f64],
+    temperature: &mut [f64],
+) -> Result<(), CfdError> {
+    scalar_step(
+        mesh,
+        boundaries,
+        config,
+        None,
+        config.diffusivity,
+        0.0,
+        dt,
+        u,
+        v,
+        temperature,
+    )
+}
+
+/// Advances the temperature field with optional thermal boundaries and source.
+///
+/// This is the energy-equation variant of [`transport_scalar`]. The thermal
+/// conductivity `k` is `thermal.conductivity` when provided, otherwise
+/// `rho · cp · diffusivity`; the transported diffusivity is `k / (rho · cp)`.
+/// Domain sides apply fixed temperature or fixed heat flux, all obstacle
+/// surfaces share `obstacleTemperature`/`obstacleHeatFlux`, and `heatSource`
+/// adds `S / (rho · cp)` per second uniformly.
+#[allow(clippy::too_many_arguments)]
+pub fn transport_thermal(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    thermal: Option<&ThermalConfig>,
+    density: f64,
+    dt: f64,
+    u: &[f64],
+    v: &[f64],
+    temperature: &mut [f64],
+) -> Result<(), CfdError> {
+    let Some(thermal) = thermal else {
+        return transport_scalar(mesh, boundaries, config, dt, u, v, temperature);
+    };
+    if !density.is_finite() || density <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "density must be a finite positive number",
+        ));
+    }
+    if !thermal.specific_heat.is_finite() || thermal.specific_heat <= 0.0 {
+        return Err(CfdError::new(
+            "thermal/invalid",
+            "thermal.specificHeat must be a finite positive number",
+        ));
+    }
+    let conductivity = thermal
+        .conductivity
+        .filter(|value| *value > 0.0)
+        .unwrap_or(density * thermal.specific_heat * config.diffusivity);
+    let kappa = if conductivity > 0.0 {
+        conductivity / (density * thermal.specific_heat)
+    } else {
+        config.diffusivity
+    };
+    let context = ThermalContext {
+        config: thermal,
+        kappa,
+        density,
+    };
+    let source = thermal.heat_source / (density * thermal.specific_heat);
+    scalar_step(
+        mesh,
+        boundaries,
+        config,
+        Some(&context),
+        kappa,
+        source,
+        dt,
+        u,
+        v,
+        temperature,
+    )
+}
+
+struct ThermalContext<'a> {
+    config: &'a ThermalConfig,
+    kappa: f64,
+    density: f64,
+}
+
+impl ThermalContext<'_> {
+    /// Wall flux in the positive face-normal direction, where `sign` is `+1`
+    /// for west/south faces and `-1` for east/north faces.
+    fn wall_flux(
+        &self,
+        temperature: Option<f64>,
+        heat_flux: Option<f64>,
+        centre: f64,
+        distance: f64,
+        sign: f64,
+    ) -> f64 {
+        if let Some(wall) = temperature {
+            sign * self.kappa * (wall - centre) / distance
+        } else if let Some(flux) = heat_flux {
+            sign * flux / (self.density * self.config.specific_heat)
+        } else {
+            0.0
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_step(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+    kappa: f64,
+    source: f64,
+    dt: f64,
+    u: &[f64],
+    v: &[f64],
+    temperature: &mut [f64],
+) -> Result<(), CfdError> {
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "dt must be a finite positive number",
+        ));
+    }
+    if !kappa.is_finite() || kappa < 0.0 {
+        return Err(CfdError::new(
+            "scalar/invalid",
+            "scalar.diffusivity must be a finite non-negative number",
+        ));
+    }
+    if temperature.len() != mesh.pressure_count() {
+        return Err(CfdError::new(
+            "solver/invalid",
+            "scalar array length does not match the mesh",
+        ));
+    }
+    let diffusion_number = kappa * dt * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
+    if diffusion_number > 0.5 {
+        return Err(CfdError::new(
+            "solver/unstable",
+            format!("explicit scalar diffusion is unstable: κ·dt·(1/dx²+1/dy²) = {diffusion_number:.3} > 0.5"),
+        ));
+    }
+
+    let mut next = vec![0.0; mesh.pressure_count()];
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                next[index] = 0.0;
+                continue;
+            }
+            let centre = temperature[index];
+            let west = scalar_west_flux(
+                mesh,
+                boundaries,
+                config,
+                context,
+                kappa,
+                u,
+                temperature,
+                i,
+                j,
+                centre,
+            );
+            let east = scalar_east_flux(
+                mesh,
+                boundaries,
+                config,
+                context,
+                kappa,
+                u,
+                temperature,
+                i,
+                j,
+                centre,
+            );
+            let south = scalar_south_flux(
+                mesh,
+                boundaries,
+                config,
+                context,
+                kappa,
+                v,
+                temperature,
+                i,
+                j,
+                centre,
+            );
+            let north = scalar_north_flux(
+                mesh,
+                boundaries,
+                config,
+                context,
+                kappa,
+                v,
+                temperature,
+                i,
+                j,
+                centre,
+            );
+            next[index] =
+                centre - dt * ((east - west) / mesh.dx + (north - south) / mesh.dy) + dt * source;
+        }
+    }
+    temperature.copy_from_slice(&next);
+    if !temperature.iter().all(|value| value.is_finite()) {
+        return Err(CfdError::new(
+            "solver/non-finite",
+            "scalar transport produced NaN or Inf; reduce dt or lower diffusivity",
+        ));
+    }
+    Ok(())
+}
+
+fn side_advect_ghost(
+    side: Side,
+    centre: f64,
+    inlet: bool,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+) -> f64 {
+    if let Some(wall) = context.and_then(|context| context.config.side(side).temperature) {
+        return wall;
+    }
+    if inlet {
+        config.inlet_value
+    } else {
+        centre
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_west_flux(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+    kappa: f64,
+    u: &[f64],
+    temperature: &[f64],
+    i: usize,
+    j: usize,
+    centre: f64,
+) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    if i == 0 {
+        let velocity = u[mesh.u_index(0, j)];
+        let inlet = boundaries.left.kind == BoundaryKind::Inlet;
+        let ghost = side_advect_ghost(Side::Left, centre, inlet, config, context);
+        let mut flux = advect(velocity, if velocity >= 0.0 { ghost } else { centre });
+        if let Some(context) = context {
+            let side = context.config.left.clone();
+            flux += context.wall_flux(side.temperature, side.heat_flux, centre, 0.5 * mesh.dx, 1.0);
+        }
+        flux
+    } else if mesh.solid[index - 1] {
+        context.map_or(0.0, |context| {
+            context.wall_flux(
+                context.config.obstacle_temperature,
+                context.config.obstacle_heat_flux,
+                centre,
+                0.5 * mesh.dx,
+                1.0,
+            )
+        })
+    } else {
+        let velocity = u[mesh.u_index(i, j)];
+        let west = temperature[index - 1];
+        advect(velocity, if velocity >= 0.0 { west } else { centre })
+            - kappa * (centre - west) / mesh.dx
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_east_flux(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+    kappa: f64,
+    u: &[f64],
+    temperature: &[f64],
+    i: usize,
+    j: usize,
+    centre: f64,
+) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    if i + 1 == mesh.nx {
+        let velocity = u[mesh.u_index(mesh.nx, j)];
+        let inlet = boundaries.right.kind == BoundaryKind::Inlet;
+        let ghost = side_advect_ghost(Side::Right, centre, inlet, config, context);
+        let mut flux = advect(velocity, if velocity >= 0.0 { centre } else { ghost });
+        if let Some(context) = context {
+            let side = context.config.right.clone();
+            flux += context.wall_flux(
+                side.temperature,
+                side.heat_flux,
+                centre,
+                0.5 * mesh.dx,
+                -1.0,
+            );
+        }
+        flux
+    } else if mesh.solid[index + 1] {
+        context.map_or(0.0, |context| {
+            context.wall_flux(
+                context.config.obstacle_temperature,
+                context.config.obstacle_heat_flux,
+                centre,
+                0.5 * mesh.dx,
+                -1.0,
+            )
+        })
+    } else {
+        let velocity = u[mesh.u_index(i + 1, j)];
+        let east = temperature[index + 1];
+        advect(velocity, if velocity >= 0.0 { centre } else { east })
+            - kappa * (east - centre) / mesh.dx
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_south_flux(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+    kappa: f64,
+    v: &[f64],
+    temperature: &[f64],
+    i: usize,
+    j: usize,
+    centre: f64,
+) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    if j == 0 {
+        let velocity = v[mesh.v_index(i, 0)];
+        let inlet = boundaries.bottom.kind == BoundaryKind::Inlet;
+        let ghost = side_advect_ghost(Side::Bottom, centre, inlet, config, context);
+        let mut flux = advect(velocity, if velocity >= 0.0 { ghost } else { centre });
+        if let Some(context) = context {
+            let side = context.config.bottom.clone();
+            flux += context.wall_flux(side.temperature, side.heat_flux, centre, 0.5 * mesh.dy, 1.0);
+        }
+        flux
+    } else if mesh.solid[index - mesh.nx] {
+        context.map_or(0.0, |context| {
+            context.wall_flux(
+                context.config.obstacle_temperature,
+                context.config.obstacle_heat_flux,
+                centre,
+                0.5 * mesh.dy,
+                1.0,
+            )
+        })
+    } else {
+        let velocity = v[mesh.v_index(i, j)];
+        let south = temperature[index - mesh.nx];
+        advect(velocity, if velocity >= 0.0 { south } else { centre })
+            - kappa * (centre - south) / mesh.dy
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scalar_north_flux(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    context: Option<&ThermalContext>,
+    kappa: f64,
+    v: &[f64],
+    temperature: &[f64],
+    i: usize,
+    j: usize,
+    centre: f64,
+) -> f64 {
+    let index = mesh.pressure_index(i, j);
+    if j + 1 == mesh.ny {
+        let velocity = v[mesh.v_index(i, mesh.ny)];
+        let inlet = boundaries.top.kind == BoundaryKind::Inlet;
+        let ghost = side_advect_ghost(Side::Top, centre, inlet, config, context);
+        let mut flux = advect(velocity, if velocity >= 0.0 { centre } else { ghost });
+        if let Some(context) = context {
+            let side = context.config.top.clone();
+            flux += context.wall_flux(
+                side.temperature,
+                side.heat_flux,
+                centre,
+                0.5 * mesh.dy,
+                -1.0,
+            );
+        }
+        flux
+    } else if mesh.solid[index + mesh.nx] {
+        context.map_or(0.0, |context| {
+            context.wall_flux(
+                context.config.obstacle_temperature,
+                context.config.obstacle_heat_flux,
+                centre,
+                0.5 * mesh.dy,
+                -1.0,
+            )
+        })
+    } else {
+        let velocity = v[mesh.v_index(i, j + 1)];
+        let north = temperature[index + mesh.nx];
+        advect(velocity, if velocity >= 0.0 { centre } else { north })
+            - kappa * (north - centre) / mesh.dy
+    }
+}
+
+fn advect(velocity: f64, upwind: f64) -> f64 {
+    velocity * upwind
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_force_samples(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+    step: usize,
+    samples: &mut [Vec<ForceSample>],
+) {
+    let raw = raw_forces(mesh, model, u, v, p, eddy);
+    for (index, sample) in raw.into_iter().enumerate() {
+        samples[index].push(ForceSample {
+            step,
+            fx: sample.0,
+            fy: sample.1,
+            cd: sample.2,
+            cl: sample.3,
+        });
+    }
+}
+
+fn build_forces(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+    samples: &[Vec<ForceSample>],
+) -> Vec<ObstacleForce> {
+    let raw = raw_forces(mesh, model, u, v, p, eddy);
+    model
+        .obstacles
+        .iter()
+        .enumerate()
+        .map(|(index, obstacle)| {
+            let (fx, fy, cd, cl) = raw.get(index).copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let id = if obstacle.id().is_empty() {
+                format!("obstacle-{}", index + 1)
+            } else {
+                obstacle.id().to_string()
+            };
+            ObstacleForce {
+                id,
+                kind: obstacle.kind().to_string(),
+                fx,
+                fy,
+                cd,
+                cl,
+                history: samples.get(index).cloned().unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Returns `(fx, fy, cd, cl)` for every obstacle in document order.
+fn raw_forces(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    eddy: Option<&[f64]>,
+) -> Vec<(f64, f64, f64, f64)> {
+    let mut fx = vec![0.0; model.obstacles.len()];
+    let mut fy = vec![0.0; model.obstacles.len()];
+    let mu = model.fluid.viscosity;
+
+    for j in 0..mesh.ny {
+        for i in 0..=mesh.nx {
+            let left_solid = i > 0 && mesh.is_solid(i - 1, j);
+            let right_solid = i < mesh.nx && mesh.is_solid(i, j);
+            if left_solid == right_solid {
+                continue;
+            }
+            let (fluid_i, solid_cell) = if right_solid {
+                if i == 0 {
+                    continue;
+                }
+                (i - 1, mesh.pressure_index(i, j))
+            } else {
+                if i == mesh.nx {
+                    continue;
+                }
+                (i, mesh.pressure_index(i - 1, j))
+            };
+            let Some(owner) = obstacle_owner(mesh, solid_cell) else {
+                continue;
+            };
+            let sign = if right_solid { 1.0 } else { -1.0 };
+            let pressure = p[mesh.pressure_index(fluid_i, j)];
+            let (uc, _) = mesh.cell_velocity(u, v, fluid_i, j);
+            let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(fluid_i, j)]);
+            let shear = (mu + eddy_face) * uc / (0.5 * mesh.dx);
+            fx[owner] += sign * (pressure + shear) * mesh.dy;
+        }
+    }
+
+    for j in 0..=mesh.ny {
+        for i in 0..mesh.nx {
+            let below_solid = j > 0 && mesh.is_solid(i, j - 1);
+            let above_solid = j < mesh.ny && mesh.is_solid(i, j);
+            if below_solid == above_solid {
+                continue;
+            }
+            let (fluid_j, solid_cell) = if above_solid {
+                if j == 0 {
+                    continue;
+                }
+                (j - 1, mesh.pressure_index(i, j))
+            } else {
+                if j == mesh.ny {
+                    continue;
+                }
+                (j, mesh.pressure_index(i, j - 1))
+            };
+            let Some(owner) = obstacle_owner(mesh, solid_cell) else {
+                continue;
+            };
+            let sign = if above_solid { 1.0 } else { -1.0 };
+            let pressure = p[mesh.pressure_index(i, fluid_j)];
+            let (_, vc) = mesh.cell_velocity(u, v, i, fluid_j);
+            let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(i, fluid_j)]);
+            let shear = (mu + eddy_face) * vc / (0.5 * mesh.dy);
+            fy[owner] += sign * (pressure + shear) * mesh.dx;
+        }
+    }
+
+    let speed = reference_speed(model);
+    model
+        .obstacles
+        .iter()
+        .enumerate()
+        .map(|(index, obstacle)| {
+            let length = obstacle.characteristic_length();
+            let scale = 2.0 / (model.fluid.density * speed * speed * length);
+            (fx[index], fy[index], fx[index] * scale, fy[index] * scale)
+        })
+        .collect()
+}
+
+fn compute_nusselt(
+    mesh: &Mesh,
+    model: &Model,
+    _u: &[f64],
+    _v: &[f64],
+    temperature: Option<&[f64]>,
+) -> Vec<ObstacleNusselt> {
+    let (Some(thermal), Some(field), Some(scalar)) =
+        (&model.thermal, temperature, model.scalar.as_ref())
+    else {
+        return Vec::new();
+    };
+    let cp = thermal.specific_heat;
+    let conductivity = thermal
+        .conductivity
+        .filter(|value| *value > 0.0)
+        .unwrap_or(model.fluid.density * cp * scalar.diffusivity);
+    if !conductivity.is_finite() || conductivity <= 0.0 || !cp.is_finite() || cp <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut fluid_sum = 0.0;
+    let mut fluid_count = 0;
+    for (index, value) in field.iter().enumerate() {
+        if mesh.solid[index] {
+            continue;
+        }
+        fluid_sum += *value;
+        fluid_count += 1;
+    }
+    let mean_fluid = if fluid_count > 0 {
+        fluid_sum / fluid_count as f64
+    } else {
+        0.0
+    };
+    let reference = thermal.reference_temperature.unwrap_or(mean_fluid);
+
+    let count = model.obstacles.len();
+    let mut flux_total = vec![0.0; count];
+    let mut wall_total = vec![0.0; count];
+    let mut area_total = vec![0.0; count];
+
+    let mut record = |owner: usize, fluid: f64, distance: f64, area: f64| {
+        let (flux, wall) = if let Some(wall) = thermal.obstacle_temperature {
+            (conductivity * (wall - fluid) / distance, wall)
+        } else if let Some(heat_flux) = thermal.obstacle_heat_flux {
+            (heat_flux, fluid + heat_flux * distance / conductivity)
+        } else {
+            (0.0, fluid)
+        };
+        if owner < count {
+            flux_total[owner] += flux * area;
+            wall_total[owner] += wall * area;
+            area_total[owner] += area;
+        }
+    };
+
+    for j in 0..mesh.ny {
+        for i in 0..=mesh.nx {
+            let left_solid = i > 0 && mesh.is_solid(i - 1, j);
+            let right_solid = i < mesh.nx && mesh.is_solid(i, j);
+            if left_solid == right_solid {
+                continue;
+            }
+            let (fluid_i, solid_cell) = if right_solid {
+                if i == 0 {
+                    continue;
+                }
+                (i - 1, mesh.pressure_index(i, j))
+            } else {
+                if i == mesh.nx {
+                    continue;
+                }
+                (i, mesh.pressure_index(i - 1, j))
+            };
+            let Some(owner) = obstacle_owner(mesh, solid_cell) else {
+                continue;
+            };
+            let fluid = field[mesh.pressure_index(fluid_i, j)];
+            record(owner, fluid, 0.5 * mesh.dx, mesh.dy);
+        }
+    }
+
+    for j in 0..=mesh.ny {
+        for i in 0..mesh.nx {
+            let below_solid = j > 0 && mesh.is_solid(i, j - 1);
+            let above_solid = j < mesh.ny && mesh.is_solid(i, j);
+            if below_solid == above_solid {
+                continue;
+            }
+            let (fluid_j, solid_cell) = if above_solid {
+                if j == 0 {
+                    continue;
+                }
+                (j - 1, mesh.pressure_index(i, j))
+            } else {
+                if j == mesh.ny {
+                    continue;
+                }
+                (j, mesh.pressure_index(i, j - 1))
+            };
+            let Some(owner) = obstacle_owner(mesh, solid_cell) else {
+                continue;
+            };
+            let fluid = field[mesh.pressure_index(i, fluid_j)];
+            record(owner, fluid, 0.5 * mesh.dy, mesh.dx);
+        }
+    }
+
+    model
+        .obstacles
+        .iter()
+        .enumerate()
+        .map(|(index, obstacle)| {
+            let area = area_total[index];
+            let mean_heat_flux = if area > 0.0 {
+                flux_total[index] / area
+            } else {
+                0.0
+            };
+            let wall_temperature = if area > 0.0 {
+                wall_total[index] / area
+            } else {
+                reference
+            };
+            let delta = wall_temperature - reference;
+            let nusselt = if delta.abs() > 1e-12 && conductivity > 0.0 {
+                mean_heat_flux * obstacle.characteristic_length() / (conductivity * delta)
+            } else {
+                0.0
+            };
+            let id = if obstacle.id().is_empty() {
+                format!("obstacle-{}", index + 1)
+            } else {
+                obstacle.id().to_string()
+            };
+            ObstacleNusselt {
+                id,
+                kind: obstacle.kind().to_string(),
+                mean_heat_flux,
+                wall_temperature,
+                reference_temperature: reference,
+                nusselt,
+            }
+        })
+        .collect()
+}
+
+fn obstacle_owner(mesh: &Mesh, cell: usize) -> Option<usize> {
+    let id = *mesh.solid_id.get(cell)?;
+    usize::try_from(id).ok()
+}
+
+fn reference_speed(model: &Model) -> f64 {
+    let inlet = [
+        &model.boundaries.left,
+        &model.boundaries.right,
+        &model.boundaries.top,
+        &model.boundaries.bottom,
+    ]
+    .iter()
+    .filter(|boundary| boundary.kind == BoundaryKind::Inlet)
+    .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
+    .fold(0.0_f64, f64::max);
+    if inlet > 0.0 {
+        inlet
+    } else {
+        1.0
+    }
+}
+
+fn pressure_range(mesh: &Mesh, pressure: &[f64]) -> (f64, f64) {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    for (index, value) in pressure.iter().enumerate() {
+        if mesh.solid[index] {
+            continue;
+        }
+        min = min.min(*value);
+        max = max.max(*value);
+    }
+    if min.is_finite() && max.is_finite() {
+        (min, max)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+fn velocity_residual(u_previous: &[f64], v_previous: &[f64], u: &[f64], v: &[f64]) -> f64 {
+    let mut sum = 0.0;
+    for (new, old) in u.iter().zip(u_previous.iter()) {
+        let delta = new - old;
+        sum += delta * delta;
+    }
+    for (new, old) in v.iter().zip(v_previous.iter()) {
+        let delta = new - old;
+        sum += delta * delta;
+    }
+    sum.sqrt()
+}
+
+fn max_velocity(u: &[f64], v: &[f64]) -> f64 {
+    u.iter()
+        .chain(v.iter())
+        .fold(0.0_f64, |maximum, value| maximum.max(value.abs()))
+}
+
+fn rms(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    (values.iter().map(|value| value * value).sum::<f64>() / values.len() as f64).sqrt()
+}

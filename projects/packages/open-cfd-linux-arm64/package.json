@@ -1,0 +1,16 @@
+{
+    "name": "@wae/open-cfd-linux-arm64",
+    "version": "0.0.0",
+    "description": "Linux arm64 native addon for @wae/open-cfd",
+    "license": "CC0-1.0",
+    "os": ["linux"],
+    "cpu": ["arm64"],
+    "main": "open-cfd.linux-arm64.node",
+    "files": ["open-cfd.linux-arm64.node", "README.md", "License.md"],
+    "engines": { "node": ">=18" },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nyar-os/OpenCFD.git",
+        "directory": "projects/packages/open-cfd-linux-arm64"
+    }
+}

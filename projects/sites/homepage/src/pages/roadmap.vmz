@@ -1,0 +1,353 @@
+<template>
+    <SiteShell page="roadmap">
+        <div class="page-head">
+            <h1>Roadmap</h1>
+            <p class="lead">
+                The phases below are gates, not marketing dates. A phase is done
+                when its evidence exists; until then, the capability matrix says
+                so.
+            </p>
+            <ul class="legend" aria-label="Phase states">
+                <li><span class="status-dot status-dot--on"></span> Done</li>
+                <li><span class="status-dot status-dot--active"></span> Active</li>
+                <li><span class="status-dot status-dot--off"></span> Planned</li>
+            </ul>
+        </div>
+
+        <section class="notice">
+            <b>No public release or installer yet.</b>
+            The source can create, edit, validate, solve and export a
+            two-dimensional incompressible case today. Three-dimensional flow,
+            compressible flow, Boussinesq buoyancy, coupled heat transfer,
+            turbulence models and external format import are still being built,
+            and the capability matrix says so.
+        </section>
+
+        <ol class="phases">
+            <li data-state="done">
+                <span class="phase__id">P0</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Freeze the case contracts</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        `.ocfd` fields, boundary kinds, error codes, the report
+                        schema and the capability matrix.
+                    </p>
+                </div>
+            </li>
+            <li data-state="done">
+                <span class="phase__id">P1</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Document and solver core</h2>
+                        <span class="chip chip--available">done</span>
+                    </div>
+                    <p>
+                        Create, open, edit, validate, solve and save a case;
+                        staggered MAC mesh, upwind convection, central diffusion,
+                        SOR pressure projection, solid obstacles, passive scalar
+                        transport and steady-state detection. The CLI, Node-API
+                        addon and SDK share the same Rust session.
+                    </p>
+                </div>
+            </li>
+            <li data-state="active">
+                <span class="phase__id">P2</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Verification and exchange</h2>
+                        <span class="chip chip--planned">active</span>
+                    </div>
+                    <p>
+                        Regression cases cover the still cavity, lid-driven
+                        cavity, pressure residual, obstacle forces, scalar
+                        diffusion and convergence. CSV, VTK and SVG export work;
+                        independent reference comparisons and a wider case corpus
+                        remain planned.
+                    </p>
+                </div>
+            </li>
+            <li data-state="active">
+                <span class="phase__id">P3</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Agent skills acceptance</h2>
+                        <span class="chip chip--planned">active</span>
+                    </div>
+                    <p>
+                        The skills package documents case creation, solving,
+                        residual inspection and field export. Install it in a
+                        clean environment and finish real cases with verified
+                        output.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P4</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Turbulence, buoyancy and heat transfer</h2>
+                        <span class="chip chip--planned">planned</span>
+                    </div>
+                    <p>
+                        Editable viscosity models, Boussinesq buoyancy and coupled
+                        heat transfer need a stability argument before they can be
+                        reported as available.
+                    </p>
+                </div>
+            </li>
+            <li>
+                <span class="phase__id">P5</span>
+                <div>
+                    <div class="phase__head">
+                        <h2>Three dimensions and external cases</h2>
+                        <span class="chip chip--planned">planned</span>
+                    </div>
+                    <p>
+                        A three-dimensional mesh, compressible flow and import or
+                        export adapters for external CFD formats.
+                    </p>
+                </div>
+            </li>
+        </ol>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Working today</h2>
+                <span class="chip chip--available">verified in the workspace</span>
+            </div>
+            <div class="table-wrap">
+                <table class="matrix">
+                    <thead>
+                        <tr>
+                            <th>Area</th>
+                            <th>Status</th>
+                            <th>Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">Case document</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Create, open, edit, validate, save and reopen an `.ocfd` case.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Mesh and boundaries</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Uniform Cartesian mesh, staggered faces and four wall/inlet/outlet sides.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Solver</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Momentum prediction plus SOR pressure projection; explicit stability guards.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Obstacles</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Rectangle and circle masks, zero solid velocity and per-obstacle `Cd`/`Cl`.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Passive scalar</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Cell-centred temperature transport with explicit diffusion limits.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Convergence</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>L2 velocity-change norm, sampled history and early stop on `--tolerance`.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">CSV export</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Cell-centred `x,y,pressure,u,v,magnitude,temperature` rows.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">VTK export</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Legacy ASCII `STRUCTURED_POINTS` with pressure, temperature and velocity.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">SVG export</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Pressure or temperature field rendered from the solved case.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">CLI</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Create, edit, validate, solve, export and print capabilities.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">SDK</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Session and document methods over the native addon.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Skills</td>
+                            <td><span class="chip chip--available">available</span></td>
+                            <td>Executable commands with the honest limits of this build.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Three-dimensional flow</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>Returns <code>capability/not-implemented</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Compressible flow</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>Returns <code>capability/not-implemented</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">Buoyancy and coupled heat</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>A declared `buoyancy` field is rejected with <code>capability/not-implemented</code>.</td>
+                        </tr>
+                        <tr>
+                            <td class="name">External import</td>
+                            <td><span class="chip chip--blocked">not implemented</span></td>
+                            <td>No OpenFOAM, Abaqus or other external case reader.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <h2>Where the tests live</h2>
+                <span class="chip">product suite</span>
+            </div>
+            <p>
+                Case corpora, residual baselines and independent reference
+                comparisons belong to the product test suite. The shared workspace
+                keeps basic integration and session checks, so a green build is
+                not presented as a finished product.
+            </p>
+        </section>
+
+        <p class="cta-line">
+            Follow the work in the
+            <a href="https://github.com/nyar-os/OpenCFD" rel="noopener">
+                source repository
+            </a>
+            .
+        </p>
+    </SiteShell>
+</template>
+
+<style>
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.notice {
+    margin-top: 28px;
+    padding: 18px 22px;
+    border: 1px solid var(--cfd-line);
+    border-left: 3px solid var(--cfd-accent);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+    color: var(--cfd-muted);
+    font-size: 15px;
+}
+
+.notice b {
+    color: var(--cfd-ink);
+}
+
+.phases {
+    margin: 32px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 14px;
+}
+
+.phases li {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 16px;
+    padding: 20px 22px;
+    border: 1px solid var(--cfd-line);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+}
+
+.phase__id {
+    font-family: var(--cfd-mono);
+    font-size: 18px;
+    color: var(--cfd-muted);
+}
+
+.phase__head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-bottom: 4px;
+}
+
+.phases h2 {
+    margin: 0;
+    font-size: 17px;
+}
+
+.phases p {
+    margin: 0;
+    color: var(--cfd-muted);
+    font-size: 14px;
+}
+
+.phases li[data-state="done"] {
+    border-left: 3px solid var(--cfd-accent);
+}
+
+.phases li[data-state="done"] .phase__id {
+    color: var(--cfd-accent);
+}
+
+.phases li[data-state="active"] {
+    border-left: 3px solid var(--cfd-accent);
+    background: linear-gradient(90deg, var(--cfd-accent-soft), var(--cfd-surface) 55%);
+}
+
+.phases li[data-state="active"] .phase__id {
+    color: var(--cfd-accent);
+}
+
+@media (max-width: 620px) {
+    .phases li {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+}
+</style>
+
+<script client>
+export default class RoadmapPage {
+    static meta() {
+        return {
+            title: "Roadmap — OpenCFD",
+            description:
+                "The P0–P5 gates for OpenCFD: case contracts and the document/solver core are done, verification and skills acceptance are active, and turbulence, 3D and compressible flow remain planned.",
+        };
+    }
+}
+</script>

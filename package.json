@@ -1,0 +1,29 @@
+{
+  "name": "open-cfd-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "description": "OpenCFD workspace: two-dimensional incompressible Navier-Stokes cases on one native model",
+  "keywords": ["cfd", "navier-stokes", "incompressible", "cavity", "wae"],
+  "license": "CC0-1.0",
+  "repository": "https://github.com/nyar-os/OpenCFD",
+  "scripts": {
+    "build": "wae build",
+    "build:rust": "cargo build --workspace --offline",
+    "build:napi": "wae native build",
+    "build:ts": "pnpm --filter @wae/open-cfd run build",
+    "stage:native": "wae native stage",
+    "typecheck": "pnpm --filter @wae/open-cfd run typecheck",
+    "check": "cargo check -p open-cfd-napi --offline",
+    "check:rust": "cargo clippy -p cfd-model -p open-cfd-napi --all-targets -- -D warnings && cargo test -p cfd-model --offline",
+    "test": "cargo test -p cfd-model --offline",
+    "fmt": "cargo fmt -p cfd-model",
+    "p": "git push && git push --tags --prune",
+    "reset": "git reset Head~ --soft"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@wae/wae": "0.0.6",
+    "typescript": "^5.9.2"
+  }
+}

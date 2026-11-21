@@ -1,0 +1,297 @@
+/**
+ * Declared types of `@wae/open-cfd`.
+ *
+ * Shapes mirror the JSON the native session returns. Every report names the
+ * file it belongs to, so a caller never has to remember a path separately.
+ */
+
+/** Disclosure level of one capability entry. */
+export type SupportLevel = 'supported' | 'unsupported';
+
+/** Matrix returned by `capabilities()`. */
+export interface OpenCfdCapabilities {
+    readonly solver: Readonly<Record<string, SupportLevel>>;
+    readonly io: Readonly<Record<string, SupportLevel>>;
+}
+
+/** Session options. Constructing a session opens no file and no network. */
+export interface OpenCfdOptions {
+    /** BCP-47 tag used for diagnostics and default copy. Defaults to `en-US`. */
+    readonly locale?: string;
+}
+
+/** Uniform structured Cartesian mesh. */
+export interface MeshConfig {
+    readonly nx: number;
+    readonly ny: number;
+    readonly lengthX: number;
+    readonly lengthY: number;
+}
+
+/** Constant-property Newtonian fluid. */
+export interface Fluid {
+    readonly density: number;
+    readonly viscosity: number;
+}
+
+/** Time integration settings. */
+export interface TimeSettings {
+    readonly dt: number;
+    readonly steps: number;
+    readonly pressureIterations: number;
+    readonly tolerance: number;
+}
+
+/** Boundary kind of one side. */
+export type BoundaryKind = 'wall' | 'inlet' | 'outlet';
+
+/** Domain side name. */
+export type Side = 'left' | 'right' | 'top' | 'bottom';
+
+/** Boundary condition of one side. */
+export interface Boundary {
+    readonly kind: BoundaryKind;
+    readonly velocity: readonly [number, number];
+}
+
+/** Boundary conditions of the four sides. */
+export interface Boundaries {
+    readonly left: Boundary;
+    readonly right: Boundary;
+    readonly top: Boundary;
+    readonly bottom: Boundary;
+}
+
+/** Optional uniform initial velocity. */
+export interface InitialField {
+    readonly velocity: readonly [number, number];
+}
+
+/** Axis-aligned rectangular obstacle. */
+export interface RectObstacle {
+    readonly kind: 'rect';
+    /** Stable identifier; omitted means `obstacle-N` in document order. */
+    readonly id?: string;
+    readonly x0: number;
+    readonly y0: number;
+    readonly x1: number;
+    readonly y1: number;
+}
+
+/** Circular obstacle. */
+export interface CircleObstacle {
+    readonly kind: 'circle';
+    /** Stable identifier; omitted means `obstacle-N` in document order. */
+    readonly id?: string;
+    readonly x: number;
+    readonly y: number;
+    readonly r: number;
+}
+
+/** Solid obstacle accepted by `CfdCase.addObstacle()`. */
+export type Obstacle = RectObstacle | CircleObstacle;
+
+/** Passive scalar (temperature) transport settings. */
+export interface ScalarConfig {
+    /** Constant diffusivity in m²/s; zero means pure advection. */
+    readonly diffusivity: number;
+    /** Uniform initial value in every fluid cell. */
+    readonly initial: number;
+    /** Value prescribed on inlet faces. */
+    readonly inletValue: number;
+}
+
+/** Eddy-viscosity turbulence model. */
+export type TurbulenceModel = 'none' | 'constant' | 'mixingLength';
+
+/** Eddy-viscosity turbulence settings. */
+export interface Turbulence {
+    readonly model: TurbulenceModel;
+    /** Constant eddy viscosity in m²/s (used by the `constant` model). */
+    readonly nuT: number;
+    /** Mixing length in metres (used by the `mixingLength` model). */
+    readonly mixingLength: number;
+}
+
+/** Thermal condition of one domain side. */
+export interface SideThermal {
+    /** Fixed wall temperature in K; takes precedence over `heatFlux`. */
+    readonly temperature?: number;
+    /** Fixed heat flux into the fluid in W/m². */
+    readonly heatFlux?: number;
+}
+
+/** Energy-equation settings layered on passive scalar transport. */
+export interface ThermalConfig {
+    /** Specific heat capacity in J/(kg·K). */
+    readonly specificHeat: number;
+    /** Thermal conductivity in W/(m·K); omitted derives `rho·cp·diffusivity`. */
+    readonly conductivity?: number;
+    /** Uniform volumetric heat source in W/m³. */
+    readonly heatSource: number;
+    readonly left: SideThermal;
+    readonly right: SideThermal;
+    readonly top: SideThermal;
+    readonly bottom: SideThermal;
+    /** Fixed temperature of every obstacle surface in K. */
+    readonly obstacleTemperature?: number;
+    /** Heat flux from every obstacle surface into the fluid in W/m². */
+    readonly obstacleHeatFlux?: number;
+    /** Reference temperature for the Nusselt number in K. */
+    readonly referenceTemperature?: number;
+}
+
+/** Surface heat-transfer summary of one obstacle. */
+export interface ObstacleNusselt {
+    readonly id: string;
+    readonly kind: 'rect' | 'circle';
+    readonly meanHeatFlux: number;
+    readonly wallTemperature: number;
+    readonly referenceTemperature: number;
+    readonly nusselt: number;
+}
+
+/** Snapshot of one open case document. */
+export interface CaseSummary {
+    /** Stable document identity; currently the file path. */
+    readonly id: string;
+    /** File the document is bound to. */
+    readonly path: string;
+    readonly format: string;
+    readonly version: number;
+    readonly mesh: MeshConfig;
+    readonly fluid: Fluid;
+    readonly time: TimeSettings;
+    readonly boundaries: Boundaries;
+    readonly initial?: InitialField;
+    /** Solid obstacles in document order. */
+    readonly obstacles: readonly Obstacle[];
+    /** Passive scalar settings, when configured. */
+    readonly scalar?: ScalarConfig;
+    /** Eddy-viscosity turbulence settings, when configured. */
+    readonly turbulence?: Turbulence;
+    /** Thermal settings, when configured. */
+    readonly thermal?: ThermalConfig;
+}
+
+/** Result of writing a document back to disk. */
+export interface SaveReport {
+    readonly path: string;
+    readonly bytes: number;
+}
+
+/** Exchange formats the engine can write. */
+export type ExportFormat = 'csv' | 'vtk';
+
+/** Result of one export. */
+export interface ExportReport {
+    readonly format: ExportFormat;
+    readonly path: string;
+}
+
+/** One sampled velocity residual. */
+export interface ResidualSample {
+    readonly step: number;
+    readonly residual: number;
+}
+
+/** One sampled obstacle force. */
+export interface ForceSample {
+    readonly step: number;
+    readonly fx: number;
+    readonly fy: number;
+    readonly cd: number;
+    readonly cl: number;
+}
+
+/** Force report of one obstacle. */
+export interface ObstacleForce {
+    readonly id: string;
+    readonly kind: 'rect' | 'circle';
+    readonly fx: number;
+    readonly fy: number;
+    readonly cd: number;
+    readonly cl: number;
+    readonly history: readonly ForceSample[];
+}
+
+/** Solve-time overrides accepted by `CfdCase.solve()`. */
+export interface SolveOptions {
+    /** Steps to advance; overrides `time.steps`. */
+    readonly steps?: number;
+    /** Steady-state tolerance on the L2 velocity change; enables early stop. */
+    readonly tolerance?: number;
+    /** Sample and test the steady-state residual every this many steps. */
+    readonly checkEvery?: number;
+}
+
+/** Report returned by `solve()`. */
+export interface SolveReport {
+    readonly format: string;
+    readonly version: number;
+    readonly steps: number;
+    readonly dt: number;
+    readonly time: number;
+    readonly maxVelocity: number;
+    readonly minPressure: number;
+    readonly maxPressure: number;
+    readonly divergenceL2: number;
+    /**
+     * Run convergence: velocity convergence when a tolerance was supplied,
+     * otherwise pressure-solve convergence.
+     */
+    readonly converged: boolean;
+    /** Whether the velocity change fell below the requested tolerance. */
+    readonly steadyState: boolean;
+    /** Final L2 norm of the per-step velocity change. */
+    readonly residual: number;
+    readonly residualHistory: readonly ResidualSample[];
+    readonly pressureConverged: boolean;
+    readonly pressureIterations: number;
+    readonly pressureResidual: number;
+    readonly pressureResidualInitial: number;
+    readonly forces: readonly ObstacleForce[];
+}
+
+/** Arguments of `CfdCase.setMesh()`. */
+export interface MeshSetRequest {
+    readonly nx: number;
+    readonly ny: number;
+    readonly lengthX: number;
+    readonly lengthY: number;
+}
+
+/** Arguments of `CfdCase.setFluid()`. */
+export interface FluidSetRequest {
+    readonly density: number;
+    readonly viscosity: number;
+}
+
+/** Arguments of `CfdCase.setTime()`. */
+export interface TimeSetRequest {
+    readonly dt: number;
+    readonly steps: number;
+    readonly pressureIterations: number;
+    /** Relative pressure residual tolerance; omitted keeps the current value. */
+    readonly tolerance?: number;
+}
+
+/** Arguments of `CfdCase.setBoundary()`. */
+export interface BoundarySetRequest {
+    readonly side: Side;
+    readonly kind: BoundaryKind;
+    /** Prescribed x velocity; omitted keeps the current value. */
+    readonly u?: number;
+    /** Prescribed y velocity; omitted keeps the current value. */
+    readonly v?: number;
+}
+
+/** Arguments of `CfdCase.setScalar()`. */
+export interface ScalarSetRequest {
+    /** Constant diffusivity in m²/s. */
+    readonly diffusivity: number;
+    /** Uniform initial value; omitted keeps the current value. */
+    readonly initial?: number;
+    /** Inlet value; omitted keeps the current value. */
+    readonly inlet?: number;
+}

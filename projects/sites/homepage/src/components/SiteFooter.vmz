@@ -1,0 +1,147 @@
+<template>
+    <footer class="site-footer">
+        <div class="site-footer__inner">
+            <div class="site-footer__brand">
+                <span class="site-footer__mark">OpenCFD</span>
+                <p class="site-footer__tag">
+                    Two-dimensional incompressible flow on one declared case:
+                    mesh, boundaries, residuals and field export.
+                </p>
+            </div>
+
+            <nav aria-label="Product" class="footer-group">
+                <b>Product</b>
+                <Link to="FeaturesPage">
+                    Features
+                </Link>
+                <Link to="RoadmapPage">
+                    Roadmap
+                </Link>
+                <Link to="IndexPage">
+                    Overview
+                </Link>
+            </nav>
+
+            <nav aria-label="Developers" class="footer-group">
+                <b>Developers</b>
+                <a href="https://github.com/nyar-os/OpenCFD" rel="noopener">
+                    CLI
+                </a>
+                <a href="https://github.com/nyar-os/OpenCFD" rel="noopener">
+                    SDK
+                </a>
+                <a href="https://github.com/nyar-os/OpenCFD/tree/master/projects/packages/open-cfd-skills" rel="noopener">
+                    Skills
+                </a>
+            </nav>
+
+            <nav aria-label="Project" class="footer-group">
+                <b>Project</b>
+                <a href="https://github.com/nyar-os/OpenCFD" rel="noopener">
+                    Source code
+                </a>
+                <a href="https://github.com/nyar-os/OpenCFD/issues" rel="noopener">
+                    Issues
+                </a>
+                <a href="https://github.com/nyar-os/OpenCFD/releases" rel="noopener">
+                    Releases
+                </a>
+            </nav>
+
+            <div class="site-footer__bottom">
+                <span>CC0-1.0 licensed · Built with VMZ</span>
+                <span>No public release yet</span>
+            </div>
+        </div>
+    </footer>
+</template>
+
+<style>
+.site-footer {
+    border-top: 1px solid var(--cfd-line);
+    background: var(--cfd-surface);
+    margin-top: 64px;
+}
+
+.site-footer__inner {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 32px;
+    max-width: var(--cfd-maxw);
+    margin: 0 auto;
+    padding: 42px 24px 30px;
+}
+
+.site-footer__mark {
+    font-family: var(--cfd-mono);
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.site-footer__tag {
+    margin: 8px 0 0;
+    max-width: 280px;
+    color: var(--cfd-muted);
+    font-size: 14px;
+}
+
+.footer-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.footer-group b {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--cfd-muted);
+    margin-bottom: 4px;
+}
+
+.footer-group a {
+    color: var(--cfd-ink);
+    font-size: 14px;
+}
+
+.footer-group a:hover {
+    color: var(--cfd-accent);
+}
+
+.site-footer__bottom {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--cfd-line);
+    color: var(--cfd-muted);
+    font-size: 13px;
+}
+
+@media (max-width: 900px) {
+    .site-footer__inner {
+        grid-template-columns: 1fr 1fr;
+        gap: 26px;
+    }
+}
+
+@media (max-width: 620px) {
+    .site-footer__inner {
+        grid-template-columns: 1fr;
+        padding: 32px 18px 24px;
+    }
+
+    .site-footer__bottom {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+}
+</style>
+
+<script client>
+export default class SiteFooter {}
+</script>

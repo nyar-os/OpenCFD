@@ -1,0 +1,48 @@
+{
+    "name": "@wae/open-cfd",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Two-dimensional incompressible Navier-Stokes cases on one native model",
+    "license": "CC0-1.0",
+    "type": "module",
+    "engines": {
+        "node": ">=18"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+        "open-cfd": "./dist/cli.js"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "locales"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.json --noEmit"
+    },
+    "keywords": [
+        "cfd",
+        "navier-stokes",
+        "incompressible",
+        "cavity",
+        "wae"
+    ],
+    "devDependencies": {
+        "@types/node": "^22.20.4",
+        "typescript": "^5.9.2"
+    },
+    "optionalDependencies": {
+        "@wae/open-cfd-darwin-arm64": "workspace:*",
+        "@wae/open-cfd-darwin-x64": "workspace:*",
+        "@wae/open-cfd-linux-arm64": "workspace:*",
+        "@wae/open-cfd-linux-x64": "workspace:*",
+        "@wae/open-cfd-win32-x64": "workspace:*"
+    }
+}

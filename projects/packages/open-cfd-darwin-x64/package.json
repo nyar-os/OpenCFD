@@ -1,0 +1,16 @@
+{
+    "name": "@wae/open-cfd-darwin-x64",
+    "version": "0.0.0",
+    "description": "macOS x64 native addon for @wae/open-cfd",
+    "license": "CC0-1.0",
+    "os": ["darwin"],
+    "cpu": ["x64"],
+    "main": "open-cfd.darwin-x64.node",
+    "files": ["open-cfd.darwin-x64.node", "README.md", "License.md"],
+    "engines": { "node": ">=18" },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nyar-os/OpenCFD.git",
+        "directory": "projects/packages/open-cfd-darwin-x64"
+    }
+}

@@ -1,0 +1,34 @@
+{
+    "cli": {
+        "intro": "OpenCFD — create, edit, solve and export two-dimensional incompressible cases.",
+        "cmd": {
+            "capabilities": "Print what this build supports, honestly",
+            "create": "Create the default lid-driven cavity case",
+            "mesh-set": "Set the structured mesh of an existing case",
+            "fluid-set": "Set density and dynamic viscosity of an existing case",
+            "time-set": "Set time step, step count, pressure sweeps and tolerance",
+            "boundary-set": "Set one boundary kind and velocity of an existing case",
+            "validate": "Validate an existing case",
+            "solve": "Solve a case and print the report",
+            "export": "Solve a case and write a CSV or VTK field"
+        },
+        "opt": {
+            "nx": "Number of cells in x (at least 3)",
+            "ny": "Number of cells in y (at least 3)",
+            "length-x": "Domain length in x, in metres",
+            "length-y": "Domain length in y, in metres",
+            "rho": "Density in kg/m3",
+            "mu": "Dynamic viscosity in Pa.s; 0 means inviscid",
+            "dt": "Constant time step in seconds",
+            "steps": "Number of time steps to advance",
+            "pressure-iterations": "Maximum pressure SOR sweeps per time step",
+            "tolerance": "Relative pressure residual tolerance",
+            "side": "Domain side: left, right, top or bottom",
+            "kind": "Boundary kind: wall, inlet or outlet",
+            "u": "Prescribed x velocity in m/s",
+            "v": "Prescribed y velocity in m/s",
+            "out": "File to write",
+            "format": "Export format: csv or vtk"
+        }
+    }
+}

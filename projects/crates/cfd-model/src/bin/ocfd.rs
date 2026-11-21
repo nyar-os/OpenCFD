@@ -1,0 +1,662 @@
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::path::{Path, PathBuf};
+use std::process;
+
+use cfd_model::{
+    write_atomic, BoundaryKind, CaseSummary, CfdError, ExportField, ExportFormat, Obstacle,
+    OpenCfd, OpenCfdOptions, Side, SideThermal, SolveOptions, ThermalConfig, TurbulenceModel,
+};
+
+const USAGE: &str = "\
+ocfd - OpenCFD two-dimensional incompressible Navier-Stokes solver
+
+Usage:
+  ocfd create <file.ocfd>
+  ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
+  ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
+  ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
+  ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]
+  ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
+  ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
+  ocfd obstacle list <file>
+  ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
+  ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>]
+       [--heat-source <W/m3>] [--left-temperature <K>] [--right-temperature <K>]
+       [--top-temperature <K>] [--bottom-temperature <K>]
+       [--left-heat-flux <W/m2>] [--right-heat-flux <W/m2>] [--top-heat-flux <W/m2>]
+       [--bottom-heat-flux <W/m2>] [--obstacle-temperature <K>] [--obstacle-heat-flux <W/m2>]
+       [--reference-temperature <K>]
+  ocfd validate <file>
+  ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
+  ocfd export <file> --format csv|vtk|svg [--field pressure|temperature] --out <dir|file>
+  ocfd capabilities
+  ocfd --help
+
+Exit codes: 0 success, 1 input/validation/IO error, 2 capability not implemented
+";
+
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let exit_code = match dispatch(&args) {
+        Ok(code) => code,
+        Err(error) => {
+            let payload = serde_json::to_string_pretty(&error)
+                .unwrap_or_else(|_| format!("{{\"code\":\"{}\"}}", error.code));
+            eprintln!("{payload}");
+            error.exit_code()
+        }
+    };
+    process::exit(exit_code);
+}
+
+fn dispatch(args: &[String]) -> Result<i32, CfdError> {
+    let Some(command) = args.first().map(String::as_str) else {
+        print!("{USAGE}");
+        return Ok(0);
+    };
+    match command {
+        "-h" | "--help" | "help" => {
+            print!("{USAGE}");
+            Ok(0)
+        }
+        "capabilities" => {
+            let session = OpenCfd::new(OpenCfdOptions::default());
+            println!("{}", session.capabilities());
+            Ok(0)
+        }
+        "create" => create(&args[1..]),
+        "mesh" => subcommand(args, "set", "mesh"),
+        "fluid" => subcommand(args, "set", "fluid"),
+        "time" => subcommand(args, "set", "time"),
+        "boundary" => subcommand(args, "set", "boundary"),
+        "obstacle" => obstacle_command(&args[1..]),
+        "scalar" => scalar_command(&args[1..]),
+        "turbulence" => turbulence_command(&args[1..]),
+        "heat" | "thermal" => heat_command(&args[1..]),
+        "validate" => validate(&args[1..]),
+        "solve" => solve_command(&args[1..]),
+        "export" => export(&args[1..]),
+        "compressible" => Err(not_implemented("compressible flow")),
+        "3d" | "threeD" => Err(not_implemented("three-dimensional flow")),
+        "import" => Err(not_implemented("external format import")),
+        other => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("unknown command `{other}`; run --help for usage"),
+        )),
+    }
+}
+
+fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CfdError> {
+    match args.get(1).map(String::as_str) {
+        Some(action) if action == expected => match (group, action) {
+            ("mesh", "set") => mesh_set(&args[2..]),
+            ("fluid", "set") => fluid_set(&args[2..]),
+            ("time", "set") => time_set(&args[2..]),
+            ("boundary", "set") => boundary_set(&args[2..]),
+            _ => Err(CfdError::new(
+                "cli/unknown-command",
+                format!("unknown command `{group} {action}`"),
+            )),
+        },
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`{group}` has no subcommand `{other}`; only `{expected}` is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            format!("`{group}` requires a subcommand; only `{expected}` is supported"),
+        )),
+    }
+}
+
+fn open_session(file: &str) -> Result<OpenCfd, CfdError> {
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.open(Path::new(file))?;
+    Ok(session)
+}
+
+fn create(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "create <file.ocfd>")?;
+    let path = PathBuf::from(file);
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    let summary = session.create(&path)?;
+    println!(
+        "created {}: {}×{} mesh, lid velocity 1 m/s, {} steps, dt={} s",
+        path.display(),
+        summary.mesh.nx,
+        summary.mesh.ny,
+        summary.time.steps,
+        summary.time.dt
+    );
+    Ok(0)
+}
+
+fn mesh_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--nx", "--ny", "--length-x", "--length-y"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>",
+    )?;
+    let nx = required_usize(&parsed, "--nx")?;
+    let ny = required_usize(&parsed, "--ny")?;
+    let length_x = required_number(&parsed, "--length-x")?;
+    let length_y = required_number(&parsed, "--length-y")?;
+    let mut session = open_session(file)?;
+    let summary = session.mesh_set(nx, ny, length_x, length_y)?;
+    println!(
+        "mesh set: {}×{}, {}×{} m",
+        summary.mesh.nx, summary.mesh.ny, summary.mesh.length_x, summary.mesh.length_y
+    );
+    Ok(0)
+}
+
+fn fluid_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--rho", "--mu"], &[])?;
+    let file = positional(&parsed, 0, "fluid set <file> --rho <kg/m3> --mu <Pa.s>")?;
+    let density = required_number(&parsed, "--rho")?;
+    let viscosity = required_number(&parsed, "--mu")?;
+    let mut session = open_session(file)?;
+    let summary = session.fluid_set(density, viscosity)?;
+    println!(
+        "fluid set: rho={} kg/m3, mu={} Pa.s",
+        summary.fluid.density, summary.fluid.viscosity
+    );
+    Ok(0)
+}
+
+fn time_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &["--dt", "--steps", "--pressure-iterations", "--tolerance"],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]",
+    )?;
+    let dt = required_number(&parsed, "--dt")?;
+    let steps = required_usize(&parsed, "--steps")?;
+    let pressure_iterations = required_usize(&parsed, "--pressure-iterations")?;
+    let tolerance = number(&parsed, "--tolerance")?;
+    let mut session = open_session(file)?;
+    let summary = session.time_set(dt, steps, pressure_iterations, tolerance)?;
+    println!(
+        "time set: dt={} s, steps={}, pressureIterations={}, relative tolerance={}",
+        summary.time.dt,
+        summary.time.steps,
+        summary.time.pressure_iterations,
+        summary.time.tolerance
+    );
+    Ok(0)
+}
+
+fn boundary_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--side", "--kind", "--u", "--v"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet [--u <m/s>] [--v <m/s>]",
+    )?;
+    let side = required(&parsed, "--side")?.parse::<Side>()?;
+    let kind = required(&parsed, "--kind")?.parse::<BoundaryKind>()?;
+    let u = number(&parsed, "--u")?;
+    let v = number(&parsed, "--v")?;
+    let mut session = open_session(file)?;
+    let summary = session.boundary_set(side, kind, u, v)?;
+    print_boundary(&summary, side);
+    Ok(0)
+}
+
+fn print_boundary(summary: &CaseSummary, side: Side) {
+    let boundary = summary.boundaries.get(side);
+    println!(
+        "{} boundary set to {}, velocity=[{}, {}] m/s",
+        side.as_str(),
+        boundary.kind.as_str(),
+        boundary.velocity[0],
+        boundary.velocity[1]
+    );
+}
+
+fn obstacle_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("add") => obstacle_add(&args[1..]),
+        Some("list") => obstacle_list(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`obstacle` has no subcommand `{other}`; only add and list are supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`obstacle` requires a subcommand; only add and list are supported",
+        )),
+    }
+}
+
+fn obstacle_add(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &[
+            "--kind", "--id", "--x0", "--y0", "--x1", "--y1", "--x", "--y", "--r",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "obstacle add <file> --kind rect|circle ... [--id <name>]",
+    )?;
+    let id = parsed.options.get("--id").cloned().unwrap_or_default();
+    let kind = required(&parsed, "--kind")?;
+    let obstacle = match kind {
+        "rect" => Obstacle::Rect {
+            id,
+            x0: required_number(&parsed, "--x0")?,
+            y0: required_number(&parsed, "--y0")?,
+            x1: required_number(&parsed, "--x1")?,
+            y1: required_number(&parsed, "--y1")?,
+        },
+        "circle" => Obstacle::Circle {
+            id,
+            x: required_number(&parsed, "--x")?,
+            y: required_number(&parsed, "--y")?,
+            r: required_number(&parsed, "--r")?,
+        },
+        other => {
+            return Err(CfdError::new(
+                "cli/invalid-obstacle-kind",
+                format!("unknown obstacle kind `{other}`; only rect and circle are supported"),
+            ))
+        }
+    };
+    let mut session = open_session(file)?;
+    let summary = session.obstacle_add(obstacle)?;
+    let added = summary
+        .obstacles
+        .last()
+        .expect("obstacle was just appended");
+    println!(
+        "added {} obstacle `{}`; {} total",
+        added.kind(),
+        added.id(),
+        summary.obstacles.len()
+    );
+    Ok(0)
+}
+
+fn obstacle_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "obstacle list <file>")?;
+    let session = open_session(file)?;
+    let obstacles = session.obstacle_list();
+    let json = serde_json::to_string_pretty(&obstacles).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize obstacles: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn scalar_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => scalar_set(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`scalar` has no subcommand `{other}`; only set is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`scalar` requires a subcommand; only set is supported",
+        )),
+    }
+}
+
+fn scalar_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--diffusivity", "--initial", "--inlet"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]",
+    )?;
+    let diffusivity = required_number(&parsed, "--diffusivity")?;
+    let initial = number(&parsed, "--initial")?;
+    let inlet = number(&parsed, "--inlet")?;
+    let mut session = open_session(file)?;
+    let summary = session.scalar_set(diffusivity, initial, inlet)?;
+    let scalar = summary.scalar.as_ref().expect("scalar was just configured");
+    println!(
+        "scalar set: diffusivity={} m2/s, initial={}, inletValue={}",
+        scalar.diffusivity, scalar.initial, scalar.inlet_value
+    );
+    Ok(0)
+}
+
+fn turbulence_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => turbulence_set(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`turbulence` has no subcommand `{other}`; only set is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`turbulence` requires a subcommand; only set is supported",
+        )),
+    }
+}
+
+fn turbulence_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--model", "--nu-t", "--mixing-length"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]",
+    )?;
+    let model = required(&parsed, "--model")?.parse::<TurbulenceModel>()?;
+    let nu_t = number(&parsed, "--nu-t")?.unwrap_or(0.0);
+    let mixing_length = number(&parsed, "--mixing-length")?.unwrap_or(0.1);
+    let mut session = open_session(file)?;
+    let summary = session.turbulence_set(model, nu_t, mixing_length)?;
+    match summary.turbulence.as_ref() {
+        Some(turbulence) => println!(
+            "turbulence set: {}, nuT={} m2/s, mixingLength={} m",
+            turbulence.model.as_str(),
+            turbulence.nu_t,
+            turbulence.mixing_length
+        ),
+        None => println!("turbulence disabled (laminar)"),
+    }
+    Ok(0)
+}
+
+fn heat_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("set") => heat_set(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`heat` has no subcommand `{other}`; only set is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`heat` requires a subcommand; only set is supported",
+        )),
+    }
+}
+
+fn side_thermal(
+    parsed: &Parsed,
+    temperature: &str,
+    heat_flux: &str,
+) -> Result<SideThermal, CfdError> {
+    Ok(SideThermal {
+        temperature: number(parsed, temperature)?,
+        heat_flux: number(parsed, heat_flux)?,
+    })
+}
+
+fn heat_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &[
+            "--conductivity",
+            "--specific-heat",
+            "--diffusivity",
+            "--heat-source",
+            "--left-temperature",
+            "--right-temperature",
+            "--top-temperature",
+            "--bottom-temperature",
+            "--left-heat-flux",
+            "--right-heat-flux",
+            "--top-heat-flux",
+            "--bottom-heat-flux",
+            "--obstacle-temperature",
+            "--obstacle-heat-flux",
+            "--reference-temperature",
+        ],
+        &[],
+    )?;
+    let file = positional(&parsed, 0, "heat set <file> [thermal options]")?;
+    let mut session = open_session(file)?;
+    let summary = session.summary()?;
+    let specific_heat = number(&parsed, "--specific-heat")?.unwrap_or(1.0);
+    let conductivity = number(&parsed, "--conductivity")?;
+    let diffusivity = match (number(&parsed, "--diffusivity")?, conductivity) {
+        (Some(diffusivity), _) => Some(diffusivity),
+        (None, Some(conductivity)) if summary.fluid.density * specific_heat > 0.0 => {
+            Some(conductivity / (summary.fluid.density * specific_heat))
+        }
+        _ => None,
+    };
+    let thermal = ThermalConfig {
+        specific_heat,
+        conductivity,
+        heat_source: number(&parsed, "--heat-source")?.unwrap_or(0.0),
+        left: side_thermal(&parsed, "--left-temperature", "--left-heat-flux")?,
+        right: side_thermal(&parsed, "--right-temperature", "--right-heat-flux")?,
+        top: side_thermal(&parsed, "--top-temperature", "--top-heat-flux")?,
+        bottom: side_thermal(&parsed, "--bottom-temperature", "--bottom-heat-flux")?,
+        obstacle_temperature: number(&parsed, "--obstacle-temperature")?,
+        obstacle_heat_flux: number(&parsed, "--obstacle-heat-flux")?,
+        reference_temperature: number(&parsed, "--reference-temperature")?,
+    };
+    let summary = session.thermal_set(thermal, diffusivity)?;
+    let thermal = summary
+        .thermal
+        .as_ref()
+        .expect("thermal was just configured");
+    println!(
+        "heat set: cp={} J/kgK, k={:?} W/mK, heatSource={} W/m3, obstacleTemperature={:?}, obstacleHeatFlux={:?}",
+        thermal.specific_heat, thermal.conductivity, thermal.heat_source,
+        thermal.obstacle_temperature, thermal.obstacle_heat_flux
+    );
+    Ok(0)
+}
+
+fn validate(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "validate <file>")?;
+    let session = open_session(file)?;
+    let summary = session.validate()?;
+    println!(
+        "validation passed: {}×{} mesh, {}×{} m, rho={} kg/m3, mu={} Pa.s, {} steps, dt={} s",
+        summary.mesh.nx,
+        summary.mesh.ny,
+        summary.mesh.length_x,
+        summary.mesh.length_y,
+        summary.fluid.density,
+        summary.fluid.viscosity,
+        summary.time.steps,
+        summary.time.dt
+    );
+    Ok(0)
+}
+
+fn solve_command(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &["--out", "--steps", "--tolerance", "--check-every"],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]",
+    )?;
+    let options = SolveOptions {
+        steps: optional_usize(&parsed, "--steps")?,
+        tolerance: number(&parsed, "--tolerance")?,
+        check_every: optional_usize(&parsed, "--check-every")?,
+    };
+    let session = open_session(file)?;
+    let report = session.solve_with(&options)?;
+    let json = serde_json::to_string_pretty(&report).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize report: {error}"),
+        )
+    })?;
+    if let Some(out) = parsed.options.get("--out") {
+        write_atomic(Path::new(out), &json)?;
+    }
+    println!("{json}");
+    Ok(0)
+}
+
+fn export(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--format", "--out", "--field"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "export <file> --format csv|vtk|svg [--field pressure|temperature] --out <dir|file>",
+    )?;
+    let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
+    let field = match parsed.options.get("--field") {
+        Some(value) => value.parse::<ExportField>()?,
+        None => ExportField::Pressure,
+    };
+    let out = required(&parsed, "--out")?;
+    let session = open_session(file)?;
+    let report = session.export_field(format, Path::new(out), field)?;
+    match format {
+        ExportFormat::Csv => println!("exported CSV: {}", report.path),
+        ExportFormat::Vtk => println!("exported legacy ASCII VTK: {}", report.path),
+        ExportFormat::Svg => println!("exported SVG ({}): {}", field.as_str(), report.path),
+    }
+    Ok(0)
+}
+
+fn not_implemented(feature: &str) -> CfdError {
+    CfdError::new(
+        "capability/not-implemented",
+        format!("{feature} is not implemented; only two-dimensional, single-phase, incompressible flow and heat transfer (with constant or mixing-length eddy viscosity) are supported"),
+    )
+}
+
+#[derive(Default)]
+struct Parsed {
+    positionals: Vec<String>,
+    flags: HashSet<String>,
+    options: HashMap<String, String>,
+}
+
+fn parse(
+    args: &[String],
+    value_options: &[&str],
+    flag_options: &[&str],
+) -> Result<Parsed, CfdError> {
+    let mut parsed = Parsed::default();
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if let Some((name, value)) = argument.split_once('=') {
+            if name.starts_with("--") {
+                if !value_options.contains(&name) {
+                    return Err(CfdError::new(
+                        "cli/unknown-option",
+                        format!("unknown option `{name}`"),
+                    ));
+                }
+                parsed.options.insert(name.to_string(), value.to_string());
+                index += 1;
+                continue;
+            }
+        }
+        if argument.starts_with("--") {
+            if flag_options.contains(&argument.as_str()) {
+                parsed.flags.insert(argument.clone());
+                index += 1;
+            } else if value_options.contains(&argument.as_str()) {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    CfdError::new(
+                        "cli/missing-value",
+                        format!("`{argument}` is missing a value"),
+                    )
+                })?;
+                if value.starts_with("--") {
+                    return Err(CfdError::new(
+                        "cli/missing-value",
+                        format!("`{argument}` is missing a value"),
+                    ));
+                }
+                parsed.options.insert(argument.clone(), value.clone());
+                index += 2;
+            } else {
+                return Err(CfdError::new(
+                    "cli/unknown-option",
+                    format!("unknown option `{argument}`"),
+                ));
+            }
+        } else {
+            parsed.positionals.push(argument.clone());
+            index += 1;
+        }
+    }
+    Ok(parsed)
+}
+
+fn positional<'a>(parsed: &'a Parsed, index: usize, usage: &str) -> Result<&'a str, CfdError> {
+    parsed
+        .positionals
+        .get(index)
+        .map(String::as_str)
+        .ok_or_else(|| CfdError::new("cli/missing-argument", format!("missing argument: {usage}")))
+}
+
+fn required<'a>(parsed: &'a Parsed, name: &str) -> Result<&'a str, CfdError> {
+    parsed.options.get(name).map(String::as_str).ok_or_else(|| {
+        CfdError::new(
+            "cli/missing-option",
+            format!("missing required option `{name}`"),
+        )
+    })
+}
+
+fn number(parsed: &Parsed, name: &str) -> Result<Option<f64>, CfdError> {
+    parsed
+        .options
+        .get(name)
+        .map(|value| {
+            value.parse::<f64>().map_err(|_| {
+                CfdError::new(
+                    "cli/invalid-number",
+                    format!("value `{value}` of `{name}` is not a valid number"),
+                )
+            })
+        })
+        .transpose()
+}
+
+fn required_number(parsed: &Parsed, name: &str) -> Result<f64, CfdError> {
+    number(parsed, name)?.ok_or_else(|| {
+        CfdError::new(
+            "cli/missing-option",
+            format!("missing required option `{name}`"),
+        )
+    })
+}
+
+fn required_usize(parsed: &Parsed, name: &str) -> Result<usize, CfdError> {
+    let value = required(parsed, name)?;
+    value.parse::<usize>().map_err(|_| {
+        CfdError::new(
+            "cli/invalid-number",
+            format!("value `{value}` of `{name}` is not a valid positive integer"),
+        )
+    })
+}
+
+fn optional_usize(parsed: &Parsed, name: &str) -> Result<Option<usize>, CfdError> {
+    parsed
+        .options
+        .get(name)
+        .map(|_| required_usize(parsed, name))
+        .transpose()
+}

@@ -1,0 +1,236 @@
+<template>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+        <div class="site-header__inner">
+            <Link to="IndexPage" class="brand">
+                <span class="brand__mark">O</span>
+                <span class="brand__name">OpenCFD</span>
+            </Link>
+            <nav id="primary-nav" aria-label="Primary" class="nav" :data-open="open ? 'true' : 'false'">
+                <Link to="IndexPage" data-nav="home" :data-active="activeId === 'home' ? 'true' : 'false'">
+                    Home
+                </Link>
+                <Link to="FeaturesPage" data-nav="features" :data-active="activeId === 'features' ? 'true' : 'false'">
+                    Features
+                </Link>
+                <Link to="RoadmapPage" data-nav="roadmap" :data-active="activeId === 'roadmap' ? 'true' : 'false'">
+                    Roadmap
+                </Link>
+            </nav>
+            <div class="header-actions">
+                <span class="header-chip">In development</span>
+                <a class="nav-source" href="https://github.com/nyar-os/OpenCFD" rel="noopener">
+                    Source
+                </a>
+                <button type="button" class="menu-toggle" @click="toggleMenu" :aria-expanded="open ? 'true' : 'false'" aria-controls="primary-nav">
+                    {{ menuLabel() }}
+                </button>
+            </div>
+        </div>
+    </header>
+</template>
+
+<style>
+.skip-link {
+    position: absolute;
+    left: 12px;
+    top: -48px;
+    z-index: 30;
+    padding: 8px 14px;
+    border: 1px solid var(--cfd-accent);
+    border-radius: var(--cfd-radius);
+    background: var(--cfd-surface);
+    color: var(--cfd-accent);
+    font-size: 14px;
+}
+
+.skip-link:focus {
+    top: 12px;
+    text-decoration: none;
+}
+
+.site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(238, 241, 242, 0.92);
+    border-bottom: 1px solid var(--cfd-line);
+    backdrop-filter: blur(8px);
+}
+
+.site-header__inner {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    max-width: var(--cfd-maxw);
+    margin: 0 auto;
+    padding: 12px 24px;
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--cfd-ink);
+    flex: none;
+}
+
+.brand:hover {
+    text-decoration: none;
+}
+
+.brand__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    background: var(--cfd-accent);
+    color: var(--cfd-on-accent);
+    font-family: var(--cfd-mono);
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.brand__name {
+    font-family: var(--cfd-mono);
+    font-weight: 600;
+    font-size: 17px;
+}
+
+.nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.nav a {
+    color: var(--cfd-muted);
+    font-size: 15px;
+}
+
+.nav a:hover {
+    color: var(--cfd-ink);
+    text-decoration: none;
+}
+
+.nav a[data-active="true"] {
+    color: var(--cfd-accent);
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.header-chip {
+    padding: 2px 9px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 999px;
+    color: var(--cfd-muted);
+    font-family: var(--cfd-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.nav-source {
+    color: var(--cfd-ink);
+    font-size: 14px;
+    padding: 5px 13px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 999px;
+}
+
+.nav-source:hover {
+    border-color: var(--cfd-accent);
+    text-decoration: none;
+}
+
+.menu-toggle {
+    display: none;
+    padding: 5px 12px;
+    border: 1px solid var(--cfd-line);
+    border-radius: 999px;
+    background: var(--cfd-surface);
+    color: var(--cfd-ink);
+    font-size: 13px;
+}
+
+.menu-toggle:hover {
+    border-color: var(--cfd-accent);
+}
+
+@media (max-width: 760px) {
+    .site-header__inner {
+        flex-wrap: wrap;
+        gap: 10px 12px;
+        padding: 10px 18px 12px;
+    }
+
+    .header-actions {
+        gap: 8px;
+    }
+
+    .nav-source {
+        display: none;
+    }
+
+    .menu-toggle {
+        display: inline-flex;
+    }
+
+    .nav {
+        order: 3;
+        width: 100%;
+        flex-direction: column;
+        gap: 2px;
+        padding-top: 4px;
+        border-top: 1px solid var(--cfd-line);
+    }
+
+    .nav[data-open="false"] {
+        display: none;
+    }
+
+    .nav a {
+        padding: 7px 4px;
+        font-size: 15px;
+    }
+}
+</style>
+
+<script client>
+const NAV_BY_PATH = {
+    "/": "home",
+    "/features": "features",
+    "/roadmap": "roadmap",
+};
+
+export default class SiteHeader {
+    public activeId: string = "";
+    public open: boolean = false;
+
+    onMount() {
+        this.resolveActive();
+    }
+
+    menuLabel() {
+        return this.open ? "Close" : "Menu";
+    }
+
+    toggleMenu() {
+        this.open = !this.open;
+    }
+
+    resolveActive() {
+        if (typeof window === "undefined" || !window.location) return;
+        const path = (window.location.pathname || "/").replace(/\/+$/, "") || "/";
+        this.activeId = NAV_BY_PATH[path] ?? "";
+    }
+}
+</script>
