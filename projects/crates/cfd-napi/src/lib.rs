@@ -333,6 +333,16 @@ fn convection_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Sets the uniform imposed pressure gradient and returns the summary.
+#[function]
+fn pressure_gradient_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let dpdx = number(&ctx, 1)?;
+    let dpdy = number(&ctx, 2)?;
+    let summary = with_session(handle, |session| session.pressure_gradient_set(dpdx, dpdy))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Sets force and moment reference quantities and returns the summary.
 #[function]
 fn reference_set(ctx: CallContext) -> Result<JsValue> {
@@ -413,6 +423,7 @@ register_module![
     probe_clear,
     scalar_set,
     convection_set,
+    pressure_gradient_set,
     reference_set,
     validate,
     solve,

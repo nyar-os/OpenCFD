@@ -32,6 +32,7 @@ export interface NativeBinding {
     probe_clear(handle: number): string;
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
     convection_set(handle: number, scheme: string): string;
+    pressure_gradient_set(handle: number, dpdx: number, dpdy: number): string;
     reference_set(handle: number, velocity?: number, area?: number, length?: number): string;
     validate(handle: number): string;
     solve(handle: number, steps?: number, tolerance?: number, checkEvery?: number): string;

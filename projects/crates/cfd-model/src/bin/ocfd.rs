@@ -29,6 +29,7 @@ Usage:
   ocfd probe clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   ocfd convection set <file> --scheme upwind|central|quick
+  ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
   ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>]
@@ -84,6 +85,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
         "convection" => convection_command(&args[1..]),
+        "pressure" => pressure_command(&args[1..]),
         "reference" => subcommand(args, "set", "reference"),
         "turbulence" => turbulence_command(&args[1..]),
         "heat" | "thermal" => heat_command(&args[1..]),
@@ -584,6 +586,39 @@ fn convection_set(args: &[String]) -> Result<i32, CfdError> {
     let mut session = open_session(file)?;
     let summary = session.convection_set(scheme)?;
     println!("convection set: {}", summary.convection.as_str());
+    Ok(0)
+}
+
+fn pressure_command(args: &[String]) -> Result<i32, CfdError> {
+    if args.first().map(String::as_str) != Some("gradient") {
+        return Err(CfdError::new(
+            "cli/unknown-command",
+            "`pressure` needs the `gradient` subcommand",
+        ));
+    }
+    if args.get(1).map(String::as_str) != Some("set") {
+        return Err(CfdError::new(
+            "cli/unknown-command",
+            "`pressure gradient` needs the `set` subcommand",
+        ));
+    }
+    let parsed = parse(&args[2..], &["--dpdx", "--dpdy"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>",
+    )?;
+    let dpdx = required_number(&parsed, "--dpdx")?;
+    let dpdy = required_number(&parsed, "--dpdy")?;
+    let mut session = open_session(file)?;
+    let summary = session.pressure_gradient_set(dpdx, dpdy)?;
+    match summary.pressure_gradient {
+        Some(gradient) => println!(
+            "pressure gradient set: dpdx={} Pa/m, dpdy={} Pa/m",
+            gradient[0], gradient[1]
+        ),
+        None => println!("pressure gradient cleared"),
+    }
     Ok(0)
 }
 

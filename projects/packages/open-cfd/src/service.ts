@@ -22,6 +22,7 @@ import type {
     Obstacle,
     OpenCfdCapabilities,
     Probe,
+    PressureGradientSetRequest,
     ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
@@ -231,6 +232,20 @@ export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummar
 export function convectionSet(handle: number, request: ConvectionSetRequest): CaseSummary {
     return decode<CaseSummary>(() =>
         binding('convection.set').convection_set(handle, request.scheme),
+    );
+}
+
+/** Sets the uniform imposed pressure gradient and writes the document back. */
+export function pressureGradientSet(
+    handle: number,
+    request: PressureGradientSetRequest,
+): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('pressure.gradient.set').pressure_gradient_set(
+            handle,
+            request.dpdx,
+            request.dpdy,
+        ),
     );
 }
 

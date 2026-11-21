@@ -123,6 +123,9 @@ pub struct CaseSummary {
     pub reference: Option<Reference>,
     /// Convective discretisation of the momentum and scalar equations.
     pub convection: ConvectionScheme,
+    /// Uniform imposed pressure gradient `[dp/dx, dp/dy]` (Pa/m), when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pressure_gradient: Option<[f64; 2]>,
     /// Time integration settings.
     pub time: TimeSettings,
     /// Boundary conditions.
@@ -156,6 +159,7 @@ impl CaseSummary {
             fluid: model.fluid.clone(),
             reference: model.reference.clone(),
             convection: model.convection,
+            pressure_gradient: model.pressure_gradient,
             time: model.time.clone(),
             boundaries: model.boundaries.clone(),
             initial: model.initial.clone(),
@@ -312,6 +316,20 @@ impl OpenCfd {
     pub fn convection_set(&mut self, scheme: ConvectionScheme) -> Result<CaseSummary, CfdError> {
         self.edit(|model| {
             model.convection = scheme;
+        })
+    }
+
+    /// Sets the uniform imposed pressure gradient and writes the document back.
+    ///
+    /// The gradient is stored in Pa/m and enters the momentum equation as the
+    /// body force `-∇p/ρ`. Setting both components to zero removes the field.
+    pub fn pressure_gradient_set(&mut self, dpdx: f64, dpdy: f64) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.pressure_gradient = if dpdx == 0.0 && dpdy == 0.0 {
+                None
+            } else {
+                Some([dpdx, dpdy])
+            };
         })
     }
 

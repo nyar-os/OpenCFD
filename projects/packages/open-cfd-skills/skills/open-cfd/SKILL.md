@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip and pressure outlets), obstacle, passive scalar, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets and periodic sides), pressure-driven flow, obstacle, passive scalar, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -10,7 +10,8 @@ description: Create, edit, validate, solve and export two-dimensional incompress
 The two-dimensional incompressible document core is executable. The CLI and SDK
 create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
 `euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure, periodic sides and
-parabolic/power-law inlet profiles), obstacle, force/moment reference, passive
+parabolic/power-law inlet profiles), uniform pressure gradients for
+pressure-driven flow, obstacle, force/moment reference, passive
 scalar, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV or force history CSV. The solve report also
@@ -43,6 +44,7 @@ ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
 ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
 ocfd heat set <file> [thermal options]
 ocfd convection set <file> --scheme upwind|central|quick
+ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
@@ -93,6 +95,9 @@ rename. Confirm the path before running them.
   and `maxDt`.
 - Inlet profiles (`uniform`, `parabolic`, `powerLaw`) shape only the normal
   velocity of an `inlet` side.
+- `pressure gradient set --dpdx ... --dpdy ...` imposes a uniform pressure
+  gradient in Pa/m as the body force `-∇p/ρ`; `0 0` clears it. It is constant in
+  space and time and is not a general body-force field.
 - `solve` stops early on the L2 norm of the velocity change when `--tolerance`
   is given and reports `converged`, `steadyState`, `residual`,
   `residualHistory` (with `continuity`), `terminationReason`, `timeScheme`,

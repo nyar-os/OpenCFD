@@ -376,6 +376,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"streamlines\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"contours\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"periodic\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"pressureDriven\": \"supported\""));
 }
 
 #[test]
@@ -1517,5 +1518,95 @@ fn periodic_channel_conserves_flow_and_excludes_wrapped_sides() {
         solution.report.max_velocity > 0.05,
         "the initial streamwise flow should persist, got {}",
         solution.report.max_velocity
+    );
+}
+
+#[test]
+fn imposed_pressure_gradient_accelerates_a_periodic_domain() {
+    let mut model = mesh_model(8, 8);
+    model.boundaries.left.kind = BoundaryKind::Periodic;
+    model.boundaries.right.kind = BoundaryKind::Periodic;
+    model.boundaries.bottom.kind = BoundaryKind::Periodic;
+    model.boundaries.top.kind = BoundaryKind::Periodic;
+    model.fluid.density = 1.0;
+    model.fluid.viscosity = 0.0;
+    model.pressure_gradient = Some([-1.0, 0.0]);
+    model.time.dt = 0.01;
+    model.time.steps = 10;
+    model.time.pressure_iterations = 20;
+
+    let solution = solve(&model).expect("pressure-driven solve");
+    let expected = 0.1;
+    for j in 0..solution.mesh.ny {
+        for i in 0..=solution.mesh.nx {
+            let actual = solution.u[solution.mesh.u_index(i, j)];
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "u[{i},{j}] = {actual}, expected {expected}"
+            );
+        }
+    }
+    assert_finite(&solution.v, "v");
+    assert_finite(&solution.p, "p");
+    assert!(solution.v.iter().all(|value| value.abs() < 1e-12));
+}
+
+#[test]
+fn pressure_gradient_drives_a_symmetric_poiseuille_like_profile() {
+    let mut model = mesh_model(16, 16);
+    model.boundaries.left.kind = BoundaryKind::Periodic;
+    model.boundaries.right.kind = BoundaryKind::Periodic;
+    model.boundaries.bottom = Boundary::wall();
+    model.boundaries.top = Boundary::wall();
+    model.fluid.density = 1.0;
+    model.fluid.viscosity = 0.02;
+    model.pressure_gradient = Some([-0.02, 0.0]);
+    model.time.dt = 0.03;
+    model.time.steps = 400;
+    model.time.pressure_iterations = 30;
+
+    let solution = solve(&model).expect("channel solve");
+    assert_finite(&solution.u, "u");
+    assert_finite(&solution.v, "v");
+    let mesh = &solution.mesh;
+    let middle = mesh.ny / 2;
+    let mut centre: f64 = 0.0;
+    for i in 1..mesh.nx {
+        centre = centre.max(solution.u[mesh.u_index(i, middle)]);
+    }
+    let near_wall = solution.u[mesh.u_index(1, 0)];
+    assert!(centre > 0.0, "the pressure gradient should drive +x flow");
+    assert!(
+        centre > near_wall,
+        "centre velocity {centre} should exceed the near-wall value {near_wall}"
+    );
+    for i in 0..=mesh.nx {
+        for j in 0..mesh.ny / 2 {
+            let lower = solution.u[mesh.u_index(i, j)];
+            let upper = solution.u[mesh.u_index(i, mesh.ny - 1 - j)];
+            assert!(
+                (lower - upper).abs() < 1e-9,
+                "profile is not symmetric at row {j}: {lower} vs {upper}"
+            );
+        }
+    }
+    let balance = solution.report.mass_balance;
+    assert_eq!(balance.net, 0.0);
+    assert_eq!(balance.relative_error, 0.0);
+}
+
+#[test]
+fn pressure_gradient_round_trips_and_rejects_non_finite_values() {
+    let mut model = Model::new();
+    model.pressure_gradient = Some([-0.5, 0.25]);
+    let text = model.to_json_pretty().expect("serialize");
+    let parsed = Model::parse_json(&text).expect("parse");
+    assert_eq!(parsed.pressure_gradient, Some([-0.5, 0.25]));
+
+    let mut invalid = model.clone();
+    invalid.pressure_gradient = Some([f64::NAN, 0.0]);
+    assert_eq!(
+        invalid.validate().expect_err("non-finite gradient").code,
+        "pressure/invalid"
     );
 }

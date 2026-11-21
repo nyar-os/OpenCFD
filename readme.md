@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, free-slip, pressure-outlet and periodic sides, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, filled-contour/iso-line SVG export, and CFL-limited adaptive time stepping with step statistics. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, free-slip, pressure-outlet and periodic sides, uniform imposed pressure gradients for pressure-driven flow, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, filled-contour/iso-line SVG export, and CFL-limited adaptive time stepping with step statistics. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -34,6 +34,8 @@ cfdCase.setInletProfile({ side: 'left', profile: 'parabolic' });
 cfdCase.setBoundary({ side: 'right', kind: 'outlet', pressure: 0 });
 cfdCase.addObstacle({ kind: 'circle', id: 'cyl', x: 0.5, y: 0.5, r: 0.1 });
 cfdCase.setReference({ velocity: 1, area: 0.2, length: 0.2 });
+cfdCase.setConvection({ scheme: 'quick' });
+cfdCase.setPressureGradient({ dpdx: -0.5, dpdy: 0 });
 cfdCase.setScalar({ diffusivity: 1e-3, initial: 300, inlet: 320 });
 
 cfdCase.validate();            // Throws OpenCFDError (stable code) on failure.
@@ -44,7 +46,8 @@ await cfd.dispose();
 ```
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
-- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setConvection`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- `setPressureGradient({dpdx, dpdy})` imposes a uniform pressure gradient in Pa/m as the momentum body force `-∇p/ρ`; setting both components to zero removes it. It drives pressure-driven channel flow, and combined with paired periodic sides it forms a fully developed periodic channel.
 - `setBoundary` accepts `wall`, `inlet`, `outlet` and `slip`; `pressure` sets the outlet gauge pressure. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setTimeScheme` selects `euler` (default) or `rk2` for the explicit momentum step.
 - `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory` (with per-sample `continuity`), `terminationReason`, `timeScheme`, `massBalance`, `forces` (with `cm` and resolved reference quantities), `probes`, `wallShear`, and the vorticity and stream-function extremes.
@@ -136,6 +139,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd probe clear <file>` | Remove every point monitor |
 | `ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]` | Enable or update passive scalar (temperature) transport; omitted values are unchanged |
 | `ocfd convection set <file> --scheme upwind\|central\|quick` | Select the convective discretisation used by momentum and scalar transport |
+| `ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>` | Impose a uniform pressure gradient as a momentum body force; `0 0` clears it |
 | `ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]` | Override the force and moment reference quantities; omitted values stay automatic |
 | `ocfd turbulence set <file> --model none\|constant\|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]` | Select the eddy-viscosity model; `none` removes the turbulence section |
 | `ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] ...` | Configure energy-equation boundaries, volumetric source and reference temperature; requires scalar transport |
@@ -168,6 +172,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
   "fluid": { "density": 1.0, "viscosity": 0.01 },
   "reference": { "velocity": 1.0, "area": 0.2, "length": 0.2 },
   "convection": "upwind",
+  "pressureGradient": [-0.5, 0.0],
   "time": {
     "dt": 0.01,
     "steps": 200,
@@ -204,6 +209,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `fluid` | Constant density `density` and constant dynamic viscosity `viscosity` |
 | `reference` | Optional; `velocity` (m/s), `area` (m²) and `length` (m) override the force and moment reference quantities independently. Defaults are the maximum inlet speed, the obstacle characteristic length times unit depth, and the obstacle characteristic length |
 | `convection` | Optional; `upwind` (default), `central` or `quick`, applied to the face-normal advective derivative of momentum and scalar transport |
+| `pressureGradient` | Optional `[dp/dx, dp/dy]` in Pa/m; enters the momentum equation as the body force `-∇p/ρ` and drives pressure-driven flow |
 | `time` | `dt`, step count `steps`, maximum pressure SOR sweeps per step `pressureIterations`, relative residual tolerance `tolerance`, the momentum time scheme `scheme` (`euler` default or `rk2`), adaptive stepping `adaptive` and its target convective CFL `targetCfl` in `(0, 1]` |
 | `boundaries` | One `kind`, velocity `[u, v]` and outlet `pressure` (Pa) for each of the four sides, plus `inletProfiles` with a `profile` per side (`uniform`, `parabolic`, `powerLaw`) and the shared power-law `exponent`. `kind` is `wall`, `inlet`, `outlet`, `slip` or `periodic`; periodic sides must come in opposite pairs |
 | `initial` | Optional; uniform initial velocity `[u, v]`, at rest by default |
@@ -258,6 +264,7 @@ Boundary semantics:
 | Rectangular and circular solid obstacles with drag, lift and moment coefficients (`obstacles`, `momentCoefficients`) | ✅ Supported (configurable reference quantities) |
 | Free-slip walls and prescribed outlet pressure (`slipBoundary`, `pressureOutlet`) | ✅ Supported |
 | Periodic sides in opposite pairs (`periodic`) | ✅ Supported |
+| Uniform imposed pressure gradient / pressure-driven flow (`pressureDriven`) | ✅ Supported |
 | Uniform, parabolic and power-law inlet velocity profiles (`inletProfiles`) | ✅ Supported |
 | Boundary mass balance and sampled continuity residual (`massBalance`) | ✅ Supported |
 | Passive scalar (temperature) transport (`scalar`) | ✅ Supported |
@@ -283,7 +290,7 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 ## Numerical method
 
 1. **Staggered (MAC) mesh**: pressure lives at the centre of each of the `nx × ny` cells; `u` lives on the `(nx+1) × ny` x-faces and `v` on the `nx × (ny+1)` y-faces. A cell whose centre lies inside an obstacle is marked solid; every face between a solid cell and a fluid cell, or between two solid cells, carries zero velocity.
-2. **Momentum prediction**: explicit convection plus central-difference diffusion and the configured time scheme produce the tentative velocities `u*` and `v*`. `time.scheme` selects first-order explicit Euler (default) or second-order Runge-Kutta (Heun: two derivative evaluations per step), both followed by the same pressure projection. The `convection` field selects first-order upwind (default), second-order central or third-order QUICK for the face-normal advective derivative; the transverse velocity gradient stays central, and QUICK falls back to upwind on the first interior face next to a boundary. Tangential wall velocities are imposed through half-cell ghost values so boundary cells take part in the projection; slip walls use mirrored ghost values for a zero tangential gradient, and solid faces are not sampled as fluid. Inlet sides scale their normal velocity by the configured `inletProfiles` factor at each face. Periodic sides are mirrored to their opposite side, and the momentum, pressure-Poisson and velocity-correction stencils wrap across the periodic axis.
+2. **Momentum prediction**: explicit convection plus central-difference diffusion and the configured time scheme produce the tentative velocities `u*` and `v*`. A configured `pressureGradient` adds the uniform body force `-∇p/ρ` to every open face. `time.scheme` selects first-order explicit Euler (default) or second-order Runge-Kutta (Heun: two derivative evaluations per step), both followed by the same pressure projection. The `convection` field selects first-order upwind (default), second-order central or third-order QUICK for the face-normal advective derivative; the transverse velocity gradient stays central, and QUICK falls back to upwind on the first interior face next to a boundary. Tangential wall velocities are imposed through half-cell ghost values so boundary cells take part in the projection; slip walls use mirrored ghost values for a zero tangential gradient, and solid faces are not sampled as fluid. Inlet sides scale their normal velocity by the configured `inletProfiles` factor at each face. Periodic sides are mirrored to their opposite side, and the momentum, pressure-Poisson and velocity-correction stencils wrap across the periodic axis.
 3. **Pressure Poisson**: pressure follows from `∇²p = (ρ/dt) ∇·u*`. Wall, inlet, slip and solid faces use homogeneous Neumann conditions and each outlet uses a Dirichlet value from its `pressure` field; solid cells are not unknowns (their pressure stays 0) and their divergence is forced to zero. SOR solves the system with a relaxation factor derived from the largest mesh side, and the iteration count and relative tolerance come from the document. In a fully closed domain only the fluid cells have their mean pressure removed after the sweeps.
 4. **Velocity correction**: `u = u* − (dt/ρ) ∇p` updates open faces only, then normal boundary conditions and zero solid velocities are reapplied to obtain a divergence-free velocity field.
 5. **Obstacle forces**: on every fluid-solid face, pressure `p × face length` and viscous shear `μ·u_fluid/(half-cell distance) × face length` are accumulated per obstacle `id`. The face force is also crossed with its position relative to the obstacle centroid to obtain `mz`; `Cd = 2Fx/(ρU²A)`, `Cl = 2Fy/(ρU²A)` and `Cm = 2Mz/(ρU²AL)` use the resolved reference speed, area and length.
@@ -334,6 +341,7 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 23. **Contours**: exporting `speed` writes `solution-speed-contours.svg` with the field/unit title, filled-band polygon elements, marching-squares iso-lines and the legend text; a named `.svg` target is used verbatim and temperature contours without a scalar field fail with `export/no-field`.
 24. **Adaptive time step**: a lid-driven cavity with `dt = 0.05 s`, target CFL 0.5 and `h = 0.05 m` reduces every step to about 0.025 s, reports `adaptive = true` and `time = averageDt × steps`, and rejects `targetCfl > 1` with `time/invalid`.
 25. **Periodic sides**: a single periodic side without its opposite pair is rejected with `boundary/invalid`; `apply_velocity_boundaries` copies the opposite boundary face; a periodic channel keeps a streamwise initial flow, wraps both boundary faces exactly and reports zero inflow, outflow and net mass balance because periodic sides are excluded.
+26. **Pressure-driven flow**: a fully periodic inviscid domain with `pressureGradient = [1, 0]` accelerates uniformly to `u = G·t/ρ` and keeps `v = 0`; a periodic channel with no-slip walls driven by a negative x gradient develops a symmetric positive parabolic-like profile with zero net boundary mass flow; a non-finite gradient is rejected with `pressure/invalid`.
 
 `projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK/SVG/streamline/residual/force export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation. It also round-trips slip walls, outlet pressure, reference quantities, inlet profiles, the time scheme and adaptive time settings through both the session and CLI paths.
 
@@ -360,6 +368,7 @@ cargo build -p cfd-model --offline
 - Adaptive stepping changes the physical time reached for a fixed step count. It does not adapt the mesh, and it uses the velocity at the start of the step, so a strong transient can briefly exceed the target before the next step clamps again.
 - The default first-order upwind plus explicit Euler makes space and time first-order, with significant numerical diffusion. `central` and `quick` are available, but above a cell Péclet number of about 2 they can oscillate and destabilise the explicit scheme. `rk2` reduces the temporal error (about 3.5× at a representative cavity step) but keeps the same pressure projection and CFL limits, so it does not permit a larger `dt`.
 - Inlet profiles shape only the normal velocity of an `inlet` side; the tangential component stays uniform, and walls, slip sides and outlets ignore the profile.
+- The imposed pressure gradient is uniform in space and constant in time; it is not a body-force field or a time-varying forcing.
 - Passive scalar (temperature) transport is supported, but Boussinesq buoyancy is not; the `buoyancy` field is rejected with `capability/not-implemented`.
 - The stream function is integrated along one path from the bottom-left corner, so in a domain cut by obstacles it is a gauge-fixed diagnostic rather than a unique potential.
 - Point probes report the nearest cell centre without interpolation, and wall shear uses the molecular viscosity with a first-order half-cell gradient.

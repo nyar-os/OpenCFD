@@ -43,6 +43,7 @@ usage:
   open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   open-cfd convection set <file> --scheme upwind|central|quick
+  open-cfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
@@ -570,6 +571,32 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const document = await session.open(file);
             const summary = document.setConvection({ scheme });
             console.log(`convection set: ${summary.convection}`);
+            return 0;
+        }
+        case 'pressure': {
+            if (rest[0] !== 'gradient' || rest[1] !== 'set') {
+                throw cliError(
+                    'cli/unknown-command',
+                    '`pressure` needs the `gradient set` subcommand',
+                );
+            }
+            const parsed = parseArguments(rest.slice(2), ['--dpdx', '--dpdy']);
+            const file = positional(
+                parsed,
+                0,
+                'pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>',
+            );
+            const document = await session.open(file);
+            const summary = document.setPressureGradient({
+                dpdx: numberOption(parsed, '--dpdx'),
+                dpdy: numberOption(parsed, '--dpdy'),
+            });
+            const gradient = summary.pressureGradient;
+            console.log(
+                gradient === undefined
+                    ? 'pressure gradient cleared'
+                    : `pressure gradient set: dpdx=${gradient[0]} Pa/m, dpdy=${gradient[1]} Pa/m`,
+            );
             return 0;
         }
         case 'reference': {

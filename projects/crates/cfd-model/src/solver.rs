@@ -973,6 +973,9 @@ fn momentum_derivative(
     let boundaries = &model.boundaries;
     let periodic_x = boundaries.periodic_x();
     let periodic_y = boundaries.periodic_y();
+    let (source_x, source_y) = model.pressure_gradient.map_or((0.0, 0.0), |gradient| {
+        (-gradient[0] / rho, -gradient[1] / rho)
+    });
 
     for j in 0..mesh.ny {
         let start = if periodic_x { 0 } else { 1 };
@@ -1038,7 +1041,7 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_west]) / dx;
             let effective = nu + u_face_eddy(mesh, eddy, i, j);
-            du[index] = -convection + effective * diffusion - pressure_gradient / rho;
+            du[index] = -convection + effective * diffusion - pressure_gradient / rho + source_x;
         }
         if periodic_x {
             du[mesh.u_index(mesh.nx, j)] = du[mesh.u_index(0, j)];
@@ -1114,7 +1117,7 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_south]) / dy;
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
-            dv[index] = -convection + effective * diffusion - pressure_gradient / rho;
+            dv[index] = -convection + effective * diffusion - pressure_gradient / rho + source_y;
         }
     }
     if periodic_y {

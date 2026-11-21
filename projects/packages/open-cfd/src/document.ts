@@ -21,6 +21,7 @@ import type {
     MeshSetRequest,
     Obstacle,
     Probe,
+    PressureGradientSetRequest,
     ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
@@ -144,6 +145,12 @@ export class CfdCase {
     setConvection(request: ConvectionSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.convectionSet(this.handle, request));
+    }
+
+    /** Sets the uniform imposed pressure gradient and writes the document back. */
+    setPressureGradient(request: PressureGradientSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.pressureGradientSet(this.handle, request));
     }
 
     /** Sets force and moment reference quantities and writes the document back. */

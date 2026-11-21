@@ -581,3 +581,38 @@ fn session_adaptive_time_setting_round_trips() {
         "time/invalid"
     );
 }
+
+#[test]
+fn session_pressure_gradient_round_trips_through_cli() {
+    let directory = temporary_dir("pressure-gradient");
+    let path = directory.join("gradient.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .pressure_gradient_set(-0.5, 0.25)
+        .expect("pressure gradient");
+    assert_eq!(summary.pressure_gradient, Some([-0.5, 0.25]));
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.pressure_gradient, Some([-0.5, 0.25]));
+
+    let cli_path = directory.join("cli-gradient.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "pressure", "gradient", "set", &cli, "--dpdx", "-0.5", "--dpdy", "0.25",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd pressure gradient set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(cli_stored.pressure_gradient, Some([-0.5, 0.25]));
+
+    let summary = session
+        .pressure_gradient_set(0.0, 0.0)
+        .expect("clear gradient");
+    assert_eq!(summary.pressure_gradient, None);
+    let stored = Model::load(&path).expect("reload");
+    assert_eq!(stored.pressure_gradient, None);
+}

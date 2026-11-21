@@ -1004,6 +1004,13 @@ pub struct Model {
     /// Convective discretisation of the momentum and scalar equations.
     #[serde(default)]
     pub convection: ConvectionScheme,
+    /// Uniform imposed pressure gradient `[dp/dx, dp/dy]` (Pa/m).
+    ///
+    /// It enters the momentum equation as the body force `-∇p/ρ` and drives a
+    /// pressure-driven flow without prescribing velocities. Omitted means no
+    /// imposed gradient.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pressure_gradient: Option<[f64; 2]>,
     /// Time integration settings.
     #[serde(default)]
     pub time: TimeSettings,
@@ -1055,6 +1062,7 @@ impl Model {
             fluid: Fluid::default(),
             reference: None,
             convection: ConvectionScheme::default(),
+            pressure_gradient: None,
             time: TimeSettings::default(),
             boundaries,
             initial: None,
@@ -1183,6 +1191,15 @@ impl Model {
             report.push(Issue::error(
                 "time/invalid",
                 "dt must be a finite positive number",
+            ));
+        }
+        if self
+            .pressure_gradient
+            .is_some_and(|gradient| !gradient.iter().all(|value| value.is_finite()))
+        {
+            report.push(Issue::error(
+                "pressure/invalid",
+                "pressureGradient components must be finite numbers",
             ));
         }
         if self.time.steps == 0 {

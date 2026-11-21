@@ -82,6 +82,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
     "periodic": "supported",
+    "pressureDriven": "supported",
     "inletProfiles": "supported",
     "momentCoefficients": "supported",
     "massBalance": "supported",

@@ -212,6 +212,8 @@ export interface CaseSummary {
     readonly reference?: Reference;
     /** Convective discretisation of the momentum and scalar equations. */
     readonly convection: ConvectionScheme;
+    /** Uniform imposed pressure gradient `[dpdx, dpdy]` in Pa/m, when set. */
+    readonly pressureGradient?: readonly [number, number];
     readonly time: TimeSettings;
     readonly boundaries: Boundaries;
     readonly initial?: InitialField;
@@ -470,6 +472,14 @@ export interface BoundaryProfileSetRequest {
 /** Arguments of `CfdCase.setConvection()`. */
 export interface ConvectionSetRequest {
     readonly scheme: ConvectionScheme;
+}
+
+/** Arguments of `CfdCase.setPressureGradient()`. */
+export interface PressureGradientSetRequest {
+    /** Imposed pressure gradient in x in Pa/m. */
+    readonly dpdx: number;
+    /** Imposed pressure gradient in y in Pa/m. */
+    readonly dpdy: number;
 }
 
 /** Arguments of `CfdCase.setReference()`. */
