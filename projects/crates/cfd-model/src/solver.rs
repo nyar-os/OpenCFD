@@ -6,7 +6,7 @@ use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
-    TimeScheme, Turbulence, TurbulenceModel,
+    TimeScheme, Turbulence, TurbulenceModel, WallFunction,
 };
 use crate::CfdError;
 
@@ -225,6 +225,10 @@ pub struct WallShear {
     pub mean_shear: f64,
     /// Largest absolute wall shear stress along the side (Pa).
     pub max_shear: f64,
+    /// Length-averaged friction velocity `u_τ` estimate in `y⁺`, i.e. the mean
+    /// of `u_τ·y/ν` over the fluid-adjacent boundary cells. Zero at rest.
+    #[serde(default)]
+    pub mean_y_plus: f64,
     /// Friction coefficient `meanShear / (0.5 ρ U²)`.
     pub friction_coefficient: f64,
 }
@@ -337,6 +341,9 @@ pub struct Report {
     /// Whether Boussinesq buoyancy coupled the temperature field to momentum.
     #[serde(default)]
     pub buoyancy: bool,
+    /// Whether a log-law wall function evaluated the reported wall shear.
+    #[serde(default)]
+    pub wall_function: bool,
 }
 
 /// A solved velocity, pressure and optional scalar field with its report.
@@ -763,6 +770,7 @@ pub fn solve_with_checkpoint(
             .buoyancy
             .as_ref()
             .is_some_and(|buoyancy| buoyancy.beta > 0.0),
+        wall_function: model.wall_function.is_some(),
     };
     Ok(Solution {
         mesh,
@@ -2719,11 +2727,15 @@ fn build_probes(
 /// adjacent cell centre, so a linear tangential profile is reproduced exactly.
 /// Solid cells along the side are skipped, and a side without fluid-adjacent
 /// boundary cells is omitted. Only the molecular viscosity contributes; eddy
-/// viscosity vanishes at a wall by construction.
+/// viscosity vanishes at a wall by construction. With a `wallFunction` section
+/// the shear of cells above the viscous-sublayer crossover follows the log law
+/// instead, and every side reports the mean `y⁺`.
 fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear> {
     let speed = reference_speed(model);
     let scale = 0.5 * model.fluid.density * speed * speed;
+    let density = model.fluid.density;
     let mu = model.fluid.viscosity;
+    let wall_function = model.wall_function.as_ref();
     let mut report = Vec::new();
     for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
         let boundary = model.boundaries.get(side);
@@ -2732,6 +2744,7 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
         }
         let mut sum = 0.0;
         let mut peak = 0.0_f64;
+        let mut y_plus_sum = 0.0;
         let mut count = 0_usize;
         match side {
             Side::Left | Side::Right => {
@@ -2742,9 +2755,16 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
                     }
                     let centre =
                         0.5 * (v[mesh.v_index(column, j)] + v[mesh.v_index(column, j + 1)]);
-                    let shear = mu * (boundary.velocity[1] - centre) / (0.5 * mesh.dx);
+                    let (shear, y_plus) = wall_shear_at(
+                        boundary.velocity[1] - centre,
+                        0.5 * mesh.dx,
+                        density,
+                        mu,
+                        wall_function,
+                    );
                     sum += shear;
                     peak = peak.max(shear.abs());
+                    y_plus_sum += y_plus;
                     count += 1;
                 }
             }
@@ -2755,9 +2775,16 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
                         continue;
                     }
                     let centre = 0.5 * (u[mesh.u_index(i, row)] + u[mesh.u_index(i + 1, row)]);
-                    let shear = mu * (boundary.velocity[0] - centre) / (0.5 * mesh.dy);
+                    let (shear, y_plus) = wall_shear_at(
+                        boundary.velocity[0] - centre,
+                        0.5 * mesh.dy,
+                        density,
+                        mu,
+                        wall_function,
+                    );
                     sum += shear;
                     peak = peak.max(shear.abs());
+                    y_plus_sum += y_plus;
                     count += 1;
                 }
             }
@@ -2770,10 +2797,75 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
             side: side.as_str().to_string(),
             mean_shear: mean,
             max_shear: peak,
+            mean_y_plus: y_plus_sum / count as f64,
             friction_coefficient: if scale > 0.0 { mean / scale } else { 0.0 },
         });
     }
     report
+}
+
+/// Signed wall shear stress and `y⁺` of one wall-adjacent cell.
+///
+/// Without a wall function the result is the laminar `ρ·ν·Δu/y`. With one, a
+/// cell whose viscous estimate lies above `minYPlus` uses the log-law friction
+/// velocity instead, and `τ_w = ρ·u_τ²`.
+fn wall_shear_at(
+    delta: f64,
+    distance: f64,
+    density: f64,
+    viscosity: f64,
+    config: Option<&WallFunction>,
+) -> (f64, f64) {
+    if distance <= 0.0 || viscosity <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let laminar = density * viscosity * delta.abs() / distance;
+    let u_tau = (laminar / density).max(0.0).sqrt();
+    let y_plus = u_tau * distance / viscosity;
+    let Some(config) = config else {
+        return (laminar.copysign(delta), y_plus);
+    };
+    if y_plus <= config.min_y_plus {
+        return (laminar.copysign(delta), y_plus);
+    }
+    let u_tau = log_law_friction_velocity(delta.abs(), distance, viscosity, config);
+    (
+        (density * u_tau * u_tau).copysign(delta),
+        u_tau * distance / viscosity,
+    )
+}
+
+/// Friction velocity that satisfies `u = u_τ·((1/κ)·ln(u_τ·y/ν) + B)`.
+///
+/// Bisection keeps the solve deterministic and bounded; the residual increases
+/// monotonically with `u_τ` above the log-law zero crossing.
+fn log_law_friction_velocity(
+    velocity: f64,
+    distance: f64,
+    viscosity: f64,
+    config: &WallFunction,
+) -> f64 {
+    let residual = |u_tau: f64| {
+        u_tau * ((u_tau * distance / viscosity).ln() / config.kappa + config.intercept) - velocity
+    };
+    let mut low = viscosity / distance * (-config.kappa * config.intercept).exp();
+    low *= 1.0 + 1.0e-9;
+    let mut high = velocity.max(low * 2.0);
+    for _ in 0..200 {
+        if residual(high) >= 0.0 {
+            break;
+        }
+        high *= 2.0;
+    }
+    for _ in 0..100 {
+        let mid = 0.5 * (low + high);
+        if residual(mid) < 0.0 {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    0.5 * (low + high)
 }
 
 /// Pressure and viscous force plus moment of every obstacle, in document order.
@@ -3454,5 +3546,42 @@ mod tests {
         assert!((bottom.mean_shear + mu).abs() < 1e-12, "bottom {bottom:?}");
         let left = find("left");
         assert!((left.mean_shear + mu).abs() < 1e-12, "left {left:?}");
+    }
+
+    #[test]
+    fn wall_function_solves_the_log_law() {
+        let config = WallFunction::default();
+        let (viscosity, density) = (1.0e-5, 1.0);
+        let (distance, velocity) = (0.01, 10.0);
+        let (shear, y_plus) = wall_shear_at(velocity, distance, density, viscosity, Some(&config));
+        assert!(y_plus > config.min_y_plus, "y+ = {y_plus}");
+        let u_tau = (shear / density).sqrt();
+        let log_law =
+            u_tau * ((u_tau * distance / viscosity).ln() / config.kappa + config.intercept);
+        assert!(
+            (log_law - velocity).abs() < 1e-8,
+            "log law {log_law} vs velocity {velocity}"
+        );
+        let laminar = density * viscosity * velocity / distance;
+        assert!(
+            shear > 5.0 * laminar,
+            "wall-function shear {shear} should exceed the laminar {laminar}"
+        );
+        let (reversed, _) = wall_shear_at(-velocity, distance, density, viscosity, Some(&config));
+        assert_eq!(reversed, -shear);
+    }
+
+    #[test]
+    fn wall_function_keeps_the_viscous_sublayer_below_the_crossover() {
+        let config = WallFunction::default();
+        let (viscosity, density) = (0.01, 1.0);
+        let (distance, velocity) = (0.03, 1.0);
+        let (shear, y_plus) = wall_shear_at(velocity, distance, density, viscosity, Some(&config));
+        assert!(y_plus <= config.min_y_plus, "y+ = {y_plus}");
+        let laminar = density * viscosity * velocity / distance;
+        assert!((shear - laminar).abs() < 1e-12);
+        let (plain, plain_y_plus) = wall_shear_at(velocity, distance, density, viscosity, None);
+        assert_eq!(plain, shear);
+        assert_eq!(plain_y_plus, y_plus);
     }
 }

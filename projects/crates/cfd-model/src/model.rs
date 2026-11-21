@@ -1086,6 +1086,39 @@ pub struct Buoyancy {
     pub gravity: [f64; 2],
 }
 
+/// Logarithmic wall function used by the wall-shear report.
+///
+/// The wall shear stress is obtained by solving the log law
+/// `u⁺ = (1/κ)·ln(y⁺) + B` for the friction velocity `u_τ` at the near-wall
+/// cell, using the half-cell distance and the local tangential velocity
+/// difference, so `τ_w = ρ·u_τ²`. When the viscous estimate places the cell
+/// below `minYPlus` the laminar value `τ_w = ρ·ν·Δu/y` is used instead. The
+/// momentum step keeps its no-slip ghost; the wall function changes the
+/// reported `wallShear` and `meanYPlus`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WallFunction {
+    /// von Kármán constant `κ`; finite and positive.
+    #[serde(default = "default_kappa")]
+    pub kappa: f64,
+    /// Log-law additive constant `B`.
+    #[serde(default = "default_log_intercept")]
+    pub intercept: f64,
+    /// Below this `y⁺` the viscous sublayer estimate is used.
+    #[serde(default = "default_min_y_plus")]
+    pub min_y_plus: f64,
+}
+
+impl Default for WallFunction {
+    fn default() -> Self {
+        Self {
+            kappa: default_kappa(),
+            intercept: default_log_intercept(),
+            min_y_plus: default_min_y_plus(),
+        }
+    }
+}
+
 /// In-memory representation of an `.ocfd` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1148,6 +1181,9 @@ pub struct Model {
     /// Optional Boussinesq buoyancy coupling to the scalar temperature field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buoyancy: Option<Buoyancy>,
+    /// Optional log-law wall function for the wall-shear report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_function: Option<WallFunction>,
 }
 
 impl Default for Model {
@@ -1183,6 +1219,7 @@ impl Model {
             turbulence: None,
             thermal: None,
             buoyancy: None,
+            wall_function: None,
         }
     }
 
@@ -1513,6 +1550,26 @@ impl Model {
                 ));
             }
         }
+        if let Some(wall_function) = &self.wall_function {
+            if !finite_positive(wall_function.kappa) {
+                report.push(Issue::error(
+                    "wallFunction/invalid",
+                    "wallFunction.kappa must be a finite positive number",
+                ));
+            }
+            if !wall_function.intercept.is_finite() {
+                report.push(Issue::error(
+                    "wallFunction/invalid",
+                    "wallFunction.intercept must be a finite number",
+                ));
+            }
+            if !wall_function.min_y_plus.is_finite() || wall_function.min_y_plus < 0.0 {
+                report.push(Issue::error(
+                    "wallFunction/invalid",
+                    "wallFunction.minYPlus must be a finite non-negative number",
+                ));
+            }
+        }
         report
     }
 }
@@ -1575,6 +1632,18 @@ fn default_mixing_length() -> f64 {
 
 fn default_specific_heat() -> f64 {
     1.0
+}
+
+fn default_kappa() -> f64 {
+    0.41
+}
+
+fn default_log_intercept() -> f64 {
+    5.2
+}
+
+fn default_min_y_plus() -> f64 {
+    11.06
 }
 
 fn default_profile_exponent() -> f64 {

@@ -21,7 +21,7 @@ use crate::export::{
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
     MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, Side, ThermalConfig,
-    TimeScheme, TimeSettings, Turbulence, TurbulenceModel,
+    TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
 };
 use crate::solver::{
     solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
@@ -159,6 +159,9 @@ pub struct CaseSummary {
     /// Optional Boussinesq buoyancy settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub buoyancy: Option<Buoyancy>,
+    /// Optional log-law wall function for the wall-shear report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wall_function: Option<WallFunction>,
 }
 
 impl CaseSummary {
@@ -183,6 +186,7 @@ impl CaseSummary {
             turbulence: model.turbulence.clone(),
             thermal: model.thermal.clone(),
             buoyancy: model.buoyancy.clone(),
+            wall_function: model.wall_function.clone(),
         }
     }
 }
@@ -620,6 +624,31 @@ impl OpenCfd {
                 None
             };
         })
+    }
+
+    /// Configures the log-law wall function and writes the document back.
+    ///
+    /// `kappa` and `intercept` define the log law and `min_y_plus` the
+    /// viscous-sublayer crossover. The wall function only changes the reported
+    /// wall shear stress and friction coefficient.
+    pub fn wall_function_set(
+        &mut self,
+        kappa: f64,
+        intercept: f64,
+        min_y_plus: f64,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.wall_function = Some(WallFunction {
+                kappa,
+                intercept,
+                min_y_plus,
+            });
+        })
+    }
+
+    /// Removes the wall function and writes the document back.
+    pub fn wall_function_clear(&mut self) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| model.wall_function = None)
     }
 
     /// Solves the current document and returns the report.

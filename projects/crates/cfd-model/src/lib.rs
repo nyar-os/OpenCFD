@@ -17,6 +17,7 @@
 //!   Nusselt numbers;
 //! * Boussinesq buoyancy coupling the temperature field back to the momentum
 //!   equation;
+//! * an optional log-law wall function for the reported wall shear stress;
 //! * SVG previews of cell-centred fields, traced streamlines and filled
 //!   contours with iso-lines;
 //! * residual/continuity and obstacle force history CSV export;
@@ -55,7 +56,7 @@ pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
     ScalarConfig, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence,
-    TurbulenceModel, Units, FORMAT, VERSION,
+    TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
 };
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
@@ -87,6 +88,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "adaptiveTimeStep": "supported",
     "probes": "supported",
     "wallShear": "supported",
+    "wallFunction": "supported",
     "slipBoundary": "supported",
     "pressureOutlet": "supported",
     "convectiveOutlet": "supported",

@@ -6,7 +6,7 @@ use std::process;
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, Side,
-    SideThermal, SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel,
+    SideThermal, SolveOptions, ThermalConfig, TimeScheme, TurbulenceModel, WallFunction,
 };
 
 const USAGE: &str = "\
@@ -41,6 +41,8 @@ Usage:
        [--left-heat-flux <W/m2>] [--right-heat-flux <W/m2>] [--top-heat-flux <W/m2>]
        [--bottom-heat-flux <W/m2>] [--obstacle-temperature <K>] [--obstacle-heat-flux <W/m2>]
        [--reference-temperature <K>]
+  ocfd wall function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
+  ocfd wall function clear <file>
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
@@ -94,6 +96,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "reference" => subcommand(args, "set", "reference"),
         "turbulence" => turbulence_command(&args[1..]),
         "heat" | "thermal" => heat_command(&args[1..]),
+        "wall" => wall_command(&args[1..]),
         "validate" => validate(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "export" => export(&args[1..]),
@@ -540,6 +543,66 @@ fn porous_list(args: &[String]) -> Result<i32, CfdError> {
         )
     })?;
     println!("{json}");
+    Ok(0)
+}
+
+fn wall_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("function") => match args.get(1).map(String::as_str) {
+            Some("set") => wall_function_set(&args[2..]),
+            Some("clear") => wall_function_clear(&args[2..]),
+            Some(other) => Err(CfdError::new(
+                "cli/unknown-command",
+                format!(
+                    "`wall function` has no subcommand `{other}`; only set and clear are supported"
+                ),
+            )),
+            None => Err(CfdError::new(
+                "cli/missing-argument",
+                "`wall function` requires a subcommand; only set and clear are supported",
+            )),
+        },
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`wall` has no subcommand `{other}`; only function is supported"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`wall` requires a subcommand; only function is supported",
+        )),
+    }
+}
+
+fn wall_function_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--kappa", "--intercept", "--min-y-plus"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "wall function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]",
+    )?;
+    let defaults = WallFunction::default();
+    let kappa = number(&parsed, "--kappa")?.unwrap_or(defaults.kappa);
+    let intercept = number(&parsed, "--intercept")?.unwrap_or(defaults.intercept);
+    let min_y_plus = number(&parsed, "--min-y-plus")?.unwrap_or(defaults.min_y_plus);
+    let mut session = open_session(file)?;
+    let summary = session.wall_function_set(kappa, intercept, min_y_plus)?;
+    let wall = summary
+        .wall_function
+        .as_ref()
+        .expect("wall function was just configured");
+    println!(
+        "wall function set: kappa={}, intercept={}, minYPlus={}",
+        wall.kappa, wall.intercept, wall.min_y_plus
+    );
+    Ok(0)
+}
+
+fn wall_function_clear(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "wall function clear <file>")?;
+    let mut session = open_session(file)?;
+    session.wall_function_clear()?;
+    println!("wall function cleared");
     Ok(0)
 }
 

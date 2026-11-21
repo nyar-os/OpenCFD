@@ -10,7 +10,7 @@ use cfd_model::{
     vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme,
     ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle,
     PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution,
-    SolveOptions, ThermalConfig, CAPABILITIES_JSON, VERSION,
+    SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -1937,6 +1937,76 @@ fn porous_drag_rejects_a_step_it_cannot_resolve() {
             .code,
         "solver/unstable"
     );
+}
+
+#[test]
+fn wall_function_round_trips_and_rejects_invalid_coefficients() {
+    let mut model = Model::new();
+    model.wall_function = Some(WallFunction {
+        kappa: 0.41,
+        intercept: 5.2,
+        min_y_plus: 11.06,
+    });
+    model.validate().expect("valid wall function");
+    let text = model.to_json_pretty().expect("serialize");
+    let parsed = Model::parse_json(&text).expect("parse");
+    assert_eq!(parsed.wall_function, model.wall_function);
+
+    let mut zero = model.clone();
+    zero.wall_function.as_mut().expect("wall function").kappa = 0.0;
+    assert_eq!(
+        zero.validate().expect_err("zero kappa").code,
+        "wallFunction/invalid"
+    );
+
+    let mut negative = model.clone();
+    negative
+        .wall_function
+        .as_mut()
+        .expect("wall function")
+        .min_y_plus = -1.0;
+    assert_eq!(
+        negative.validate().expect_err("negative y+ crossover").code,
+        "wallFunction/invalid"
+    );
+}
+
+#[test]
+fn wall_function_falls_back_to_laminar_shear_at_low_y_plus() {
+    let mut model = mesh_model(16, 16);
+    model.time.steps = 80;
+    model.time.pressure_iterations = 60;
+    let plain = solve(&model).expect("plain cavity solve");
+    assert!(!plain.report.wall_function);
+
+    model.wall_function = Some(WallFunction::default());
+    let wall = solve(&model).expect("wall-function cavity solve");
+    assert!(wall.report.wall_function);
+    assert_eq!(
+        wall.report.wall_shear.len(),
+        plain.report.wall_shear.len(),
+        "both runs report the same wall sides"
+    );
+    for (with, without) in wall
+        .report
+        .wall_shear
+        .iter()
+        .zip(plain.report.wall_shear.iter())
+    {
+        assert_eq!(with.side, without.side);
+        assert!(
+            (with.mean_shear - without.mean_shear).abs() < 1e-12,
+            "{}: viscous sublayer must keep the laminar shear",
+            with.side
+        );
+        assert!(with.mean_y_plus.is_finite() && with.mean_y_plus >= 0.0);
+        assert!(
+            with.mean_y_plus < 11.06,
+            "{}: y+ {} should stay in the sublayer",
+            with.side,
+            with.mean_y_plus
+        );
+    }
 }
 
 #[test]

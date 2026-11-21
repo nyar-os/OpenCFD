@@ -202,6 +202,20 @@ export interface Buoyancy {
     readonly gravity: readonly [number, number];
 }
 
+/**
+ * Logarithmic wall function for the reported wall shear. The friction velocity
+ * solves `u⁺ = (1/κ)·ln(y⁺) + B`; below `minYPlus` the viscous sublayer value
+ * `τ = ρ·ν·Δu/y` is used.
+ */
+export interface WallFunction {
+    /** von Kármán constant κ; finite and positive. */
+    readonly kappa: number;
+    /** Log-law additive constant B. */
+    readonly intercept: number;
+    /** `y⁺` below which the viscous sublayer estimate is used. */
+    readonly minYPlus: number;
+}
+
 /** Surface heat-transfer summary of one obstacle. */
 export interface ObstacleNusselt {
     readonly id: string;
@@ -270,6 +284,8 @@ export interface CaseSummary {
     readonly thermal?: ThermalConfig;
     /** Boussinesq buoyancy settings, when configured. */
     readonly buoyancy?: Buoyancy;
+    /** Log-law wall-function settings, when configured. */
+    readonly wallFunction?: WallFunction;
 }
 
 /** Result of writing a document back to disk. */
@@ -394,6 +410,8 @@ export interface WallShear {
     readonly meanShear: number;
     /** Largest absolute wall shear stress along the side in Pa. */
     readonly maxShear: number;
+    /** Length-averaged `y⁺` of the wall-adjacent cells. */
+    readonly meanYPlus: number;
     /** Friction coefficient `meanShear / (0.5 ρ U²)`. */
     readonly frictionCoefficient: number;
 }
@@ -472,6 +490,8 @@ export interface SolveReport {
     readonly timeScheme: TimeScheme;
     /** Whether Boussinesq buoyancy coupled temperature to momentum. */
     readonly buoyancy: boolean;
+    /** Whether a log-law wall function evaluated the reported wall shear. */
+    readonly wallFunction: boolean;
 }
 
 /** Arguments of `CfdCase.setMesh()`. */

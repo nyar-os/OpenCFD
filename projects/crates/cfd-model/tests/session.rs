@@ -704,6 +704,53 @@ fn session_porous_region_round_trips_through_cli() {
 }
 
 #[test]
+fn session_wall_function_round_trips_through_cli() {
+    let directory = temporary_dir("wall-function");
+    let path = directory.join("wall.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    let summary = session
+        .wall_function_set(0.4, 5.0, 12.0)
+        .expect("wall function");
+    let stored = summary.wall_function.clone().expect("configured");
+    assert_eq!(stored.kappa, 0.4);
+    assert_eq!(stored.intercept, 5.0);
+    assert_eq!(stored.min_y_plus, 12.0);
+    assert_eq!(
+        Model::load(&path).expect("load").wall_function,
+        summary.wall_function
+    );
+
+    let cli_path = directory.join("cli-wall.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "wall",
+        "function",
+        "set",
+        &cli,
+        "--kappa",
+        "0.4",
+        "--intercept",
+        "5.0",
+        "--min-y-plus",
+        "12.0",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd wall function set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_stored = Model::load(&cli_path).expect("load CLI document");
+    assert_eq!(cli_stored.wall_function, summary.wall_function);
+
+    assert!(run_cli(&["wall", "function", "clear", &cli])
+        .status
+        .success());
+    assert_eq!(Model::load(&cli_path).expect("reload").wall_function, None);
+}
+
+#[test]
 fn session_buoyancy_requires_scalar_and_round_trips_through_cli() {
     let directory = temporary_dir("buoyancy");
     let path = directory.join("buoyancy.ocfd");
