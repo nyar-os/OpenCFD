@@ -814,6 +814,115 @@ impl PorousRegion {
     }
 }
 
+/// Volumetric scalar source or sink over an axis-aligned rectangle.
+///
+/// The source adds `rate · f(t)` units of scalar per second to every fluid cell
+/// whose centre lies inside the rectangle, where `f(t)` is `0` before `start`,
+/// ramps linearly from `0` to `1` over `ramp` seconds, and stays `1` afterwards.
+/// A negative `rate` is a sink. A source requires scalar transport so a scalar
+/// field exists. When `id` is empty the report names it `source-N` by its
+/// one-based document position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScalarSource {
+    /// Stable identifier used by the scalar-source report; empty means `source-N`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    /// Lower x coordinate (m).
+    pub x0: f64,
+    /// Lower y coordinate (m).
+    pub y0: f64,
+    /// Upper x coordinate (m).
+    pub x1: f64,
+    /// Upper y coordinate (m).
+    pub y1: f64,
+    /// Volumetric source rate in scalar units per second; negative is a sink.
+    pub rate: f64,
+    /// Time (s) at which the source starts; finite and non-negative.
+    #[serde(default)]
+    pub start: f64,
+    /// Linear ramp duration (s) after `start`; zero means a step source.
+    #[serde(default)]
+    pub ramp: f64,
+}
+
+impl ScalarSource {
+    /// Stable identifier, or an empty string when the document omitted it.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns a copy of this source carrying `id`.
+    pub fn with_id(self, id: String) -> Self {
+        Self { id, ..self }
+    }
+
+    /// Whether the point `(x, y)` lies inside the region (edges included).
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
+    }
+
+    /// Ramp factor at physical time `time`, in `[0, 1]`.
+    pub fn factor(&self, time: f64) -> f64 {
+        if !time.is_finite() || time < self.start {
+            0.0
+        } else if !self.ramp.is_finite() || self.ramp <= 0.0 {
+            1.0
+        } else {
+            ((time - self.start) / self.ramp).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Rate applied at physical time `time`, in scalar units per second.
+    pub fn applied_rate(&self, time: f64) -> f64 {
+        self.rate * self.factor(time)
+    }
+
+    /// Checks finite settings, positive size and that the region lies inside the
+    /// domain.
+    pub fn validate(&self, length_x: f64, length_y: f64) -> Result<(), CfdError> {
+        if ![
+            self.x0, self.y0, self.x1, self.y1, self.rate, self.start, self.ramp,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+        {
+            return Err(CfdError::new(
+                "scalar/invalid",
+                "scalar source coordinates, rate, start and ramp must be finite",
+            ));
+        }
+        if self.x1 <= self.x0 || self.y1 <= self.y0 {
+            return Err(CfdError::new(
+                "scalar/invalid",
+                "scalar source must satisfy x1 > x0 and y1 > y0",
+            ));
+        }
+        if self.x0 < 0.0 || self.y0 < 0.0 || self.x1 > length_x || self.y1 > length_y {
+            return Err(CfdError::new(
+                "scalar/invalid",
+                format!(
+                    "scalar source ({}, {})-({}, {}) lies outside the {}×{} m domain",
+                    self.x0, self.y0, self.x1, self.y1, length_x, length_y
+                ),
+            ));
+        }
+        if self.start < 0.0 {
+            return Err(CfdError::new(
+                "scalar/invalid",
+                "scalar source start must be non-negative",
+            ));
+        }
+        if self.ramp < 0.0 {
+            return Err(CfdError::new(
+                "scalar/invalid",
+                "scalar source ramp must be non-negative",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Point monitor sampled during the solve.
 ///
 /// The probe is bound to the cell whose centre is nearest to `(x, y)`. It must
@@ -1185,6 +1294,9 @@ pub struct Model {
     /// Point monitors sampled during the solve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<Probe>,
+    /// Volumetric scalar sources and sinks over rectangular regions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scalar_sources: Vec<ScalarSource>,
     /// Optional passive scalar (temperature) transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -1231,6 +1343,7 @@ impl Model {
             obstacles: Vec::new(),
             porous: Vec::new(),
             probes: Vec::new(),
+            scalar_sources: Vec::new(),
             scalar: None,
             turbulence: None,
             thermal: None,
@@ -1452,6 +1565,17 @@ impl Model {
             {
                 report.push(Issue::error(error.code, error.message));
             }
+        }
+        for source in &self.scalar_sources {
+            if let Err(error) = source.validate(self.mesh.length_x, self.mesh.length_y) {
+                report.push(Issue::error(error.code, error.message));
+            }
+        }
+        if !self.scalar_sources.is_empty() && self.scalar.is_none() {
+            report.push(Issue::error(
+                "scalar/invalid",
+                "scalar sources require scalar transport to be configured",
+            ));
         }
         if let Some(scalar) = &self.scalar {
             if !scalar.diffusivity.is_finite() || scalar.diffusivity < 0.0 {

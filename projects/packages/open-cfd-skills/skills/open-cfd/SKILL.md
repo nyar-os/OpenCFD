@@ -25,8 +25,9 @@ with `meanYPlus` (`wallShear`), the optional log-law wall function flag
 coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), per-outlet flow allocation (`outlets`),
 the selected `timeScheme`, adaptive-step statistics (`adaptive`,
-`averageDt`, `minDt`, `maxDt`), the `terminationReason` and whether Boussinesq
-buoyancy was applied (`buoyancy`). Compressible flow, three-dimensional flow,
+`averageDt`, `minDt`, `maxDt`), the `terminationReason`, whether Boussinesq
+buoyancy was applied (`buoyancy`), and rectangular scalar sources with their
+applied rate (`scalarSources`). Compressible flow, three-dimensional flow,
 adaptive meshing and external format import are
 not implemented and report `capability/not-implemented`.
 
@@ -51,6 +52,9 @@ ocfd probe add <file> --x <m> --y <m> [--id <name>]
 ocfd probe list <file>
 ocfd probe clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+ocfd scalar source add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --rate <unit/s> [--start <s>] [--ramp <s>] [--id <name>]
+ocfd scalar source list <file>
+ocfd scalar source clear <file>
 ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
 ocfd turbulence set <file> --model none|constant|mixingLength|kEpsilon [--nu-t <m2/s>] [--mixing-length <m>] [--k <m2/s2>] [--epsilon <m2/s3>]
 ocfd heat set <file> [thermal options]
@@ -108,6 +112,13 @@ rename. Confirm the path before running them.
   `−β(T − tRef)·g`, requires scalar transport, and `--beta 0` disables it.
   The coupling is explicit, so pick `--dt` small enough for the induced
   acceleration.
+- `scalar source add` adds `rate` scalar units per second to every fluid cell
+  inside a rectangle until `scalar source clear`; a negative rate is a sink.
+  The source starts at `--start` (default `0`) and ramps linearly over `--ramp`
+  seconds (default `0`, a step). It requires `scalar set` and adds a
+  `scalarSources` report entry with `id`, `cells`, `rate` and `appliedRate`.
+  The source is explicit, so a very large rate paired with a large `--dt` can
+  overshoot and should be reduced or resolved with a smaller step.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces`,
   `coefficients` and `particles` are
   the only export targets. `inp` and `openfoam` reject with

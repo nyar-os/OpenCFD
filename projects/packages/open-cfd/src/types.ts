@@ -145,6 +145,33 @@ export interface ScalarConfig {
     readonly inletValue: number;
 }
 
+/** Volumetric scalar source or sink over an axis-aligned rectangle. */
+export interface ScalarSource {
+    /** Stable identifier; omitted means `source-N` in document order. */
+    readonly id?: string;
+    readonly x0: number;
+    readonly y0: number;
+    readonly x1: number;
+    readonly y1: number;
+    /** Volumetric scalar rate per second; negative is a sink. */
+    readonly rate: number;
+    /** Start time in seconds; defaults to `0`. */
+    readonly start?: number;
+    /** Linear ramp duration in seconds; `0` means a step source. */
+    readonly ramp?: number;
+}
+
+/** Per-region scalar source summary. */
+export interface ScalarSourceSummary {
+    readonly id: string;
+    /** Number of fluid cells inside the region. */
+    readonly cells: number;
+    /** Configured volumetric scalar rate per second. */
+    readonly rate: number;
+    /** Rate applied at the final simulated time. */
+    readonly appliedRate: number;
+}
+
 /** Eddy-viscosity turbulence model. */
 export type TurbulenceModel = 'none' | 'constant' | 'mixingLength' | 'kEpsilon';
 
@@ -280,6 +307,8 @@ export interface CaseSummary {
     readonly porous: readonly PorousRegion[];
     /** Point monitors in document order. */
     readonly probes: readonly Probe[];
+    /** Volumetric scalar sources in document order. */
+    readonly scalarSources: readonly ScalarSource[];
     /** Passive scalar settings, when configured. */
     readonly scalar?: ScalarConfig;
     /** Eddy-viscosity turbulence settings, when configured. */
@@ -521,6 +550,8 @@ export interface SolveReport {
     readonly forces: readonly ObstacleForce[];
     /** Porous resistance summary in document order. */
     readonly porous: readonly PorousSummary[];
+    /** Scalar source summary in document order. */
+    readonly scalarSources: readonly ScalarSourceSummary[];
     /** Point monitor time series in document order. */
     readonly probes: readonly ProbeSeries[];
     /** Wall shear and friction summary of every wall side. */

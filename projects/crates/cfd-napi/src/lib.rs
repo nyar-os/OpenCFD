@@ -17,8 +17,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, Side, SolveOptions, TimeScheme,
-    TurbulenceModel,
+    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, ScalarSource, Side, SolveOptions,
+    TimeScheme, TurbulenceModel,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -320,6 +320,36 @@ fn probe_clear(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Appends one volumetric scalar source and returns the summary.
+#[function]
+fn scalar_source_add(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let request = text(&ctx, 1)?;
+    let source = serde_json::from_str::<ScalarSource>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the scalar source request: {error}"
+        ))
+    })?;
+    let summary = with_session(handle, |session| session.scalar_source_add(source))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Returns the volumetric scalar sources of one session document.
+#[function]
+fn scalar_source_list(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let sources = with_session(handle, |session| Ok(session.scalar_source_list()))?;
+    respond(&ctx, &json!(sources))
+}
+
+/// Removes every volumetric scalar source and returns the summary.
+#[function]
+fn scalar_source_clear(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let summary = with_session(handle, |session| session.scalar_source_clear())?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Configures passive scalar transport and returns the summary.
 #[function]
 fn scalar_set(ctx: CallContext) -> Result<JsValue> {
@@ -467,6 +497,9 @@ register_module![
     probe_list,
     probe_clear,
     scalar_set,
+    scalar_source_add,
+    scalar_source_list,
+    scalar_source_clear,
     turbulence_set,
     buoyancy_set,
     convection_set,

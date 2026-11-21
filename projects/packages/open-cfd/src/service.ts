@@ -29,6 +29,7 @@ import type {
     ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
+    ScalarSource,
     SolveOptions,
     SolveReport,
     TimeAdaptiveSetRequest,
@@ -220,9 +221,29 @@ export function probeClear(handle: number): CaseSummary {
     return decode<CaseSummary>(() => binding('probe.clear').probe_clear(handle));
 }
 
-/** Configures passive scalar transport and writes the document back. */
-export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummary {
+/** Appends one volumetric scalar source and writes the document back. */
+export function scalarSourceAdd(handle: number, source: ScalarSource): CaseSummary {
     return decode<CaseSummary>(() =>
+        binding('scalar.source.add').scalar_source_add(handle, JSON.stringify(source)),
+    );
+}
+
+/** Returns the volumetric scalar sources in document order. */
+export function scalarSourceList(handle: number): readonly ScalarSource[] {
+    return decode<readonly ScalarSource[]>(() =>
+        binding('scalar.source.list').scalar_source_list(handle),
+    );
+}
+
+/** Removes every volumetric scalar source and writes the document back. */
+export function scalarSourceClear(handle: number): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('scalar.source.clear').scalar_source_clear(handle),
+    );
+}
+
+/** Configures passive scalar transport and writes the document back. */
+export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummary {    return decode<CaseSummary>(() =>
         binding('scalar.set').scalar_set(
             handle,
             request.diffusivity,

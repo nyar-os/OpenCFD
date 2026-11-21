@@ -21,8 +21,8 @@ use crate::export::{
 use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
-    MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, Side, ThermalConfig,
-    TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
+    MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, ScalarSource, Side,
+    ThermalConfig, TimeScheme, TimeSettings, Turbulence, TurbulenceModel, WallFunction,
 };
 use crate::particles::{
     export_particles as write_particles, ParticleConfig, DEFAULT_PARTICLE_STEPS,
@@ -156,6 +156,8 @@ pub struct CaseSummary {
     pub porous: Vec<PorousRegion>,
     /// Point monitors in document order.
     pub probes: Vec<Probe>,
+    /// Volumetric scalar sources in document order.
+    pub scalar_sources: Vec<ScalarSource>,
     /// Optional passive scalar transport settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -191,6 +193,7 @@ impl CaseSummary {
             obstacles: model.obstacles.clone(),
             porous: model.porous.clone(),
             probes: model.probes.clone(),
+            scalar_sources: model.scalar_sources.clone(),
             scalar: model.scalar.clone(),
             turbulence: model.turbulence.clone(),
             thermal: model.thermal.clone(),
@@ -543,6 +546,31 @@ impl OpenCfd {
     /// Removes every point monitor and writes the document back.
     pub fn probe_clear(&mut self) -> Result<CaseSummary, CfdError> {
         self.edit(|model| model.probes.clear())
+    }
+
+    /// Appends a volumetric scalar source or sink and writes the document back.
+    ///
+    /// An empty id is replaced by `source-N`, where `N` is the one-based
+    /// position in the source list. Scalar transport must already be configured.
+    pub fn scalar_source_add(&mut self, source: ScalarSource) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            let id = if source.id().is_empty() {
+                format!("source-{}", model.scalar_sources.len() + 1)
+            } else {
+                source.id().to_string()
+            };
+            model.scalar_sources.push(source.with_id(id));
+        })
+    }
+
+    /// Returns the volumetric scalar sources in document order.
+    pub fn scalar_source_list(&self) -> Vec<ScalarSource> {
+        self.model.scalar_sources.clone()
+    }
+
+    /// Removes every volumetric scalar source and writes the document back.
+    pub fn scalar_source_clear(&mut self) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| model.scalar_sources.clear())
     }
 
     /// Configures passive scalar transport and writes the document back.

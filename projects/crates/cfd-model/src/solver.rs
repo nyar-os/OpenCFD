@@ -5,8 +5,8 @@ use crate::checkpoint::Checkpoint;
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
-    TimeScheme, Turbulence, TurbulenceModel, WallFunction,
+    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, ScalarSource, Side,
+    ThermalConfig, TimeScheme, Turbulence, TurbulenceModel, WallFunction,
 };
 use crate::quality::{mesh_quality, MeshQuality};
 use crate::CfdError;
@@ -56,6 +56,25 @@ pub struct PorousSummary {
     pub mean_speed: f64,
     /// Mean drag acceleration magnitude inside the region (m/s²).
     pub mean_drag: f64,
+}
+
+/// Per-region scalar source summary.
+///
+/// `cells` counts the fluid cells whose centre lies inside the region,
+/// `rate` is the configured volumetric rate and `appliedRate` is
+/// `rate · f(t)` at the final simulated time, so a ramped source shows how much
+/// of its rate had taken effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScalarSourceSummary {
+    /// Stable source identifier.
+    pub id: String,
+    /// Number of fluid cells owned by the region.
+    pub cells: usize,
+    /// Configured volumetric scalar rate (scalar units per second).
+    pub rate: f64,
+    /// Rate applied at the final simulated time (scalar units per second).
+    pub applied_rate: f64,
 }
 
 /// One sampled velocity residual.
@@ -386,6 +405,9 @@ pub struct Report {
     /// Per-region porous resistance summary, in document order.
     #[serde(default)]
     pub porous: Vec<PorousSummary>,
+    /// Per-region scalar source summary, in document order.
+    #[serde(default)]
+    pub scalar_sources: Vec<ScalarSourceSummary>,
     /// Whether Boussinesq buoyancy coupled the temperature field to momentum.
     #[serde(default)]
     pub buoyancy: bool,
@@ -688,7 +710,7 @@ pub fn solve_with_checkpoint(
         );
 
         if let (Some(config), Some(field)) = (model.scalar.as_ref(), temperature.as_mut()) {
-            transport_thermal(
+            transport_thermal_with_sources(
                 &mesh,
                 &model.boundaries,
                 config,
@@ -696,6 +718,8 @@ pub fn solve_with_checkpoint(
                 model.fluid.density,
                 model.convection,
                 dt,
+                simulated_time,
+                &model.scalar_sources,
                 &u,
                 &v,
                 field,
@@ -805,6 +829,7 @@ pub fn solve_with_checkpoint(
     };
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
     let porous_summary = porous_summary(&mesh, model, &porous, &u, &v);
+    let scalar_source_summary = scalar_source_summary(&mesh, model, simulated_time);
 
     let report = Report {
         format: REPORT_FORMAT.to_string(),
@@ -869,6 +894,7 @@ pub fn solve_with_checkpoint(
         turbulent_dissipation_mean: dissipation_mean,
         nusselt,
         porous: porous_summary,
+        scalar_sources: scalar_source_summary,
         buoyancy: model
             .buoyancy
             .as_ref()
@@ -2322,6 +2348,62 @@ fn adaptive_dt(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64], eddy: Option<&[
     }
 }
 
+/// Volumetric scalar source field evaluated at physical time `time`.
+fn scalar_source_field(mesh: &Mesh, sources: &[ScalarSource], time: f64) -> Vec<f64> {
+    let mut field = vec![0.0; mesh.pressure_count()];
+    if sources.is_empty() {
+        return field;
+    }
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            if mesh.is_solid(i, j) {
+                continue;
+            }
+            let (x, y) = mesh.cell_center(i, j);
+            let index = mesh.pressure_index(i, j);
+            field[index] = sources
+                .iter()
+                .filter(|source| source.contains(x, y))
+                .map(|source| source.applied_rate(time))
+                .sum();
+        }
+    }
+    field
+}
+
+/// Per-region scalar source summary at the final simulated time.
+fn scalar_source_summary(mesh: &Mesh, model: &Model, time: f64) -> Vec<ScalarSourceSummary> {
+    model
+        .scalar_sources
+        .iter()
+        .enumerate()
+        .map(|(position, source)| {
+            let mut cells = 0;
+            for j in 0..mesh.ny {
+                for i in 0..mesh.nx {
+                    if mesh.is_solid(i, j) {
+                        continue;
+                    }
+                    let (x, y) = mesh.cell_center(i, j);
+                    if source.contains(x, y) {
+                        cells += 1;
+                    }
+                }
+            }
+            ScalarSourceSummary {
+                id: if source.id().is_empty() {
+                    format!("source-{}", position + 1)
+                } else {
+                    source.id().to_string()
+                },
+                cells,
+                rate: source.rate,
+                applied_rate: source.applied_rate(time),
+            }
+        })
+        .collect()
+}
+
 fn initial_temperature(mesh: &Mesh, config: &ScalarConfig) -> Vec<f64> {
     let mut field = vec![config.initial; mesh.pressure_count()];
     for (index, value) in field.iter_mut().enumerate() {
@@ -2358,6 +2440,7 @@ pub fn transport_scalar(
         None,
         config.diffusivity,
         0.0,
+        None,
         scheme,
         dt,
         u,
@@ -2387,8 +2470,60 @@ pub fn transport_thermal(
     v: &[f64],
     temperature: &mut [f64],
 ) -> Result<(), CfdError> {
+    transport_thermal_with_sources(
+        mesh,
+        boundaries,
+        config,
+        thermal,
+        density,
+        scheme,
+        dt,
+        0.0,
+        &[],
+        u,
+        v,
+        temperature,
+    )
+}
+
+/// Advances the temperature field with thermal boundaries, a uniform source and
+/// rectangular scalar sources evaluated at physical time `time`.
+#[allow(clippy::too_many_arguments)]
+pub fn transport_thermal_with_sources(
+    mesh: &Mesh,
+    boundaries: &Boundaries,
+    config: &ScalarConfig,
+    thermal: Option<&ThermalConfig>,
+    density: f64,
+    scheme: ConvectionScheme,
+    dt: f64,
+    time: f64,
+    sources: &[ScalarSource],
+    u: &[f64],
+    v: &[f64],
+    temperature: &mut [f64],
+) -> Result<(), CfdError> {
+    let source_field = scalar_source_field(mesh, sources, time);
+    let source_field = if sources.is_empty() {
+        None
+    } else {
+        Some(source_field.as_slice())
+    };
     let Some(thermal) = thermal else {
-        return transport_scalar(mesh, boundaries, config, scheme, dt, u, v, temperature);
+        return scalar_step(
+            mesh,
+            boundaries,
+            config,
+            None,
+            config.diffusivity,
+            0.0,
+            source_field,
+            scheme,
+            dt,
+            u,
+            v,
+            temperature,
+        );
     };
     if !density.is_finite() || density <= 0.0 {
         return Err(CfdError::new(
@@ -2424,6 +2559,7 @@ pub fn transport_thermal(
         Some(&context),
         kappa,
         source,
+        source_field,
         scheme,
         dt,
         u,
@@ -2467,6 +2603,7 @@ fn scalar_step(
     context: Option<&ThermalContext>,
     kappa: f64,
     source: f64,
+    source_field: Option<&[f64]>,
     scheme: ConvectionScheme,
     dt: f64,
     u: &[f64],
@@ -2560,8 +2697,9 @@ fn scalar_step(
                 j,
                 centre,
             );
-            next[index] =
-                centre - dt * ((east - west) / mesh.dx + (north - south) / mesh.dy) + dt * source;
+            let regional = source_field.map_or(0.0, |field| field[index]);
+            next[index] = centre - dt * ((east - west) / mesh.dx + (north - south) / mesh.dy)
+                + dt * (source + regional);
         }
     }
     temperature.copy_from_slice(&next);

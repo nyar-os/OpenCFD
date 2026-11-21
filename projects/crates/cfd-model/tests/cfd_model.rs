@@ -10,8 +10,8 @@ use cfd_model::{
     solve_with_checkpoint, stream_function, trace_particles, transport_scalar, vorticity,
     Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField,
     ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig,
-    ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, SideThermal,
-    Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
+    ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, ScalarSource,
+    SideThermal, Solution, SolveOptions, ThermalConfig, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -2533,4 +2533,104 @@ fn kepsilon_rejects_non_positive_initial_values_and_missing_field_export() {
     let error = export_svg(&solution, &directory, ExportField::TurbulentKineticEnergy)
         .expect_err("laminar case has no k field");
     assert_eq!(error.code, "export/no-field");
+}
+
+#[test]
+fn scalar_source_raises_the_field_only_inside_the_region() {
+    let mut model = mesh_model(12, 12);
+    model.boundaries.top = Boundary {
+        kind: BoundaryKind::Wall,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.time.dt = 0.01;
+    model.time.steps = 10;
+    model.scalar = Some(ScalarConfig {
+        diffusivity: 0.0,
+        initial: 0.0,
+        inlet_value: 0.0,
+    });
+    model.scalar_sources = vec![ScalarSource {
+        id: String::new(),
+        x0: 0.5,
+        y0: 0.5,
+        x1: 0.6,
+        y1: 0.6,
+        rate: 2.0,
+        start: 0.0,
+        ramp: 0.0,
+    }];
+
+    let solution = solve(&model).expect("scalar source solve");
+    let field = solution.temperature.as_ref().expect("temperature field");
+    let mesh = &solution.mesh;
+    let centre = field[mesh.pressure_index(6, 6)];
+    assert!(
+        (centre - 0.2).abs() < 1e-9,
+        "centre scalar {centre}, expected 0.2 after ten 0.01 s steps at rate 2"
+    );
+    assert_eq!(field[mesh.pressure_index(0, 0)], 0.0);
+    assert_eq!(solution.report.scalar_sources.len(), 1);
+    let summary = &solution.report.scalar_sources[0];
+    assert_eq!(summary.id, "source-1");
+    assert_eq!(summary.cells, 1);
+    assert!((summary.applied_rate - 2.0).abs() < 1e-12);
+}
+
+#[test]
+fn scalar_source_validates_geometry_time_and_scalar_transport() {
+    let source = ScalarSource {
+        id: String::new(),
+        x0: 0.2,
+        y0: 0.2,
+        x1: 0.8,
+        y1: 0.8,
+        rate: -1.0,
+        start: 1.0,
+        ramp: 2.0,
+    };
+    assert!((source.factor(0.5) - 0.0).abs() < 1e-12);
+    assert!((source.factor(2.0) - 0.5).abs() < 1e-12);
+    assert!((source.factor(5.0) - 1.0).abs() < 1e-12);
+    assert!((source.applied_rate(2.0) + 0.5).abs() < 1e-12);
+
+    let outside = ScalarSource {
+        x1: 1.5,
+        ..source.clone()
+    };
+    assert_eq!(
+        outside.validate(1.0, 1.0).expect_err("outside region").code,
+        "scalar/invalid"
+    );
+
+    let negative_ramp = ScalarSource {
+        ramp: -1.0,
+        ..source
+    };
+    assert_eq!(
+        negative_ramp
+            .validate(1.0, 1.0)
+            .expect_err("negative ramp")
+            .code,
+        "scalar/invalid"
+    );
+
+    let mut model = mesh_model(8, 8);
+    model.scalar_sources = vec![ScalarSource {
+        id: String::new(),
+        x0: 0.1,
+        y0: 0.1,
+        x1: 0.9,
+        y1: 0.9,
+        rate: 1.0,
+        start: 0.0,
+        ramp: 0.0,
+    }];
+    assert_eq!(
+        model
+            .validate()
+            .expect_err("sources need scalar transport")
+            .code,
+        "scalar/invalid"
+    );
 }

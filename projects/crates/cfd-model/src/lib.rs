@@ -10,7 +10,8 @@
 //! * solid rectangle and circle obstacles with drag, lift and moment
 //!   coefficients and configurable reference quantities;
 //! * uniform, parabolic and power-law inlet velocity profiles;
-//! * passive scalar (temperature) transport with explicit advection-diffusion;
+//! * passive scalar (temperature) transport with explicit advection-diffusion,
+//!   volumetric source/sink regions with an optional linear ramp;
 //! * isotropic porous regions with a Darcy–Forchheimer momentum sink;
 //! * optional eddy-viscosity turbulence (constant or mixing-length) and a
 //!   standard `k`–`ε` model with `k`/`ε` fields and export;
@@ -61,8 +62,8 @@ pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
-    ScalarConfig, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings, Turbulence,
-    TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
+    ScalarConfig, ScalarSource, Side, SideThermal, ThermalConfig, TimeScheme, TimeSettings,
+    Turbulence, TurbulenceModel, Units, WallFunction, FORMAT, VERSION,
 };
 pub use crate::particles::{
     export_particles, trace_particles, trace_solution_particles, ParticleConfig, ParticleSample,
@@ -76,7 +77,8 @@ pub use crate::solver::{
     outlet_flows, solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar,
     transport_thermal, ForceSample, MassBalance, ObstacleForce, ObstacleNusselt, OutletFlow,
     PorousSummary, PressureSettings, PressureStats, ProbeSample, ProbeSeries, Report,
-    ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
+    ResidualSample, ScalarSourceSummary, Solution, SolveOptions, WallShear, REPORT_FORMAT,
+    REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -91,6 +93,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "obstacles": "supported",
     "porousMedia": "supported",
     "scalar": "supported",
+    "scalarSources": "supported",
     "convergence": "supported",
     "vorticity": "supported",
     "streamFunction": "supported",

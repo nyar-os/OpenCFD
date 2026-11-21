@@ -28,6 +28,7 @@ import type {
     ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
+    ScalarSource,
     SolveOptions,
     SolveReport,
     TimeAdaptiveSetRequest,
@@ -167,6 +168,24 @@ export class CfdCase {
     setScalar(request: ScalarSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.scalarSet(this.handle, request));
+    }
+
+    /** Adds one volumetric scalar source and writes the document back. */
+    addScalarSource(source: ScalarSource): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.scalarSourceAdd(this.handle, source));
+    }
+
+    /** Returns the volumetric scalar sources in document order. */
+    listScalarSources(): readonly ScalarSource[] {
+        this.assertOpen();
+        return service.scalarSourceList(this.handle);
+    }
+
+    /** Removes every volumetric scalar source and writes the document back. */
+    clearScalarSources(): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.scalarSourceClear(this.handle));
     }
 
     /** Configures the eddy-viscosity turbulence model and writes the document back. */

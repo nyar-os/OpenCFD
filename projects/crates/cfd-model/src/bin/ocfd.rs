@@ -6,7 +6,7 @@ use std::process;
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
-    PorousRegion, Probe, Side, SideThermal, SolveOptions, ThermalConfig, TimeScheme,
+    PorousRegion, Probe, ScalarSource, Side, SideThermal, SolveOptions, ThermalConfig, TimeScheme,
     TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
 };
 
@@ -31,6 +31,9 @@ Usage:
   ocfd probe list <file>
   ocfd probe clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  ocfd scalar source add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --rate <unit/s> [--start <s>] [--ramp <s>] [--id <name>]
+  ocfd scalar source list <file>
+  ocfd scalar source clear <file>
   ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
   ocfd convection set <file> --scheme upwind|central|quick
   ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
@@ -673,15 +676,93 @@ fn probe_clear(args: &[String]) -> Result<i32, CfdError> {
 fn scalar_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("set") => scalar_set(&args[1..]),
+        Some("source") => scalar_source_command(&args[1..]),
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`scalar` has no subcommand `{other}`; only set is supported"),
+            format!("`scalar` has no subcommand `{other}`; use `set`, `source add`, `source list` or `source clear`"),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`scalar` requires a subcommand; only set is supported",
+            "`scalar` requires a subcommand; use `set`, `source add`, `source list` or `source clear`",
         )),
     }
+}
+
+fn scalar_source_command(args: &[String]) -> Result<i32, CfdError> {
+    match args.first().map(String::as_str) {
+        Some("add") => scalar_source_add(&args[1..]),
+        Some("list") => scalar_source_list(&args[1..]),
+        Some("clear") => scalar_source_clear(&args[1..]),
+        Some(other) => Err(CfdError::new(
+            "cli/unknown-command",
+            format!("`scalar source` has no subcommand `{other}`; use add, list or clear"),
+        )),
+        None => Err(CfdError::new(
+            "cli/missing-argument",
+            "`scalar source` requires a subcommand; use add, list or clear",
+        )),
+    }
+}
+
+fn scalar_source_add(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &[
+            "--x0", "--y0", "--x1", "--y1", "--rate", "--start", "--ramp", "--id",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "scalar source add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --rate <unit/s> [--start <s>] [--ramp <s>] [--id <name>]",
+    )?;
+    let mut session = open_session(file)?;
+    let source = ScalarSource {
+        id: parsed.options.get("--id").cloned().unwrap_or_default(),
+        x0: required_number(&parsed, "--x0")?,
+        y0: required_number(&parsed, "--y0")?,
+        x1: required_number(&parsed, "--x1")?,
+        y1: required_number(&parsed, "--y1")?,
+        rate: required_number(&parsed, "--rate")?,
+        start: number(&parsed, "--start")?.unwrap_or(0.0),
+        ramp: number(&parsed, "--ramp")?.unwrap_or(0.0),
+    };
+    let summary = session.scalar_source_add(source)?;
+    let added = summary
+        .scalar_sources
+        .last()
+        .expect("scalar source was just added");
+    println!(
+        "added scalar source {} rate={} unit/s, start={} s, ramp={} s; {} total",
+        added.id,
+        added.rate,
+        added.start,
+        added.ramp,
+        summary.scalar_sources.len()
+    );
+    Ok(0)
+}
+
+fn scalar_source_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "scalar source list <file>")?;
+    let session = open_session(file)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&session.scalar_source_list())
+            .unwrap_or_else(|_| "[]".to_string())
+    );
+    Ok(0)
+}
+
+fn scalar_source_clear(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "scalar source clear <file>")?;
+    let mut session = open_session(file)?;
+    session.scalar_source_clear()?;
+    println!("cleared all scalar sources");
+    Ok(0)
 }
 
 fn scalar_set(args: &[String]) -> Result<i32, CfdError> {
