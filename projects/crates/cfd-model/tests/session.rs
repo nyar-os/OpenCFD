@@ -278,6 +278,22 @@ fn session_create_edit_solve_export_matches_cli() {
     assert!(PathBuf::from(&vtk.path).is_file());
     assert!(PathBuf::from(&svg.path).is_file());
     assert!(PathBuf::from(&streams.path).is_file());
+    let residual_path = directory.join("residuals.csv");
+    let residual = session
+        .export(ExportFormat::Residuals, &residual_path)
+        .expect("residual export");
+    assert_eq!(residual.format, "residuals");
+    assert!(fs::read_to_string(&residual_path)
+        .expect("read residuals")
+        .starts_with("step,residual,continuity\n"));
+    let force_path = directory.join("forces.csv");
+    let force = session
+        .export(ExportFormat::Forces, &force_path)
+        .expect("force export");
+    assert_eq!(force.format, "forces");
+    assert!(fs::read_to_string(&force_path)
+        .expect("read forces")
+        .starts_with("obstacle,kind,step,fx,fy,mz,cd,cl,cm\n"));
     let stream_text = fs::read_to_string(&stream_path).expect("read streamlines");
     assert!(stream_text.contains("OpenCFD streamlines"));
     assert!(stream_text.contains("<polyline"));
@@ -413,6 +429,24 @@ fn session_create_edit_solve_export_matches_cli() {
     let cli_stream = fs::read_to_string(&cli_stream_path).expect("CLI streamlines");
     assert!(cli_stream.contains("OpenCFD streamlines"));
     assert!(cli_stream.contains("<polyline"));
+
+    let cli_residual_path = directory.join("cli-residuals.csv");
+    let output = run_cli(&[
+        "export",
+        &text(&cli_path),
+        "--format",
+        "residuals",
+        "--out",
+        &text(&cli_residual_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd residual export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::read_to_string(&cli_residual_path)
+        .expect("CLI residuals")
+        .starts_with("step,residual,continuity\n"));
 
     let output = run_cli(&["probe", "list", &text(&cli_path)]);
     assert!(output.status.success());

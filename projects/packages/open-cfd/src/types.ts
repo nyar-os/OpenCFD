@@ -225,7 +225,7 @@ export interface SaveReport {
 }
 
 /** Exchange formats the engine can write. */
-export type ExportFormat = 'csv' | 'vtk' | 'svg' | 'streamlines';
+export type ExportFormat = 'csv' | 'vtk' | 'svg' | 'streamlines' | 'residuals' | 'forces';
 
 /** Cell-centred field an SVG export can visualise. */
 export type ExportField = 'pressure' | 'temperature' | 'vorticity' | 'streamFunction';
@@ -364,6 +364,8 @@ export interface SolveReport {
     /** Final L2 norm of the per-step velocity change. */
     readonly residual: number;
     readonly residualHistory: readonly ResidualSample[];
+    /** Why the run stopped: `maxSteps` or `steadyState`. */
+    readonly terminationReason: string;
     readonly pressureConverged: boolean;
     readonly pressureIterations: number;
     readonly pressureResidual: number;

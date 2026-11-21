@@ -28,6 +28,11 @@ fn default_convection_name() -> String {
     ConvectionScheme::Upwind.as_str().to_string()
 }
 
+/// Default termination reason for reports written before the field existed.
+fn default_termination_reason() -> String {
+    "maxSteps".to_string()
+}
+
 /// One sampled velocity residual.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -246,6 +251,10 @@ pub struct Report {
     pub residual: f64,
     /// Velocity residuals sampled every `checkEvery` steps (bounded).
     pub residual_history: Vec<ResidualSample>,
+    /// Why the run stopped: `"maxSteps"` when every requested step was
+    /// advanced, `"steadyState"` when the velocity residual met the tolerance.
+    #[serde(default = "default_termination_reason")]
+    pub termination_reason: String,
     /// Whether the final pressure solve reduced its residual below
     /// `tolerance × max(initial residual, 1e-12)`.
     pub pressure_converged: bool,
@@ -588,6 +597,11 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         steady_state,
         residual,
         residual_history,
+        termination_reason: if steady_state {
+            "steadyState".to_string()
+        } else {
+            "maxSteps".to_string()
+        },
         pressure_converged: last_stats.converged,
         pressure_iterations: last_stats.iterations,
         pressure_residual: last_stats.residual,

@@ -13,7 +13,10 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use crate::export::{export_csv, export_streamlines, export_svg, export_vtk, ExportField};
+use crate::export::{
+    export_csv, export_forces, export_residuals, export_streamlines, export_svg, export_vtk,
+    ExportField,
+};
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
     Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence,
@@ -33,6 +36,10 @@ pub enum ExportFormat {
     Svg,
     /// Self-contained SVG of traced streamlines.
     Streamlines,
+    /// Sampled residual-history CSV rows.
+    Residuals,
+    /// Sampled obstacle force-history CSV rows.
+    Forces,
 }
 
 impl ExportFormat {
@@ -43,6 +50,8 @@ impl ExportFormat {
             Self::Vtk => "vtk",
             Self::Svg => "svg",
             Self::Streamlines => "streamlines",
+            Self::Residuals => "residuals",
+            Self::Forces => "forces",
         }
     }
 }
@@ -56,16 +65,18 @@ impl FromStr for ExportFormat {
             "vtk" => Ok(Self::Vtk),
             "svg" => Ok(Self::Svg),
             "streamlines" | "streamline" => Ok(Self::Streamlines),
+            "residuals" | "residual" => Ok(Self::Residuals),
+            "forces" | "force" => Ok(Self::Forces),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg or streamlines are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, streamlines, residuals or forces are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg or streamlines are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, streamlines, residuals or forces are supported"
                 ),
             )),
         }
@@ -529,6 +540,8 @@ impl OpenCfd {
             ExportFormat::Vtk => export_vtk(&solution, out)?,
             ExportFormat::Svg => export_svg(&solution, out, field)?,
             ExportFormat::Streamlines => export_streamlines(&solution, out)?,
+            ExportFormat::Residuals => export_residuals(&solution, out)?,
+            ExportFormat::Forces => export_forces(&solution, out)?,
         };
         Ok(ExportReport {
             format: format.as_str().to_string(),

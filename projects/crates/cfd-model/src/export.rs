@@ -279,6 +279,56 @@ pub fn export_vtk(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError>
     Ok(target)
 }
 
+/// Writes the sampled residual history as `step,residual,continuity` CSV rows.
+///
+/// One row is written per [`crate::solver::ResidualSample`] the solve kept, in
+/// time order. When `path` ends in `.csv` it is used as the output file;
+/// otherwise it is treated as a directory and `residuals.csv` is created inside
+/// it.
+pub fn export_residuals(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "csv", "residuals.csv");
+    let mut text = String::from("step,residual,continuity\n");
+    for sample in &solution.report.residual_history {
+        let _ = writeln!(
+            text,
+            "{},{:.10e},{:.10e}",
+            sample.step, sample.residual, sample.continuity
+        );
+    }
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
+/// Writes every sampled obstacle force as a long-form CSV.
+///
+/// The header is `obstacle,kind,step,fx,fy,mz,cd,cl,cm`; each obstacle
+/// contributes one row per sample it recorded, grouped in document order.
+/// When `path` ends in `.csv` it is used as the output file; otherwise it is
+/// treated as a directory and `forces.csv` is created inside it.
+pub fn export_forces(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "csv", "forces.csv");
+    let mut text = String::from("obstacle,kind,step,fx,fy,mz,cd,cl,cm\n");
+    for force in &solution.report.forces {
+        for sample in &force.history {
+            let _ = writeln!(
+                text,
+                "{},{},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e}",
+                force.id,
+                force.kind,
+                sample.step,
+                sample.fx,
+                sample.fy,
+                sample.mz,
+                sample.cd,
+                sample.cl,
+                sample.cm
+            );
+        }
+    }
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
 /// Writes a self-contained SVG of streamlines traced through the velocity field.
 ///
 /// Lines are seeded on a regular grid, integrated with a second-order midpoint

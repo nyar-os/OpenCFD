@@ -37,7 +37,7 @@ Usage:
        [--reference-temperature <K>]
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -674,9 +674,10 @@ fn solve_command(args: &[String]) -> Result<i32, CfdError> {
     let session = open_session(file)?;
     let report = session.solve_with(&options)?;
     eprintln!(
-        "solve summary: {} steps, t={} s, steadyState={}, residual={:.6e}, continuity={:.6e}, massBalance={:.6e} kg/s (relative {:.6e})",
+        "solve summary: {} steps, t={} s, termination={}, steadyState={}, residual={:.6e}, continuity={:.6e}, massBalance={:.6e} kg/s (relative {:.6e})",
         report.steps,
         report.time,
+        report.termination_reason,
         report.steady_state,
         report.residual,
         report.divergence_l2,
@@ -701,7 +702,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|streamlines [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|streamlines|residuals|forces [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
@@ -716,6 +717,8 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         ExportFormat::Vtk => println!("exported legacy ASCII VTK: {}", report.path),
         ExportFormat::Svg => println!("exported SVG ({}): {}", field.as_str(), report.path),
         ExportFormat::Streamlines => println!("exported streamlines SVG: {}", report.path),
+        ExportFormat::Residuals => println!("exported residual history CSV: {}", report.path),
+        ExportFormat::Forces => println!("exported force history CSV: {}", report.path),
     }
     Ok(0)
 }

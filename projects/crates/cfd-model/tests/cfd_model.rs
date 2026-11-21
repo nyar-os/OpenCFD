@@ -4,10 +4,11 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_csv, export_streamlines, export_svg, export_vtk, solve, solve_pressure, solve_with,
-    stream_function, transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme,
-    ExportField, InletProfile, Mesh, Model, Obstacle, PressureSettings, Probe, Reference,
-    ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
+    export_csv, export_forces, export_residuals, export_streamlines, export_svg, export_vtk, solve,
+    solve_pressure, solve_with, stream_function, transport_scalar, vorticity, Boundary,
+    BoundaryKind, ConvectionScheme, ExportField, InletProfile, Mesh, Model, Obstacle,
+    PressureSettings, Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON,
+    VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -592,6 +593,7 @@ fn solve_options_stop_on_loose_tolerance_and_report_strict() {
     .expect("loose solve");
     assert!(loose.report.converged);
     assert!(loose.report.steady_state);
+    assert_eq!(loose.report.termination_reason, "steadyState");
     assert!(
         loose.report.steps < 200,
         "stopped at {}",
@@ -625,6 +627,7 @@ fn solve_options_stop_on_loose_tolerance_and_report_strict() {
     .expect("strict solve");
     assert!(!strict.report.converged);
     assert!(!strict.report.steady_state);
+    assert_eq!(strict.report.termination_reason, "maxSteps");
     assert_eq!(strict.report.steps, 3);
     assert!(strict.report.residual > 1e-12);
 }
@@ -1144,6 +1147,64 @@ fn convection_scheme_changes_the_cavity_solution_and_stays_stable() {
         difference(&solutions[0], &solutions[2]) > 1e-4,
         "QUICK produced an identical velocity field to upwind"
     );
+}
+
+#[test]
+fn history_exports_have_stable_csv_shapes() {
+    let mut model = mesh_model(16, 12);
+    model.time.pressure_iterations = 40;
+    model.obstacles = vec![Obstacle::Circle {
+        id: "cyl".to_string(),
+        x: 0.5,
+        y: 0.5,
+        r: 0.1,
+    }];
+    let solution = solve_with(
+        &model,
+        &SolveOptions {
+            steps: Some(12),
+            tolerance: None,
+            check_every: Some(2),
+        },
+    )
+    .expect("solve");
+    assert_eq!(solution.report.termination_reason, "maxSteps");
+
+    let directory = temporary_dir("history");
+    let residual_path = export_residuals(&solution, &directory).expect("residuals");
+    assert_eq!(
+        residual_path.file_name().and_then(|name| name.to_str()),
+        Some("residuals.csv")
+    );
+    let residuals = fs::read_to_string(&residual_path).expect("read residuals");
+    let lines: Vec<&str> = residuals.lines().collect();
+    assert_eq!(lines[0], "step,residual,continuity");
+    assert_eq!(lines.len(), solution.report.residual_history.len() + 1);
+    assert!(lines.len() > 1, "residual history is empty");
+    for line in &lines[1..] {
+        assert_eq!(line.split(',').count(), 3);
+    }
+
+    let force_path = export_forces(&solution, &directory).expect("forces");
+    assert_eq!(
+        force_path.file_name().and_then(|name| name.to_str()),
+        Some("forces.csv")
+    );
+    let forces = fs::read_to_string(&force_path).expect("read forces");
+    let force_lines: Vec<&str> = forces.lines().collect();
+    assert_eq!(force_lines[0], "obstacle,kind,step,fx,fy,mz,cd,cl,cm");
+    let samples: usize = solution
+        .report
+        .forces
+        .iter()
+        .map(|force| force.history.len())
+        .sum();
+    assert_eq!(force_lines.len(), samples + 1);
+    assert!(samples > 0);
+    for line in &force_lines[1..] {
+        assert_eq!(line.split(',').count(), 9);
+        assert!(line.starts_with("cyl,circle,"));
+    }
 }
 
 #[test]
