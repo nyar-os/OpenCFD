@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cfd_model::{BoundaryKind, ExportFormat, Model, OpenCfd, OpenCfdOptions, Side};
+use cfd_model::{BoundaryKind, ExportField, ExportFormat, Model, OpenCfd, OpenCfdOptions, Side};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -94,8 +94,15 @@ fn session_create_edit_solve_export_matches_cli() {
     let vtk = session
         .export(ExportFormat::Vtk, &vtk_path)
         .expect("vtk export");
+    let svg_path = directory.join("vorticity.svg");
+    let svg = session
+        .export_field(ExportFormat::Svg, &svg_path, ExportField::Vorticity)
+        .expect("svg export");
     assert!(PathBuf::from(&csv.path).is_file());
     assert!(PathBuf::from(&vtk.path).is_file());
+    assert!(PathBuf::from(&svg.path).is_file());
+    let svg_text = fs::read_to_string(&svg_path).expect("read svg");
+    assert!(svg_text.contains("OpenCFD vorticity field (1/s)"));
     let vtk_text = fs::read_to_string(&vtk_path).expect("read vtk");
     assert!(vtk_text.contains("DATASET UNSTRUCTURED_GRID"));
     assert!(vtk_text.contains("POINT_DATA 120"));
@@ -187,6 +194,25 @@ fn session_create_edit_solve_export_matches_cli() {
         fs::read_to_string(cli_csv_dir.join("solution.csv")).expect("CLI csv"),
         fs::read_to_string(&csv.path).expect("session csv")
     );
+
+    let cli_svg_path = directory.join("cli-stream-function.svg");
+    let output = run_cli(&[
+        "export",
+        &text(&cli_path),
+        "--format",
+        "svg",
+        "--field",
+        "streamFunction",
+        "--out",
+        &text(&cli_svg_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd svg export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_svg = fs::read_to_string(&cli_svg_path).expect("CLI svg");
+    assert!(cli_svg.contains("OpenCFD streamFunction field (m²/s)"));
 }
 
 #[test]

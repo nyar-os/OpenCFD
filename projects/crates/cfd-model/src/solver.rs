@@ -1,6 +1,7 @@
 use boost_check::{CheckReport, Issue};
 use serde::{Deserialize, Serialize};
 
+use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
     Boundaries, BoundaryKind, Model, ScalarConfig, Side, ThermalConfig, Turbulence, TurbulenceModel,
@@ -111,6 +112,18 @@ pub struct Report {
     pub max_pressure: f64,
     /// RMS of the discrete divergence after the final projection (1/s).
     pub divergence_l2: f64,
+    /// Minimum cell-centred vorticity of fluid cells (1/s).
+    #[serde(default)]
+    pub vorticity_min: f64,
+    /// Maximum cell-centred vorticity of fluid cells (1/s).
+    #[serde(default)]
+    pub vorticity_max: f64,
+    /// Minimum cell-centred stream function of fluid cells (m²/s).
+    #[serde(default)]
+    pub stream_function_min: f64,
+    /// Maximum cell-centred stream function of fluid cells (m²/s).
+    #[serde(default)]
+    pub stream_function_max: f64,
     /// Run convergence. With a steady-state tolerance it reports whether the
     /// velocity stopped changing; without one it reports the pressure solve.
     pub converged: bool,
@@ -161,6 +174,10 @@ pub struct Solution {
     pub p: Vec<f64>,
     /// Cell-centred passive scalar, when the case configures one.
     pub temperature: Option<Vec<f64>>,
+    /// Cell-centred vorticity `ω = ∂v/∂x − ∂u/∂y` (1/s).
+    pub vorticity: Vec<f64>,
+    /// Cell-centred stream function `ψ` (m²/s) with zero mean over fluid cells.
+    pub stream_function: Vec<f64>,
     /// Cell-centred eddy viscosity, when a turbulence model is active.
     pub eddy_viscosity: Option<Vec<f64>>,
     /// Simulation report.
@@ -396,6 +413,10 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
     let divergence_l2 = rms(&divergence);
     let max_velocity = max_velocity(&u, &v);
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
+    let vorticity_field = vorticity(&mesh, &u, &v);
+    let stream_function_field = stream_function(&mesh, &u, &v);
+    let (vorticity_min, vorticity_max) = pressure_range(&mesh, &vorticity_field);
+    let (stream_function_min, stream_function_max) = pressure_range(&mesh, &stream_function_field);
     let forces = build_forces(&mesh, model, &u, &v, &p, eddy.as_deref(), &force_samples);
     let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
@@ -410,6 +431,10 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         min_pressure,
         max_pressure,
         divergence_l2,
+        vorticity_min,
+        vorticity_max,
+        stream_function_min,
+        stream_function_max,
         converged: if options.tolerance.is_some() {
             steady_state
         } else {
@@ -439,6 +464,8 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         v,
         p,
         temperature,
+        vorticity: vorticity_field,
+        stream_function: stream_function_field,
         eddy_viscosity: eddy,
         report,
     })

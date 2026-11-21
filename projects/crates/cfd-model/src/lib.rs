@@ -24,6 +24,7 @@
 
 mod error;
 mod export;
+mod fields;
 mod mesh;
 mod model;
 mod session;
@@ -31,6 +32,7 @@ mod solver;
 
 pub use crate::error::CfdError;
 pub use crate::export::{export_csv, export_svg, export_vtk, write_atomic, ExportField};
+pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, Fluid, InitialField, MeshConfig, Model, Obstacle,
@@ -58,6 +60,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "obstacles": "supported",
     "scalar": "supported",
     "convergence": "supported",
+    "vorticity": "supported",
+    "streamFunction": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

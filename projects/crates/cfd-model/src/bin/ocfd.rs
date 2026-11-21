@@ -30,7 +30,7 @@ Usage:
        [--reference-temperature <K>]
   ocfd validate <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg [--field pressure|temperature] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -515,7 +515,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg [--field pressure|temperature] --out <dir|file>",
+        "export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {

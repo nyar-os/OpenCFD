@@ -12,6 +12,7 @@ import * as service from './service.js';
 import type {
     BoundarySetRequest,
     CaseSummary,
+    ExportField,
     ExportFormat,
     ExportReport,
     FluidSetRequest,
@@ -110,10 +111,10 @@ export class CfdCase {
         return service.solve(this.handle, options);
     }
 
-    /** Solves and exports the field as CSV or VTK. */
-    export(format: ExportFormat, target: string): ExportReport {
+    /** Solves and exports the field as CSV, VTK or an SVG preview. */
+    export(format: ExportFormat, target: string, field?: ExportField): ExportReport {
         this.assertOpen();
-        return service.exportCase(this.handle, format, target);
+        return service.exportCase(this.handle, format, target, field);
     }
 
     /** Writes the document, optionally to a new path. */

@@ -27,7 +27,7 @@ export interface NativeBinding {
     scalar_set(handle: number, diffusivity: number, initial?: number, inlet?: number): string;
     validate(handle: number): string;
     solve(handle: number, steps?: number, tolerance?: number, checkEvery?: number): string;
-    export(handle: number, format: string, out: string): string;
+    export(handle: number, format: string, out: string, field?: string): string;
     close(handle: number): boolean;
 }
 

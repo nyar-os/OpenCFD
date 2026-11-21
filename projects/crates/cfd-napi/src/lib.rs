@@ -16,7 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
-    BoundaryKind, CfdError, ExportFormat, Obstacle, OpenCfd, OpenCfdOptions, Side, SolveOptions,
+    BoundaryKind, CfdError, ExportField, ExportFormat, Obstacle, OpenCfd, OpenCfdOptions, Side,
+    SolveOptions,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -265,13 +266,21 @@ fn solve(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(report))
 }
 
-/// Solves and exports one session document as CSV or VTK.
+/// Solves and exports one session document as CSV, VTK or SVG.
+///
+/// `field` only affects SVG output and defaults to `pressure`.
 #[function]
 fn export(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;
     let format = text(&ctx, 1)?.parse::<ExportFormat>().map_err(fail)?;
     let out = text(&ctx, 2)?;
-    let report = with_session(handle, |session| session.export(format, Path::new(&out)))?;
+    let field = match optional_text(&ctx, 3)? {
+        Some(value) => value.parse::<ExportField>().map_err(fail)?,
+        None => ExportField::Pressure,
+    };
+    let report = with_session(handle, |session| {
+        session.export_field(format, Path::new(&out), field)
+    })?;
     respond(&ctx, &json!(report))
 }
 

@@ -12,6 +12,7 @@ import { nativeBinding } from './native.js';
 import type {
     BoundarySetRequest,
     CaseSummary,
+    ExportField,
     ExportFormat,
     ExportReport,
     FluidSetRequest,
@@ -177,13 +178,18 @@ export function solve(handle: number, options?: SolveOptions): SolveReport {
     );
 }
 
-/** Solves one case and writes a CSV or VTK field. */
+/** Solves one case and writes a CSV, VTK or SVG field. */
 export function exportCase(
     handle: number,
     format: ExportFormat,
     target: string,
+    field?: ExportField,
 ): ExportReport {
-    return decode<ExportReport>(() => binding('export').export(handle, format, target));
+    return decode<ExportReport>(() =>
+        field === undefined
+            ? binding('export').export(handle, format, target)
+            : binding('export').export(handle, format, target, field),
+    );
 }
 
 /** Releases one case handle. */

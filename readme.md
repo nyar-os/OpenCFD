@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, and steady-state velocity convergence detection. It has no turbulence, compressible flow, Boussinesq buoyancy, coupled heat transfer, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, vorticity and stream-function post-processing, and steady-state velocity convergence detection. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -40,9 +40,9 @@ await cfd.dispose();
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
 - Document: `id`, `summary`, `obstacles`, `setMesh`, `setFluid`, `setTime`, `setBoundary`, `addObstacle`, `listObstacles`, `setScalar`, `validate`, `solve(options?)`, `export`, `save`, `close`.
-- `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory` and `forces`.
+- `solve(options?)` overrides document steps with `steps`; when `tolerance` is given it stops early on the L2 norm of the velocity change and reports `converged`, `steadyState`, `residual`, `residualHistory`, `forces`, and the vorticity and stream-function extremes.
 - Errors are always `OpenCFDError`; `code` is the contract (for example `mesh/invalid`, `obstacle/invalid`, `solver/unstable`). A missing native addon reports `capability/not-implemented`.
-- An `export` target ending in `.csv` or `.vtk` is treated as a file; otherwise it is treated as a directory.
+- `export(format, target, field?)` writes CSV, legacy ASCII VTK or an SVG preview; `field` selects the SVG field (`pressure`, `temperature`, `vorticity` or `streamFunction`). A target ending in `.csv`, `.vtk` or `.svg` is treated as a file; otherwise it is treated as a directory.
 
 Build the native addon and SDK:
 
@@ -94,6 +94,10 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
   "minPressure": -0.1866,
   "maxPressure": 0.4767,
   "divergenceL2": 3.48e-4,
+  "vorticityMin": -10.1342,
+  "vorticityMax": 4.2168,
+  "streamFunctionMin": -0.05959,
+  "streamFunctionMax": 0.02278,
   "converged": true,
   "pressureIterations": 37
 }
@@ -112,16 +116,19 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]` | Add a circular obstacle |
 | `ocfd obstacle list <file>` | Print the obstacle JSON array in document order |
 | `ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]` | Enable or update passive scalar (temperature) transport; omitted values are unchanged |
+| `ocfd turbulence set <file> --model none\|constant\|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]` | Select the eddy-viscosity model; `none` removes the turbulence section |
+| `ocfd heat set <file> [--conductivity <W/mK>] [--specific-heat <J/kgK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] ...` | Configure energy-equation boundaries, volumetric source and reference temperature; requires scalar transport |
 | `ocfd validate <file>` | Structural validation; on failure prints a JSON error and returns exit code `1` |
 | `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]` | Solve and print an `open-cfd-report` JSON; `--tolerance` enables steady-state early stopping and `--check-every` controls the sampling interval |
-| `ocfd export <file> --format csv --out <dir\|file.csv>` | After solving, write cell-centred `x,y,pressure,u,v,magnitude,temperature` |
-| `ocfd export <file> --format vtk --out <dir\|file.vtk>` | After solving, write legacy ASCII `STRUCTURED_POINTS` VTK (with `temperature` SCALARS) |
+| `ocfd export <file> --format csv --out <dir\|file.csv>` | After solving, write cell-centred `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` |
+| `ocfd export <file> --format vtk --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data |
+| `ocfd export <file> --format svg [--field pressure\|temperature\|vorticity\|streamFunction] --out <dir\|file.svg>` | After solving, write a self-contained SVG preview of one cell-centred field |
 | `ocfd capabilities` | Print the machine-readable capability matrix |
 | `ocfd --help` | Print usage |
 
 Exit codes: `0` success, `1` input, validation or IO error, `2` capability not implemented.
 
-An `export` `--out` ending in `.csv` or `.vtk` is treated as a file path; otherwise it is treated as a directory and `solution.csv` or `solution.vtk` is written inside it. CSV and VTK are both written atomically through a temporary file plus rename.
+An `export` `--out` ending in `.csv`, `.vtk` or `.svg` is treated as a file path; otherwise it is treated as a directory and `solution.csv`, `solution.vtk` or `solution-<field>.svg` is written inside it. CSV, VTK and SVG are all written atomically through a temporary file plus rename.
 
 ## The `.ocfd` document format
 
@@ -166,6 +173,8 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `initial` | Optional; uniform initial velocity `[u, v]`, at rest by default |
 | `obstacles` | Optional; rectangle `{kind:"rect",x0,y0,x1,y1}` or circle `{kind:"circle",x,y,r}`; `id` may be omitted and becomes `obstacle-N` in order |
 | `scalar` | Optional; `diffusivity` (m²/s), `initial` and `inletValue`, enabling passive scalar transport |
+| `turbulence` | Optional; `model` (`none`, `constant`, `mixingLength`), `nuT` (m²/s) and `mixingLength` (m) |
+| `thermal` | Optional; `specificHeat`, `conductivity`, `heatSource`, per-side `temperature`/`heatFlux`, `obstacleTemperature`, `obstacleHeatFlux` and `referenceTemperature`; requires `scalar` |
 | `buoyancy` | Declared only for document compatibility; this build does not implement Boussinesq and validation returns `capability/not-implemented` |
 
 Boundary semantics:
@@ -181,6 +190,8 @@ Boundary semantics:
 | `steps` / `dt` / `time` | Steps actually advanced, time step, total physical time |
 | `maxVelocity` | Maximum absolute velocity over all faces |
 | `minPressure` / `maxPressure` | Pressure extremes at fluid cell centres |
+| `vorticityMin` / `vorticityMax` | Vorticity `∂v/∂x − ∂u/∂y` extremes over fluid cells (1/s) |
+| `streamFunctionMin` / `streamFunctionMax` | Stream-function extremes over fluid cells (m²/s), with zero mean |
 | `divergenceL2` | RMS of the discrete divergence of the final velocity field |
 | `converged` | With `tolerance`, whether steady state was reached; otherwise whether the final pressure solve met its relative tolerance |
 | `steadyState` | Whether the L2 norm of the velocity change fell below `tolerance` |
@@ -201,12 +212,13 @@ Boundary semantics:
 | Rectangular and circular solid obstacles with `Cd` and `Cl` force coefficients (`obstacles`) | ✅ Supported |
 | Passive scalar (temperature) transport (`scalar`) | ✅ Supported |
 | Steady-state velocity convergence detection and early stopping (`convergence`) | ✅ Supported |
+| Vorticity and stream-function fields with report extremes (`vorticity`, `streamFunction`) | ✅ Supported |
+| Eddy-viscosity turbulence, constant or mixing length (`turbulence`) | ✅ Supported (no energy-equation closure) |
+| Thermal side/obstacle conditions, heat sources and obstacle Nusselt numbers (`heat`) | ✅ Supported (no buoyancy) |
 | Boussinesq buoyancy (`buoyancy`) | ❌ Not implemented (avoids an unvalidated unstable path) |
 | `.ocfd` JSON read and write | ✅ Supported |
-| CSV and legacy ASCII VTK export | ✅ Supported |
+| CSV, legacy ASCII VTK and SVG export | ✅ Supported |
 | Compressible flow (`compressible`) | ❌ Not implemented |
-| Turbulence models (`turbulence`) | ❌ Not implemented |
-| Coupled heat transfer (`heat`) | ❌ Not implemented |
 | Three-dimensional flow (`threeD`) | ❌ Not implemented |
 | External format import and export such as Abaqus `.inp` and OpenFOAM | ❌ Not implemented |
 
@@ -222,6 +234,9 @@ The machine-readable version is printed by `ocfd capabilities`, and the single s
 6. **Passive scalar**: the same upwind convection plus central diffusion is advanced explicitly at cell centres; solid faces carry zero flux, solid cells hold no scalar and inlet faces use `inletValue`. A violation returns `solver/unstable`.
 7. **Convergence detection**: each step computes the L2 norm of the velocity change, samples it every `checkEvery` steps and checks it against `tolerance`, stopping early when it passes; history is capped at 1000 entries.
 8. **Stability guards**: before solving, the explicit convective CFL number and the momentum and scalar diffusion numbers are checked; a violation returns `solver/unstable` and never emits NaN or Inf. Every step also checks that all fields are finite.
+9. **Eddy viscosity**: the optional turbulence section either applies a constant `nuT` or evaluates `nuT = l²·|S|` per cell from the resolved strain-rate tensor. Fluid faces use the mean of the adjacent cell values and solid cells carry zero.
+10. **Thermal transport**: when a `thermal` section is present, the scalar equation becomes an energy equation. The transported diffusivity is `k/(ρ·cp)`, sides and obstacle surfaces use fixed temperature or fixed heat flux, and a uniform volumetric source is added. Every obstacle reports `meanHeatFlux`, `wallTemperature` and `Nu = q̅·D/(k·ΔT)`.
+11. **Derived fields**: after the solve, cell-centred vorticity `ω = ∂v/∂x − ∂u/∂y` uses central differences of the averaged face velocities, with one-sided differences on the first and last row or column. The stream function satisfies `∂ψ/∂y = u` and `∂ψ/∂x = −v`, is integrated from the bottom-left corner and has its fluid-cell mean removed, so it is a gauge-fixed value rather than a unique potential in multiply connected domains.
 
 This is a first-order in time and space MVP with visible numerical diffusion. It suits validation and teaching, not high-accuracy engineering results.
 
@@ -236,12 +251,14 @@ The integration tests in `projects/crates/cfd-model/tests/cfd_model.rs` cover:
 1. **Still cavity**: four stationary walls and zero initial velocity; after 40 steps the velocity and divergence stay near zero with no NaN or Inf.
 2. **Lid-driven cavity**: 24×24, 300 steps, Re=100; `u > 0` on the upper centreline, mean `u > 0` in the upper quarter, maximum speed at most 1.05, `divergenceL2 < 1e-2` and every report field present. The measured maximum speed is about 0.84 and `divergenceL2` about 1.4e-5.
 3. **Pressure Poisson residual**: 300 SOR sweeps on a fixed divergence field leave a residual below 1% of the first residual, and 300 sweeps beat 50.
-4. **Export formats**: the CSV row count is `nx*ny+1` with the header `x,y,pressure,u,v,magnitude,temperature`; the VTK contains `STRUCTURED_POINTS`, `DIMENSIONS`, `POINT_DATA`, `SCALARS pressure`, `SCALARS temperature` and `VECTORS velocity`.
+4. **Export formats**: the CSV row count is `nx*ny+1` with the header `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction`; the VTK contains `DATASET UNSTRUCTURED_GRID`, `POINTS`, `POINT_DATA`, `SCALARS pressure`, `SCALARS temperature`, `SCALARS magnitude`, `SCALARS vorticity`, `SCALARS streamFunction` and `VECTORS velocity`; an SVG preview names the selected field and its unit.
 5. **Document round trip**: `.ocfd` save and load are identical, camelCase fields are correct, default fields deserialize and a wrong `format` is rejected.
 6. **Solid mask**: all four faces of a solid cell carry zero velocity, divergence stays zero and an obstacle force report is present.
 7. **Flow past a cylinder**: a 48×24 channel at Re≈100 with a circular obstacle yields a finite positive `Cd`, a finite `Cl` and no NaN anywhere.
 8. **Scalar diffusion**: a hot spot in still fluid decays monotonically in peak value and a uniform field stays uniform.
 9. **Steady-state convergence**: a loose tolerance stops before `steps` and reports `converged: true`; a strict tolerance with few steps reports `converged: false`.
+10. **Derived fields**: a linear shear `u = y` gives vorticity `−1` in every cell and stream-function increments `u·dy`; solid-body rotation `(−y, x)` gives vorticity `2`; the solved stream function has zero fluid-cell mean and the report extremes match the stored field.
+11. **Vorticity SVG**: exporting the vorticity field produces a self-contained SVG naming `vorticity (1/s)` and its numerical range.
 
 `projects/crates/cfd-model/tests/session.rs` covers the full session API path: `create → mesh/fluid/time/boundary set → validate → solve → CSV/VTK export`, comparing each item with the report and CSV produced by the `ocfd` CLI to confirm both entry points share one implementation.
 
@@ -262,11 +279,12 @@ cargo build -p cfd-model --offline
 ## Limitations
 
 - Two dimensions only; no three-dimensional mesh or axisymmetric support.
-- Single-phase, incompressible, constant-density, constant-viscosity Newtonian flow only; there is no turbulence model at high Re, so results are a laminar approximation.
+- Single-phase, incompressible, constant-density, constant-viscosity Newtonian flow only; the optional eddy viscosity is algebraic (constant or mixing length), so high-Reynolds-number results remain a laminar approximation.
 - Uniform structured Cartesian meshes only; no body-fitted meshes, adaptive refinement, moving meshes or immersed boundaries. Obstacles are stair-stepped by cell centre.
 - Explicit time stepping is limited by CFL and diffusion numbers; finer meshes and higher viscosity require a smaller `dt`. Violations raise an error instead of reducing the step automatically.
 - First-order upwind plus explicit Euler makes both space and time first-order, with significant numerical diffusion.
-- Passive scalar (temperature) transport is supported, but Boussinesq buoyancy and coupled heat transfer are not; the `buoyancy` field is rejected with `capability/not-implemented`.
+- Passive scalar (temperature) transport is supported, but Boussinesq buoyancy is not; the `buoyancy` field is rejected with `capability/not-implemented`.
+- The stream function is integrated along one path from the bottom-left corner, so in a domain cut by obstacles it is a gauge-fixed diagnostic rather than a unique potential.
 - Boundary handling is first-order: tangential wall velocity uses a half-cell ghost and outlets use zero-gradient velocity with pressure 0.
 - No restart, parallel execution or external format (Abaqus, OpenFOAM and similar) import or export.
 - No graphical interface; use ParaView to open exported VTK.

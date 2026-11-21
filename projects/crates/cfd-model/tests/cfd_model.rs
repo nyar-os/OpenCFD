@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    export_csv, export_vtk, solve, solve_pressure, solve_with, transport_scalar, Boundary,
-    BoundaryKind, Mesh, Model, Obstacle, PressureSettings, ScalarConfig, SolveOptions,
-    CAPABILITIES_JSON, VERSION,
+    export_csv, export_svg, export_vtk, solve, solve_pressure, solve_with, stream_function,
+    transport_scalar, vorticity, Boundary, BoundaryKind, ExportField, Mesh, Model, Obstacle,
+    PressureSettings, ScalarConfig, SolveOptions, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -139,6 +139,10 @@ fn lid_driven_cavity_develops_clockwise_flow() {
         "minPressure",
         "maxPressure",
         "divergenceL2",
+        "vorticityMin",
+        "vorticityMax",
+        "streamFunctionMin",
+        "streamFunctionMax",
         "converged",
         "pressureIterations",
     ] {
@@ -219,11 +223,11 @@ fn csv_and_vtk_exports_have_expected_shape() {
     let lines: Vec<&str> = csv.lines().collect();
     assert_eq!(
         lines[0],
-        "x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature"
+        "x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction"
     );
     assert_eq!(lines.len(), 12 * 10 + 1);
     for line in &lines[1..] {
-        assert_eq!(line.split(',').count(), 9);
+        assert_eq!(line.split(',').count(), 11);
     }
 
     let vtk_path = export_vtk(&solution, &directory).expect("vtk");
@@ -238,6 +242,8 @@ fn csv_and_vtk_exports_have_expected_shape() {
         "SCALARS pressure double 1",
         "SCALARS temperature double 1",
         "SCALARS magnitude double 1",
+        "SCALARS vorticity double 1",
+        "SCALARS streamFunction double 1",
         "LOOKUP_TABLE default",
         "VECTORS velocity double",
     ] {
@@ -307,6 +313,8 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"compressible\": \"unsupported\""));
     assert!(CAPABILITIES_JSON.contains("\"obstacles\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"buoyancy\": \"unsupported\""));
+    assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
 }
 
 #[test]
@@ -491,4 +499,106 @@ fn solve_options_stop_on_loose_tolerance_and_report_strict() {
     assert!(!strict.report.steady_state);
     assert_eq!(strict.report.steps, 3);
     assert!(strict.report.residual > 1e-12);
+}
+
+#[test]
+fn vorticity_and_stream_function_match_analytic_fields() {
+    let mut model = Model::new();
+    model.mesh.nx = 16;
+    model.mesh.ny = 12;
+    let mesh = Mesh::new(&model.mesh).expect("mesh");
+
+    let mut u = vec![0.0; mesh.u_count()];
+    let v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        for i in 0..=mesh.nx {
+            let (_, y) = mesh.u_position(i, j);
+            u[mesh.u_index(i, j)] = y;
+        }
+    }
+
+    let omega = vorticity(&mesh, &u, &v);
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let value = omega[mesh.pressure_index(i, j)];
+            assert!(
+                (value + 1.0).abs() < 1e-12,
+                "Couette shear vorticity at ({i}, {j}) is {value}, expected -1"
+            );
+        }
+    }
+
+    let psi = stream_function(&mesh, &u, &v);
+    for j in 0..mesh.ny - 1 {
+        for i in 0..mesh.nx {
+            let below = mesh.pressure_index(i, j);
+            let above = mesh.pressure_index(i, j + 1);
+            let (ux, _) = mesh.cell_velocity(&u, &v, i, j);
+            let difference = psi[above] - psi[below];
+            assert!(
+                (difference - ux * mesh.dy).abs() < 1e-9,
+                "stream function increment at ({i}, {j}) is {difference}, expected {}",
+                ux * mesh.dy
+            );
+        }
+    }
+    let mean = psi.iter().sum::<f64>() / psi.len() as f64;
+    assert!(mean.abs() < 1e-12, "stream function mean is {mean}");
+
+    let mut rotating_u = vec![0.0; mesh.u_count()];
+    let mut rotating_v = vec![0.0; mesh.v_count()];
+    for j in 0..mesh.ny {
+        for i in 0..=mesh.nx {
+            let (_, y) = mesh.u_position(i, j);
+            rotating_u[mesh.u_index(i, j)] = -y;
+        }
+    }
+    for j in 0..=mesh.ny {
+        for i in 0..mesh.nx {
+            let (x, _) = mesh.v_position(i, j);
+            rotating_v[mesh.v_index(i, j)] = x;
+        }
+    }
+    let rotation = vorticity(&mesh, &rotating_u, &rotating_v);
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let value = rotation[mesh.pressure_index(i, j)];
+            assert!(
+                (value - 2.0).abs() < 1e-12,
+                "solid-body vorticity at ({i}, {j}) is {value}, expected 2"
+            );
+        }
+    }
+}
+
+#[test]
+fn solve_reports_derived_fields_and_svg_export() {
+    let mut model = mesh_model(16, 16);
+    model.time.steps = 60;
+    model.time.pressure_iterations = 60;
+    let solution = solve(&model).expect("solve");
+
+    assert_finite(&solution.vorticity, "vorticity");
+    assert_finite(&solution.stream_function, "streamFunction");
+    assert_eq!(solution.vorticity.len(), solution.mesh.pressure_count());
+    assert_eq!(
+        solution.stream_function.len(),
+        solution.mesh.pressure_count()
+    );
+    let report = &solution.report;
+    assert!(report.vorticity_min < report.vorticity_max);
+    assert!(report.stream_function_min < report.stream_function_max);
+
+    let fluid_mean = solution.stream_function.iter().sum::<f64>()
+        / solution.mesh.solid.iter().filter(|solid| !**solid).count() as f64;
+    assert!(
+        fluid_mean.abs() < 1e-9,
+        "stream function mean is {fluid_mean}"
+    );
+
+    let directory = temporary_dir("derived");
+    let svg_path = export_svg(&solution, &directory, ExportField::Vorticity).expect("svg");
+    let svg = fs::read_to_string(&svg_path).expect("read svg");
+    assert!(svg.contains("OpenCFD vorticity field (1/s)"));
+    assert!(svg.contains("range "));
 }

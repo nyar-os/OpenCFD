@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 
 import { NotImplementedError, OpenCFDError, type OpenCFDErrorCode } from './errors.js';
 import { OpenCFD } from './open-cfd.js';
-import type { BoundaryKind, ExportFormat, Obstacle, Side } from './types.js';
+import type { BoundaryKind, ExportField, ExportFormat, Obstacle, Side } from './types.js';
 
 const USAGE = `open-cfd - OpenCFD two-dimensional incompressible Navier-Stokes solver
 
@@ -29,7 +29,7 @@ usage:
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
   open-cfd validate <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--out report.json]
-  open-cfd export <file> --format csv|vtk --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -152,10 +152,27 @@ function parseExportFormat(raw: string): ExportFormat {
     if (raw === 'inp' || raw === 'openfoam') {
         throw new NotImplementedError(`${raw} export`);
     }
-    if (raw !== 'csv' && raw !== 'vtk') {
-        throw cliError('cli/unknown-format', `unknown export format \`${raw}\`; use csv or vtk`);
+    if (raw !== 'csv' && raw !== 'vtk' && raw !== 'svg') {
+        throw cliError('cli/unknown-format', `unknown export format \`${raw}\`; use csv, vtk or svg`);
     }
     return raw;
+}
+
+const EXPORT_FIELDS: readonly ExportField[] = [
+    'pressure',
+    'temperature',
+    'vorticity',
+    'streamFunction',
+];
+
+function parseExportField(raw: string): ExportField {
+    if (!EXPORT_FIELDS.includes(raw as ExportField)) {
+        throw cliError(
+            'cli/unknown-format',
+            `unknown export field \`${raw}\`; use pressure, temperature, vorticity or streamFunction`,
+        );
+    }
+    return raw as ExportField;
 }
 
 function parseObstacle(parsed: ParsedArguments): Obstacle {
@@ -390,21 +407,25 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'export': {
-            const parsed = parseArguments(rest, ['--format', '--out']);
+            const parsed = parseArguments(rest, ['--format', '--out', '--field']);
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk --out <dir|file>',
+                'export <file> --format csv|vtk|svg [--field pressure|temperature|vorticity|streamFunction] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
+            const rawField = parsed.options['--field'];
+            const field = rawField === undefined ? undefined : parseExportField(rawField);
             const out = requiredOption(parsed, '--out');
             const document = await session.open(file);
-            const report = document.export(format, out);
-            console.log(
-                format === 'csv'
-                    ? `exported CSV: ${report.path}`
-                    : `exported legacy ASCII VTK: ${report.path}`,
-            );
+            const report = document.export(format, out, field);
+            if (format === 'csv') {
+                console.log(`exported CSV: ${report.path}`);
+            } else if (format === 'vtk') {
+                console.log(`exported legacy ASCII VTK: ${report.path}`);
+            } else {
+                console.log(`exported SVG (${field ?? 'pressure'}): ${report.path}`);
+            }
             return 0;
         }
         case 'compressible':

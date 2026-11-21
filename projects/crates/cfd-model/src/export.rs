@@ -15,6 +15,10 @@ pub enum ExportField {
     Pressure,
     /// Temperature in kelvin.
     Temperature,
+    /// Vorticity `∂v/∂x − ∂u/∂y` in 1/s.
+    Vorticity,
+    /// Stream function `ψ` in m²/s.
+    StreamFunction,
 }
 
 impl ExportField {
@@ -23,6 +27,8 @@ impl ExportField {
         match self {
             Self::Pressure => "pressure",
             Self::Temperature => "temperature",
+            Self::Vorticity => "vorticity",
+            Self::StreamFunction => "streamFunction",
         }
     }
 
@@ -31,6 +37,8 @@ impl ExportField {
         match self {
             Self::Pressure => "Pa",
             Self::Temperature => "K",
+            Self::Vorticity => "1/s",
+            Self::StreamFunction => "m²/s",
         }
     }
 }
@@ -42,10 +50,12 @@ impl FromStr for ExportField {
         match value {
             "pressure" => Ok(Self::Pressure),
             "temperature" => Ok(Self::Temperature),
+            "vorticity" => Ok(Self::Vorticity),
+            "streamFunction" | "stream-function" | "stream_function" => Ok(Self::StreamFunction),
             other => Err(CfdError::new(
                 "export/invalid-field",
                 format!(
-                    "unknown export field `{other}`; only pressure or temperature is supported"
+                    "unknown export field `{other}`; only pressure, temperature, vorticity or streamFunction is supported"
                 ),
             )),
         }
@@ -81,6 +91,8 @@ pub fn export_svg(
                 "the case does not configure scalar (temperature) transport, so temperature cannot be exported as SVG",
             )
         })?,
+        ExportField::Vorticity => &solution.vorticity,
+        ExportField::StreamFunction => &solution.stream_function,
     };
     let text = render_svg(solution, values, field);
     write_atomic(&target, &text)?;
@@ -232,12 +244,13 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<(), CfdError> {
 }
 
 /// Writes cell-centred `x, y, z, pressure, velocity_x, velocity_y, velocity_z,
-/// magnitude, temperature` rows.
+/// magnitude, temperature, vorticity, streamFunction` rows.
 ///
 /// Points follow the mesh's i/j row-major pressure order, so the row order
-/// still encodes `(i, j)` exactly as before. When `path` ends in `.csv` it is
-/// used as the output file; otherwise it is treated as a directory and
-/// `solution.csv` is created inside it.
+/// still encodes `(i, j)` exactly as before. `vorticity` is `∂v/∂x − ∂u/∂y`
+/// in 1/s and `streamFunction` is `ψ` in m²/s with zero mean over fluid cells.
+/// When `path` ends in `.csv` it is used as the output file; otherwise it is
+/// treated as a directory and `solution.csv` is created inside it.
 pub fn export_csv(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
     let target = with_extension_or_file(path, "csv", "solution.csv");
     let mesh = field_mesh(solution);
@@ -252,9 +265,10 @@ pub fn export_csv(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError>
 ///
 /// Points are the `nx × ny` cell centres in i/j row-major order and every quad
 /// joins four neighbouring centres, so the point data keeps the cell-centred
-/// `pressure`, `velocity`, `magnitude` and `temperature` values. When `path`
-/// ends in `.vtk` it is used as the output file; otherwise it is treated as a
-/// directory and `solution.vtk` is created inside it.
+/// `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and
+/// `streamFunction` values. When `path` ends in `.vtk` it is used as the output
+/// file; otherwise it is treated as a directory and `solution.vtk` is created
+/// inside it.
 pub fn export_vtk(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
     let target = with_extension_or_file(path, "vtk", "solution.vtk");
     let mesh = field_mesh(solution);
@@ -318,6 +332,8 @@ fn solution_fields(solution: &Solution) -> Vec<Field> {
         Field::vector("velocity", velocity),
         Field::scalar("magnitude", magnitude),
         Field::scalar("temperature", temperature),
+        Field::scalar("vorticity", solution.vorticity.clone()),
+        Field::scalar("streamFunction", solution.stream_function.clone()),
     ]
 }
 

@@ -181,7 +181,10 @@ export interface SaveReport {
 }
 
 /** Exchange formats the engine can write. */
-export type ExportFormat = 'csv' | 'vtk';
+export type ExportFormat = 'csv' | 'vtk' | 'svg';
+
+/** Cell-centred field an SVG export can visualise. */
+export type ExportField = 'pressure' | 'temperature' | 'vorticity' | 'streamFunction';
 
 /** Result of one export. */
 export interface ExportReport {
@@ -236,6 +239,14 @@ export interface SolveReport {
     readonly minPressure: number;
     readonly maxPressure: number;
     readonly divergenceL2: number;
+    /** Minimum vorticity over fluid cells in 1/s. */
+    readonly vorticityMin: number;
+    /** Maximum vorticity over fluid cells in 1/s. */
+    readonly vorticityMax: number;
+    /** Minimum stream function over fluid cells in m²/s. */
+    readonly streamFunctionMin: number;
+    /** Maximum stream function over fluid cells in m²/s. */
+    readonly streamFunctionMax: number;
     /**
      * Run convergence: velocity convergence when a tolerance was supplied,
      * otherwise pressure-solve convergence.
