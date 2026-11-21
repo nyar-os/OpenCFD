@@ -14,6 +14,8 @@
 //! * optional eddy-viscosity turbulence (constant or mixing-length);
 //! * thermal side/obstacle boundaries, volumetric heat sources and obstacle
 //!   Nusselt numbers;
+//! * Boussinesq buoyancy coupling the temperature field back to the momentum
+//!   equation;
 //! * SVG previews of cell-centred fields, traced streamlines and filled
 //!   contours with iso-lines;
 //! * residual/continuity and obstacle force history CSV export;
@@ -23,8 +25,8 @@
 //! * lid-driven cavity and Couette-like channel cases with wall, slip, inlet and
 //!   pressure-outlet sides.
 //!
-//! Compressibility, heat coupling with buoyancy, three-dimensional grids,
-//! adaptive meshing and external format import are **not** implemented. See
+//! Compressibility, three-dimensional grids, adaptive meshing and external
+//! format import are **not** implemented. See
 //! [`CAPABILITIES_JSON`] for the machine-readable capability matrix and the
 //! repository Readme for the user facing description.
 
@@ -90,7 +92,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "inletProfiles": "supported",
     "momentCoefficients": "supported",
     "massBalance": "supported",
-    "buoyancy": "unsupported",
+    "buoyancy": "supported",
     "compressible": "unsupported",
     "turbulence": "supported",
     "heat": "supported",

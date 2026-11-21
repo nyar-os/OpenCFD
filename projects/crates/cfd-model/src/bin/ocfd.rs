@@ -28,6 +28,7 @@ Usage:
   ocfd probe list <file>
   ocfd probe clear <file>
   ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
   ocfd convection set <file> --scheme upwind|central|quick
   ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
@@ -84,6 +85,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "obstacle" => obstacle_command(&args[1..]),
         "probe" => probe_command(&args[1..]),
         "scalar" => scalar_command(&args[1..]),
+        "buoyancy" => subcommand(args, "set", "buoyancy"),
         "convection" => convection_command(&args[1..]),
         "pressure" => pressure_command(&args[1..]),
         "reference" => subcommand(args, "set", "reference"),
@@ -108,6 +110,7 @@ fn subcommand(args: &[String], expected: &str, group: &str) -> Result<i32, CfdEr
             ("mesh", "set") => mesh_set(&args[2..]),
             ("fluid", "set") => fluid_set(&args[2..]),
             ("reference", "set") => reference_set(&args[2..]),
+            ("buoyancy", "set") => buoyancy_set(&args[2..]),
             _ => Err(CfdError::new(
                 "cli/unknown-command",
                 format!("unknown command `{group} {action}`"),
@@ -558,6 +561,29 @@ fn scalar_set(args: &[String]) -> Result<i32, CfdError> {
         "scalar set: diffusivity={} m2/s, initial={}, inletValue={}",
         scalar.diffusivity, scalar.initial, scalar.inlet_value
     );
+    Ok(0)
+}
+
+fn buoyancy_set(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--beta", "--t-ref", "--gx", "--gy"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>",
+    )?;
+    let beta = required_number(&parsed, "--beta")?;
+    let t_ref = required_number(&parsed, "--t-ref")?;
+    let gx = required_number(&parsed, "--gx")?;
+    let gy = required_number(&parsed, "--gy")?;
+    let mut session = open_session(file)?;
+    let summary = session.buoyancy_set(beta, t_ref, gx, gy)?;
+    match summary.buoyancy.as_ref() {
+        Some(buoyancy) => println!(
+            "buoyancy set: beta={} 1/K, tRef={} K, gravity=[{}, {}] m/s2",
+            buoyancy.beta, buoyancy.t_ref, buoyancy.gravity[0], buoyancy.gravity[1]
+        ),
+        None => println!("buoyancy disabled"),
+    }
     Ok(0)
 }
 

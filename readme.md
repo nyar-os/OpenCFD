@@ -8,7 +8,7 @@ OpenCFD is a **narrowly scoped, verifiable** two-dimensional incompressible Navi
 
 **The Rust session API is the single core implementation**: `cfd_model::OpenCfd` owns document reading and writing, editing, validation, solving and export. The CLI (`ocfd`), the Node-API addon (`open-cfd-napi`) and the TypeScript SDK (`@wae/open-cfd`) are thin wrappers and do not duplicate any solver logic.
 
-It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, free-slip, pressure-outlet and periodic sides, uniform imposed pressure gradients for pressure-driven flow, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export, SVG streamline export, filled-contour/iso-line SVG export, and CFL-limited adaptive time stepping with step statistics. It has no turbulence energy-equation models, compressible flow, Boussinesq buoyancy, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
+It is **not** a general-purpose commercial CFD package. The current build supports two-dimensional, single-phase, incompressible, constant-property laminar flow on a structured Cartesian mesh, rectangular and circular solid obstacles, passive scalar (temperature) transport, optional constant or mixing-length eddy viscosity, Boussinesq buoyancy coupling, thermal side and obstacle conditions with obstacle Nusselt numbers, selectable upwind, central or QUICK convection, selectable explicit Euler or RK2 time integration, uniform/parabolic/power-law inlet profiles, free-slip, pressure-outlet and periodic sides, uniform imposed pressure gradients for pressure-driven flow, vorticity and stream-function post-processing, point monitor time series, wall shear and friction coefficients, drag, lift and moment coefficients with configurable reference quantities, slip walls and pressure outlets, steady-state velocity convergence detection, boundary mass-balance diagnostics, residual/force history CSV export and coefficient summary CSV export, SVG streamline export, filled-contour/iso-line SVG export, and CFL-limited adaptive time stepping with step statistics. It has no turbulence energy-equation models, compressible flow, three-dimensional flow, adaptive meshing or external format import. Unsupported capabilities return `capability/not-implemented` (exit code `2`) instead of degrading silently.
 
 ## TypeScript SDK
 
@@ -46,7 +46,7 @@ await cfd.dispose();
 ```
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
-- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setBuoyancy`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
 - `solve(options?)` accepts `steps`, `tolerance`, `checkEvery`, `restart` (checkpoint path to resume) and `checkpoint` (path that receives the final state). Resumed reports keep cumulative `steps`/`time`.
 - `setBoundary` accepts `wall`, `inlet`, `outlet`, `slip` and `periodic`; `pressure` sets the outlet gauge pressure. Periodic sides must be paired. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setPressureGradient({dpdx, dpdy})` imposes a uniform pressure gradient in Pa/m as the momentum body force `-∇p/ρ`; setting both components to zero removes it. It drives pressure-driven channel flow, and combined with paired periodic sides it forms a fully developed periodic channel.
@@ -138,6 +138,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd probe add <file> --x <m> --y <m> [--id <name>]` | Add a point monitor sampled during the solve; omitting `--id` generates `probe-N` in order |
 | `ocfd probe list <file>` | Print the probe JSON array in document order |
 | `ocfd probe clear <file>` | Remove every point monitor |
+| `ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>` | Enable Boussinesq buoyancy (requires scalar transport); `--beta 0` removes the section |
 | `ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]` | Enable or update passive scalar (temperature) transport; omitted values are unchanged |
 | `ocfd convection set <file> --scheme upwind\|central\|quick` | Select the convective discretisation used by momentum and scalar transport |
 | `ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>` | Impose a uniform pressure gradient as a momentum body force; `0 0` clears it |
@@ -226,7 +227,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `scalar` | Optional; `diffusivity` (m²/s), `initial` and `inletValue`, enabling passive scalar transport |
 | `turbulence` | Optional; `model` (`none`, `constant`, `mixingLength`), `nuT` (m²/s) and `mixingLength` (m) |
 | `thermal` | Optional; `specificHeat`, `conductivity`, `heatSource`, per-side `temperature`/`heatFlux`, `obstacleTemperature`, `obstacleHeatFlux` and `referenceTemperature`; requires `scalar` |
-| `buoyancy` | Declared only for document compatibility; this build does not implement Boussinesq and validation returns `capability/not-implemented` |
+| `buoyancy` | Optional; `beta` (1/K), `tRef` (K) and `gravity` (`[gx, gy]`, m/s²); couples `−β(T − tRef)g` into momentum and requires `scalar` |
 
 Boundary semantics:
 
@@ -252,6 +253,7 @@ Boundary semantics:
 | `residual` / `residualHistory` | Final and `checkEvery`-sampled L2 norms of the velocity change; each sample also carries `continuity`, the RMS discrete divergence after that step |
 | `terminationReason` | `maxSteps` when every requested step was advanced, `steadyState` when the velocity residual met the tolerance first |
 | `timeScheme` | Momentum time scheme actually used: `euler` or `rk2` |
+| `buoyancy` | Whether Boussinesq buoyancy coupled temperature to momentum in this run |
 | `massBalance` | Boundary mass flow `{inflow, outflow, net, relativeError}` in kg/s; `net = outflow − inflow` and `relativeError = |net| / max(inflow, outflow)` |
 | `pressureConverged` | Whether the final pressure solve met its relative tolerance |
 | `pressureIterations` | SOR sweeps actually performed in the final step |
@@ -284,8 +286,7 @@ Boundary semantics:
 | Point monitor time series (`probes`) | ✅ Supported |
 | Wall shear stress and friction coefficients (`wallShear`) | ✅ Supported |
 | Eddy-viscosity turbulence, constant or mixing length (`turbulence`) | ✅ Supported (no energy-equation closure) |
-| Thermal side/obstacle conditions, heat sources and obstacle Nusselt numbers (`heat`) | ✅ Supported (no buoyancy) |
-| Boussinesq buoyancy (`buoyancy`) | ❌ Not implemented (avoids an unvalidated unstable path) |
+| Thermal side/obstacle conditions, heat sources, obstacle Nusselt numbers and Boussinesq buoyancy (`heat`, `buoyancy`) | ✅ Supported |
 | `.ocfd` JSON read and write | ✅ Supported |
 | CSV, legacy ASCII VTK, SVG field preview, SVG contours and SVG streamlines export (`contours`) | ✅ Supported (CSV/VTK at cell centres or nodes) |
 | Residual/continuity and obstacle force history CSV export (`history`) | ✅ Supported |
@@ -379,7 +380,7 @@ cargo build -p cfd-model --offline
 - The default first-order upwind plus explicit Euler makes space and time first-order, with significant numerical diffusion. `central` and `quick` are available, but above a cell Péclet number of about 2 they can oscillate and destabilise the explicit scheme. `rk2` reduces the temporal error (about 3.5× at a representative cavity step) but keeps the same pressure projection and CFL limits, so it does not permit a larger `dt`.
 - Inlet profiles shape only the normal velocity of an `inlet` side; the tangential component stays uniform, and walls, slip sides and outlets ignore the profile.
 - The imposed pressure gradient is uniform in space and constant in time; it is not a body-force field or a time-varying forcing.
-- Passive scalar (temperature) transport is supported, but Boussinesq buoyancy is not; the `buoyancy` field is rejected with `capability/not-implemented`.
+- Passive scalar (temperature) transport is supported and Boussinesq buoyancy couples it back to momentum through the `buoyancy` section; a buoyancy section requires `scalar` and validates `beta`, `tRef` and both gravity components as finite.
 - The stream function is integrated along one path from the bottom-left corner, so in a domain cut by obstacles it is a gauge-fixed diagnostic rather than a unique potential.
 - Point probes report the nearest cell centre without interpolation, and wall shear uses the molecular viscosity with a first-order half-cell gradient.
 - Boundary handling is first-order: tangential wall velocity uses a half-cell ghost, slip walls use mirrored ghost values, outlets use zero-gradient velocity with the prescribed Dirichlet pressure, and periodic sides wrap the momentum and pressure stencils across the opposite side.

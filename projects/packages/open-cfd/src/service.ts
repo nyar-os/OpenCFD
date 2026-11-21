@@ -12,6 +12,7 @@ import { nativeBinding } from './native.js';
 import type {
     BoundaryProfileSetRequest,
     BoundarySetRequest,
+    BuoyancySetRequest,
     CaseSummary,
     ConvectionSetRequest,
     ExportField,
@@ -225,6 +226,19 @@ export function scalarSet(handle: number, request: ScalarSetRequest): CaseSummar
             request.diffusivity,
             request.initial,
             request.inlet,
+        ),
+    );
+}
+
+/** Configures Boussinesq buoyancy and writes the document back. */
+export function buoyancySet(handle: number, request: BuoyancySetRequest): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('buoyancy.set').buoyancy_set(
+            handle,
+            request.beta,
+            request.tRef,
+            request.gx,
+            request.gy,
         ),
     );
 }

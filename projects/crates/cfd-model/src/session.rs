@@ -19,9 +19,9 @@ use crate::export::{
     export_streamlines, export_svg, export_vtk_with_layout, ExportField, ExportLayout,
 };
 use crate::model::{
-    Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, InletProfile, MeshConfig,
-    Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeScheme, TimeSettings,
-    Turbulence, TurbulenceModel,
+    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
+    MeshConfig, Model, Obstacle, Probe, Reference, ScalarConfig, Side, ThermalConfig, TimeScheme,
+    TimeSettings, Turbulence, TurbulenceModel,
 };
 use crate::solver::{
     solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
@@ -153,6 +153,9 @@ pub struct CaseSummary {
     /// Optional thermal (energy-equation) settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thermal: Option<ThermalConfig>,
+    /// Optional Boussinesq buoyancy settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub buoyancy: Option<Buoyancy>,
 }
 
 impl CaseSummary {
@@ -175,6 +178,7 @@ impl CaseSummary {
             scalar: model.scalar.clone(),
             turbulence: model.turbulence.clone(),
             thermal: model.thermal.clone(),
+            buoyancy: model.buoyancy.clone(),
         }
     }
 }
@@ -565,6 +569,32 @@ impl OpenCfd {
                     .diffusivity = diffusivity;
             }
             model.thermal = Some(thermal);
+        })
+    }
+
+    /// Configures Boussinesq buoyancy and writes the document back.
+    ///
+    /// `beta` is the thermal expansion coefficient (1/K), `t_ref` the
+    /// reference temperature (K) and `[gx, gy]` the gravity vector (m/s²). A
+    /// non-positive `beta` removes the buoyancy section. Buoyancy requires an
+    /// existing scalar (temperature) field, so configure `scalar_set` first.
+    pub fn buoyancy_set(
+        &mut self,
+        beta: f64,
+        t_ref: f64,
+        gx: f64,
+        gy: f64,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.buoyancy = if beta > 0.0 {
+                Some(Buoyancy {
+                    beta,
+                    t_ref,
+                    gravity: [gx, gy],
+                })
+            } else {
+                None
+            };
         })
     }
 

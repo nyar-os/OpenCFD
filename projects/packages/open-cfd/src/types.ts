@@ -188,8 +188,21 @@ export interface ThermalConfig {
     readonly referenceTemperature?: number;
 }
 
-/** Surface heat-transfer summary of one obstacle. */
-export interface ObstacleNusselt {
+/**
+ * Boussinesq buoyancy coupling to the scalar temperature field. Requires
+ * `scalar` transport; the momentum equation gains `−β·(T − tRef)·g` per unit
+ * mass.
+ */
+export interface Buoyancy {
+    /** Thermal expansion coefficient in 1/K. */
+    readonly beta: number;
+    /** Reference temperature in K where the density variation vanishes. */
+    readonly tRef: number;
+    /** Gravity vector `[gx, gy]` in m/s², typically `[0, -9.81]`. */
+    readonly gravity: readonly [number, number];
+}
+
+/** Surface heat-transfer summary of one obstacle. */export interface ObstacleNusselt {
     readonly id: string;
     readonly kind: 'rect' | 'circle';
     readonly meanHeatFlux: number;
@@ -227,6 +240,8 @@ export interface CaseSummary {
     readonly turbulence?: Turbulence;
     /** Thermal settings, when configured. */
     readonly thermal?: ThermalConfig;
+    /** Boussinesq buoyancy settings, when configured. */
+    readonly buoyancy?: Buoyancy;
 }
 
 /** Result of writing a document back to disk. */
@@ -425,6 +440,8 @@ export interface SolveReport {
     readonly convection: string;
     /** Time integration scheme used by the run. */
     readonly timeScheme: TimeScheme;
+    /** Whether Boussinesq buoyancy coupled temperature to momentum. */
+    readonly buoyancy: boolean;
 }
 
 /** Arguments of `CfdCase.setMesh()`. */
@@ -513,4 +530,16 @@ export interface ScalarSetRequest {
     readonly initial?: number;
     /** Inlet value; omitted keeps the current value. */
     readonly inlet?: number;
+}
+
+/** Arguments of `CfdCase.setBuoyancy()`. */
+export interface BuoyancySetRequest {
+    /** Thermal expansion coefficient in 1/K; `0` removes the buoyancy section. */
+    readonly beta: number;
+    /** Reference temperature in K. */
+    readonly tRef: number;
+    /** Gravity x component in m/s². */
+    readonly gx: number;
+    /** Gravity y component in m/s². */
+    readonly gy: number;
 }

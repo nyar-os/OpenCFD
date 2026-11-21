@@ -5,7 +5,7 @@ use crate::checkpoint::Checkpoint;
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
+    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, Side, ThermalConfig,
     TimeScheme, Turbulence, TurbulenceModel,
 };
 use crate::CfdError;
@@ -313,6 +313,9 @@ pub struct Report {
     /// Per-obstacle Nusselt numbers, when a thermal configuration is present.
     #[serde(default)]
     pub nusselt: Vec<ObstacleNusselt>,
+    /// Whether Boussinesq buoyancy coupled the temperature field to momentum.
+    #[serde(default)]
+    pub buoyancy: bool,
 }
 
 /// A solved velocity, pressure and optional scalar field with its report.
@@ -532,6 +535,7 @@ pub fn solve_with_checkpoint(
                 &u,
                 &v,
                 &p,
+                temperature.as_deref(),
                 eddy.as_deref(),
                 dt,
                 &mut u_star,
@@ -545,6 +549,7 @@ pub fn solve_with_checkpoint(
                 &u,
                 &v,
                 &p,
+                temperature.as_deref(),
                 eddy.as_deref(),
                 dt,
                 &mut u_star,
@@ -720,6 +725,10 @@ pub fn solve_with_checkpoint(
         eddy_viscosity_max: eddy_max,
         eddy_viscosity_mean: eddy_mean,
         nusselt,
+        buoyancy: model
+            .buoyancy
+            .as_ref()
+            .is_some_and(|buoyancy| buoyancy.beta > 0.0),
     };
     Ok(Solution {
         mesh,
@@ -990,6 +999,42 @@ fn pressure_residual(
     maximum
 }
 
+/// Boussinesq acceleration at one face, in m/s².
+///
+/// The face temperature is the mean of its two adjacent fluid cells; solid
+/// cells are skipped and an all-solid face contributes nothing. The returned
+/// value is `−β·(T − T_ref)·g`, where `component` selects `gx` or `gy`, so a
+/// hot cell under downward gravity accelerates upwards.
+fn face_buoyancy(
+    mesh: &Mesh,
+    buoyancy: Option<&Buoyancy>,
+    temperature: Option<&[f64]>,
+    first: (usize, usize),
+    second: (usize, usize),
+    component: usize,
+) -> f64 {
+    let (Some(buoyancy), Some(field)) = (buoyancy, temperature) else {
+        return 0.0;
+    };
+    if buoyancy.beta == 0.0 {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    let mut count = 0_usize;
+    for (i, j) in [first, second] {
+        if mesh.is_solid(i, j) {
+            continue;
+        }
+        sum += field[mesh.pressure_index(i, j)];
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    let value = sum / count as f64;
+    -buoyancy.beta * (value - buoyancy.t_ref) * buoyancy.gravity[component]
+}
+
 #[allow(clippy::too_many_arguments)]
 fn momentum_derivative(
     mesh: &Mesh,
@@ -997,6 +1042,7 @@ fn momentum_derivative(
     u: &[f64],
     v: &[f64],
     p: &[f64],
+    temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
     du: &mut [f64],
     dv: &mut [f64],
@@ -1076,7 +1122,32 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_west]) / dx;
             let effective = nu + u_face_eddy(mesh, eddy, i, j);
-            du[index] = -convection + effective * diffusion - pressure_gradient / rho + source_x;
+            let buoyancy_x = if i == 0 {
+                if periodic_x {
+                    face_buoyancy(
+                        mesh,
+                        model.buoyancy.as_ref(),
+                        temperature,
+                        (mesh.nx - 1, j),
+                        (0, j),
+                        0,
+                    )
+                } else {
+                    0.0
+                }
+            } else {
+                face_buoyancy(
+                    mesh,
+                    model.buoyancy.as_ref(),
+                    temperature,
+                    (i - 1, j),
+                    (i, j),
+                    0,
+                )
+            };
+            du[index] = -convection + effective * diffusion - pressure_gradient / rho
+                + source_x
+                + buoyancy_x;
         }
         if periodic_x {
             du[mesh.u_index(mesh.nx, j)] = du[mesh.u_index(0, j)];
@@ -1152,7 +1223,32 @@ fn momentum_derivative(
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_south]) / dy;
             let effective = nu + v_face_eddy(mesh, eddy, i, j);
-            dv[index] = -convection + effective * diffusion - pressure_gradient / rho + source_y;
+            let buoyancy_y = if j == 0 {
+                if periodic_y {
+                    face_buoyancy(
+                        mesh,
+                        model.buoyancy.as_ref(),
+                        temperature,
+                        (i, mesh.ny - 1),
+                        (i, 0),
+                        1,
+                    )
+                } else {
+                    0.0
+                }
+            } else {
+                face_buoyancy(
+                    mesh,
+                    model.buoyancy.as_ref(),
+                    temperature,
+                    (i, j - 1),
+                    (i, j),
+                    1,
+                )
+            };
+            dv[index] = -convection + effective * diffusion - pressure_gradient / rho
+                + source_y
+                + buoyancy_y;
         }
     }
     if periodic_y {
@@ -1170,6 +1266,7 @@ fn momentum_euler(
     u: &[f64],
     v: &[f64],
     p: &[f64],
+    temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
     dt: f64,
     u_star: &mut [f64],
@@ -1177,7 +1274,7 @@ fn momentum_euler(
     du: &mut [f64],
     dv: &mut [f64],
 ) {
-    momentum_derivative(mesh, model, u, v, p, eddy, du, dv);
+    momentum_derivative(mesh, model, u, v, p, temperature, eddy, du, dv);
     for index in 0..u.len() {
         u_star[index] = u[index] + dt * du[index];
     }
@@ -1195,6 +1292,7 @@ fn momentum_heun(
     u: &[f64],
     v: &[f64],
     p: &[f64],
+    temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
     dt: f64,
     u_star: &mut [f64],
@@ -1207,7 +1305,7 @@ fn momentum_heun(
     let mut du2 = vec![0.0; u.len()];
     let mut dv2 = vec![0.0; v.len()];
 
-    momentum_derivative(mesh, model, u, v, p, eddy, &mut du1, &mut dv1);
+    momentum_derivative(mesh, model, u, v, p, temperature, eddy, &mut du1, &mut dv1);
     for index in 0..u.len() {
         u1[index] = u[index] + dt * du1[index];
     }
@@ -1216,7 +1314,17 @@ fn momentum_heun(
     }
     mesh.apply_velocity_boundaries(&model.boundaries, &mut u1, &mut v1);
 
-    momentum_derivative(mesh, model, &u1, &v1, p, eddy, &mut du2, &mut dv2);
+    momentum_derivative(
+        mesh,
+        model,
+        &u1,
+        &v1,
+        p,
+        temperature,
+        eddy,
+        &mut du2,
+        &mut dv2,
+    );
     for index in 0..u.len() {
         u_star[index] = u[index] + 0.5 * dt * (du1[index] + du2[index]);
     }
@@ -2860,6 +2968,55 @@ mod tests {
             length_y: 1.0,
         })
         .expect("mesh")
+    }
+
+    #[test]
+    fn buoyancy_acceleration_points_away_from_gravity_when_hot() {
+        let mesh = mesh();
+        let buoyancy = Buoyancy {
+            beta: 0.1,
+            t_ref: 300.0,
+            gravity: [0.0, -9.81],
+        };
+        let mut temperature = vec![300.0; mesh.pressure_count()];
+        temperature[mesh.pressure_index(0, 0)] = 310.0;
+        temperature[mesh.pressure_index(1, 0)] = 310.0;
+        let vertical = face_buoyancy(
+            &mesh,
+            Some(&buoyancy),
+            Some(&temperature),
+            (0, 0),
+            (1, 0),
+            1,
+        );
+        assert!((vertical - 9.81).abs() < 1e-12);
+        assert_eq!(
+            face_buoyancy(
+                &mesh,
+                Some(&buoyancy),
+                Some(&temperature),
+                (0, 0),
+                (1, 0),
+                0,
+            ),
+            0.0
+        );
+
+        temperature[mesh.pressure_index(0, 0)] = 290.0;
+        temperature[mesh.pressure_index(1, 0)] = 290.0;
+        let cold = face_buoyancy(
+            &mesh,
+            Some(&buoyancy),
+            Some(&temperature),
+            (0, 0),
+            (1, 0),
+            1,
+        );
+        assert!((cold + 9.81).abs() < 1e-12);
+        assert_eq!(
+            face_buoyancy(&mesh, None, Some(&temperature), (0, 0), (1, 0), 1),
+            0.0
+        );
     }
 
     #[test]

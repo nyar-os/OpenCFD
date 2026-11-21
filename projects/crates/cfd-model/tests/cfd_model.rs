@@ -7,9 +7,10 @@ use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
     export_residuals, export_streamlines, export_svg, export_vtk, export_vtk_with_layout, solve,
     solve_pressure, solve_with, solve_with_checkpoint, stream_function, transport_scalar,
-    vorticity, Boundaries, Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField,
-    ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, PressureSettings,
-    Probe, Reference, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON, VERSION,
+    vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme,
+    ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle,
+    PressureSettings, Probe, Reference, ScalarConfig, SideThermal, Solution, SolveOptions,
+    ThermalConfig, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -398,7 +399,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"cavity2d\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"compressible\": \"unsupported\""));
     assert!(CAPABILITIES_JSON.contains("\"obstacles\": \"supported\""));
-    assert!(CAPABILITIES_JSON.contains("\"buoyancy\": \"unsupported\""));
+    assert!(CAPABILITIES_JSON.contains("\"buoyancy\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
@@ -1667,6 +1668,107 @@ fn pressure_gradient_round_trips_and_rejects_non_finite_values() {
     assert_eq!(
         invalid.validate().expect_err("non-finite gradient").code,
         "pressure/invalid"
+    );
+}
+
+#[test]
+fn buoyancy_requires_scalar_and_finite_settings() {
+    let mut model = Model::new();
+    model.buoyancy = Some(Buoyancy {
+        beta: 1.0e-3,
+        t_ref: 300.0,
+        gravity: [0.0, -9.81],
+    });
+    assert_eq!(
+        model.validate().expect_err("buoyancy without scalar").code,
+        "buoyancy/invalid"
+    );
+
+    model.scalar = Some(ScalarConfig {
+        diffusivity: 1.0e-3,
+        initial: 300.0,
+        inlet_value: 300.0,
+    });
+    model
+        .validate()
+        .expect("buoyancy with scalar transport is valid");
+    let text = model.to_json_pretty().expect("serialize");
+    assert_eq!(
+        Model::parse_json(&text).expect("parse").buoyancy,
+        model.buoyancy
+    );
+
+    let mut negative = model.clone();
+    negative.buoyancy.as_mut().expect("buoyancy").beta = -1.0;
+    assert_eq!(
+        negative.validate().expect_err("negative beta").code,
+        "buoyancy/invalid"
+    );
+}
+
+#[test]
+fn hot_bottom_drives_upward_flow_through_buoyancy() {
+    let mut model = mesh_model(12, 12);
+    model.boundaries.top = Boundary {
+        kind: BoundaryKind::Wall,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.time.dt = 0.001;
+    model.time.steps = 200;
+    model.scalar = Some(ScalarConfig {
+        diffusivity: 2.0e-3,
+        initial: 300.0,
+        inlet_value: 300.0,
+    });
+    model.thermal = Some(ThermalConfig {
+        specific_heat: 1.0,
+        conductivity: Some(0.05),
+        heat_source: 0.0,
+        bottom: SideThermal::default(),
+        top: SideThermal::default(),
+        left: SideThermal {
+            temperature: Some(320.0),
+            heat_flux: None,
+        },
+        right: SideThermal {
+            temperature: Some(300.0),
+            heat_flux: None,
+        },
+        ..ThermalConfig::default()
+    });
+    model.buoyancy = Some(Buoyancy {
+        beta: 0.2,
+        t_ref: 300.0,
+        gravity: [0.0, -9.81],
+    });
+    let options = SolveOptions {
+        steps: Some(200),
+        ..SolveOptions::default()
+    };
+    let buoyant = solve_with(&model, &options).expect("buoyant solve");
+    assert_finite(&buoyant.u, "buoyant u");
+    assert_finite(&buoyant.v, "buoyant v");
+    assert!(buoyant.report.buoyancy);
+    assert!(
+        buoyant.report.max_velocity > 1.0e-4,
+        "buoyancy should create motion, got {}",
+        buoyant.report.max_velocity
+    );
+    let hottest_rise = buoyant.v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        hottest_rise > 1.0e-5,
+        "hot bottom should create upward flow, got {hottest_rise}"
+    );
+
+    let mut calm = model.clone();
+    calm.buoyancy = None;
+    let calm = solve_with(&calm, &options).expect("calm solve");
+    assert!(!calm.report.buoyancy);
+    assert!(
+        calm.report.max_velocity < 1.0e-9,
+        "without buoyancy the cavity should stay at rest, got {}",
+        calm.report.max_velocity
     );
 }
 

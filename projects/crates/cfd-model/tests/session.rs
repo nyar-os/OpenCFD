@@ -641,6 +641,60 @@ fn session_pressure_gradient_round_trips_through_cli() {
 }
 
 #[test]
+fn session_buoyancy_requires_scalar_and_round_trips_through_cli() {
+    let directory = temporary_dir("buoyancy");
+    let path = directory.join("buoyancy.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    assert_eq!(
+        session
+            .buoyancy_set(0.2, 300.0, 0.0, -9.81)
+            .expect_err("buoyancy without scalar")
+            .code,
+        "buoyancy/invalid"
+    );
+    session
+        .scalar_set(1.0e-3, Some(300.0), Some(300.0))
+        .expect("scalar");
+    let summary = session
+        .buoyancy_set(0.2, 300.0, 0.0, -9.81)
+        .expect("buoyancy");
+    assert_eq!(
+        summary.buoyancy,
+        Some(cfd_model::Buoyancy {
+            beta: 0.2,
+            t_ref: 300.0,
+            gravity: [0.0, -9.81],
+        })
+    );
+    assert_eq!(Model::load(&path).expect("load").buoyancy, summary.buoyancy);
+
+    let cli_path = directory.join("cli-buoyancy.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    assert!(run_cli(&["scalar", "set", &cli, "--diffusivity", "1e-3"])
+        .status
+        .success());
+    let output = run_cli(&[
+        "buoyancy", "set", &cli, "--beta", "0.2", "--t-ref", "300", "--gx", "0", "--gy", "-9.81",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd buoyancy set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        Model::load(&cli_path).expect("load CLI document").buoyancy,
+        summary.buoyancy
+    );
+
+    let summary = session
+        .buoyancy_set(0.0, 300.0, 0.0, -9.81)
+        .expect("clear buoyancy");
+    assert_eq!(summary.buoyancy, None);
+}
+
+#[test]
 fn session_and_cli_restart_from_checkpoints() {
     let directory = temporary_dir("restart");
     let path = directory.join("restart.ocfd");

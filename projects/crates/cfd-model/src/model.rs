@@ -962,19 +962,21 @@ impl ThermalConfig {
 
 /// Boussinesq buoyancy settings.
 ///
-/// Declared for documentation completeness only. This build rejects a document
-/// that enables buoyancy with `capability/not-implemented`; no unstable path is
-/// shipped silently.
+/// Buoyancy couples the passive scalar (temperature) field to the momentum
+/// equation. The density variation is linearised as `ρ = ρ₀(1 − β(T − T_ref))`,
+/// so the momentum equation gains the body force `−β(T − T_ref)·g` per unit
+/// mass, with `g` the supplied gravity vector (for example `[0, -9.81]`). A
+/// buoyancy section requires scalar transport so a temperature field exists.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Buoyancy {
-    /// Thermal expansion coefficient `β` (1/K).
+    /// Thermal expansion coefficient `β` (1/K); must be non-negative.
     #[serde(default)]
     pub beta: f64,
-    /// Reference temperature `T_ref` (K).
+    /// Reference temperature `T_ref` (K) where the density variation vanishes.
     #[serde(default)]
     pub t_ref: f64,
-    /// Gravity vector `[gx, gy]` (m/s²).
+    /// Gravity vector `[gx, gy]` (m/s²), typically `[0, -9.81]`.
     #[serde(default)]
     pub gravity: [f64; 2],
 }
@@ -1035,7 +1037,7 @@ pub struct Model {
     /// Optional energy-equation settings (thermal boundaries and source).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thermal: Option<ThermalConfig>,
-    /// Optional Boussinesq buoyancy; declared but not supported by this build.
+    /// Optional Boussinesq buoyancy coupling to the scalar temperature field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buoyancy: Option<Buoyancy>,
 }
@@ -1371,11 +1373,31 @@ impl Model {
                 }
             }
         }
-        if self.buoyancy.is_some() {
-            report.push(Issue::error(
-                "capability/not-implemented",
-                "Boussinesq buoyancy has not passed stability validation, so this build does not support buoyancy; remove the field from the document",
-            ));
+        if let Some(buoyancy) = &self.buoyancy {
+            if !buoyancy.beta.is_finite() || buoyancy.beta < 0.0 {
+                report.push(Issue::error(
+                    "buoyancy/invalid",
+                    "buoyancy.beta must be a finite non-negative number",
+                ));
+            }
+            if !buoyancy.t_ref.is_finite() {
+                report.push(Issue::error(
+                    "buoyancy/invalid",
+                    "buoyancy.tRef must be a finite number",
+                ));
+            }
+            if !buoyancy.gravity.iter().all(|value| value.is_finite()) {
+                report.push(Issue::error(
+                    "buoyancy/invalid",
+                    "buoyancy.gravity components must be finite numbers",
+                ));
+            }
+            if self.scalar.is_none() {
+                report.push(Issue::error(
+                    "buoyancy/invalid",
+                    "buoyancy requires scalar (temperature) transport to be configured",
+                ));
+            }
         }
         report
     }

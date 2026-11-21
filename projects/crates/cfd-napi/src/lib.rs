@@ -324,6 +324,18 @@ fn scalar_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Configures Boussinesq buoyancy and returns the summary.
+#[function]
+fn buoyancy_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let beta = number(&ctx, 1)?;
+    let t_ref = number(&ctx, 2)?;
+    let gx = number(&ctx, 3)?;
+    let gy = number(&ctx, 4)?;
+    let summary = with_session(handle, |session| session.buoyancy_set(beta, t_ref, gx, gy))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Selects the convective discretisation and returns the summary.
 #[function]
 fn convection_set(ctx: CallContext) -> Result<JsValue> {
@@ -431,6 +443,7 @@ register_module![
     probe_list,
     probe_clear,
     scalar_set,
+    buoyancy_set,
     convection_set,
     pressure_gradient_set,
     reference_set,

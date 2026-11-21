@@ -12,6 +12,7 @@ import * as service from './service.js';
 import type {
     BoundaryProfileSetRequest,
     BoundarySetRequest,
+    BuoyancySetRequest,
     CaseSummary,
     ConvectionSetRequest,
     ExportField,
@@ -164,6 +165,12 @@ export class CfdCase {
     setScalar(request: ScalarSetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.scalarSet(this.handle, request));
+    }
+
+    /** Configures Boussinesq buoyancy and writes the document back. */
+    setBuoyancy(request: BuoyancySetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.buoyancySet(this.handle, request));
     }
 
     /** Validates the document and returns its summary. */

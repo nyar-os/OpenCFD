@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets and periodic sides), pressure-driven flow, obstacle, passive scalar, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets and periodic sides), pressure-driven flow, obstacle, passive scalar, buoyancy, turbulence or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -12,7 +12,7 @@ create and reopen one `.ocfd` case, edit mesh, fluid, time (including the
 `euler`/`rk2` scheme), boundary (including free-slip walls, outlet pressure, periodic sides and
 parabolic/power-law inlet profiles), uniform pressure gradients for
 pressure-driven flow, obstacle, force/moment reference, passive
-scalar, turbulence and thermal settings, validate it, solve it and export CSV,
+scalar, buoyancy, turbulence and thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV, force history CSV or a final drag/lift/moment
 summary CSV. CSV and VTK can sample
@@ -21,8 +21,9 @@ a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
 (`wallShear`), drag/lift/moment coefficients (`forces`), sampled continuity and
 boundary mass balance (`massBalance`), the selected `timeScheme`, adaptive-step statistics (`adaptive`,
-`averageDt`, `minDt`, `maxDt`) and the `terminationReason`. Compressible flow, three-dimensional flow, Boussinesq
-buoyancy, adaptive meshing and external format import are
+`averageDt`, `minDt`, `maxDt`), the `terminationReason` and whether Boussinesq
+buoyancy was applied (`buoyancy`). Compressible flow, three-dimensional flow,
+adaptive meshing and external format import are
 not implemented and report `capability/not-implemented`.
 
 Only these commands are executable today:
@@ -44,6 +45,7 @@ ocfd probe add <file> --x <m> --y <m> [--id <name>]
 ocfd probe list <file>
 ocfd probe clear <file>
 ocfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+ocfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
 ocfd turbulence set <file> --model none|constant|mixingLength [--nu-t <m2/s>] [--mixing-length <m>]
 ocfd heat set <file> [thermal options]
 ocfd convection set <file> --scheme upwind|central|quick
@@ -83,8 +85,11 @@ rename. Confirm the path before running them.
 - The solver is two-dimensional, single-phase, incompressible and
   constant-property, on a structured Cartesian mesh.
 - Turbulence is limited to `none`, `constant` and `mixingLength` eddy viscosity.
-- Heat transfer uses the implemented passive scalar and thermal configuration;
-  there is no coupled buoyancy.
+- Heat transfer uses the implemented passive scalar and thermal configuration.
+  `buoyancy set` couples the temperature field back to momentum with
+  `−β(T − tRef)·g`, requires scalar transport, and `--beta 0` disables it.
+  The coupling is explicit, so pick `--dt` small enough for the induced
+  acceleration.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces` and
   `coefficients` are
   the only export targets. `inp` and `openfoam` reject with

@@ -43,6 +43,7 @@ usage:
   open-cfd probe list <file>
   open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  open-cfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
   open-cfd convection set <file> --scheme upwind|central|quick
   open-cfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
   open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
@@ -570,6 +571,34 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const scalar = summary.scalar;
             console.log(
                 `scalar set: diffusivity=${scalar?.diffusivity} m2/s, initial=${scalar?.initial}, inletValue=${scalar?.inletValue}`,
+            );
+            return 0;
+        }
+        case 'buoyancy': {
+            expectSet(rest, 'buoyancy');
+            const parsed = parseArguments(rest.slice(1), [
+                '--beta',
+                '--t-ref',
+                '--gx',
+                '--gy',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>',
+            );
+            const document = await session.open(file);
+            const summary = document.setBuoyancy({
+                beta: numberOption(parsed, '--beta'),
+                tRef: numberOption(parsed, '--t-ref'),
+                gx: numberOption(parsed, '--gx'),
+                gy: numberOption(parsed, '--gy'),
+            });
+            const buoyancy = summary.buoyancy;
+            console.log(
+                buoyancy === undefined
+                    ? 'buoyancy disabled'
+                    : `buoyancy set: beta=${buoyancy.beta} 1/K, tRef=${buoyancy.tRef} K, gravity=[${buoyancy.gravity[0]}, ${buoyancy.gravity[1]}] m/s2`,
             );
             return 0;
         }
