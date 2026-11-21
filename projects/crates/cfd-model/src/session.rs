@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::export::{export_csv, export_svg, export_vtk, ExportField};
 use crate::model::{
     Boundaries, BoundaryKind, ConvectionScheme, Fluid, InitialField, MeshConfig, Model, Obstacle,
-    ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
+    Probe, ScalarConfig, Side, ThermalConfig, TimeSettings, Turbulence, TurbulenceModel,
 };
 use crate::solver::{solve, solve_with, Report, SolveOptions};
 use crate::{CfdError, CAPABILITIES_JSON};
@@ -107,6 +107,8 @@ pub struct CaseSummary {
     pub initial: Option<InitialField>,
     /// Solid obstacles in document order.
     pub obstacles: Vec<Obstacle>,
+    /// Point monitors in document order.
+    pub probes: Vec<Probe>,
     /// Optional passive scalar transport settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -132,6 +134,7 @@ impl CaseSummary {
             boundaries: model.boundaries.clone(),
             initial: model.initial.clone(),
             obstacles: model.obstacles.clone(),
+            probes: model.probes.clone(),
             scalar: model.scalar.clone(),
             turbulence: model.turbulence.clone(),
             thermal: model.thermal.clone(),
@@ -348,6 +351,31 @@ impl OpenCfd {
     /// Returns the solid obstacles in document order.
     pub fn obstacle_list(&self) -> Vec<Obstacle> {
         self.model.obstacles.clone()
+    }
+
+    /// Appends a point monitor and writes the document back.
+    ///
+    /// An empty id is replaced by `probe-N`, where `N` is the one-based
+    /// position in the probe list.
+    pub fn probe_add(&mut self, probe: Probe) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            let id = if probe.id().is_empty() {
+                format!("probe-{}", model.probes.len() + 1)
+            } else {
+                probe.id().to_string()
+            };
+            model.probes.push(probe.with_id(id));
+        })
+    }
+
+    /// Returns the point monitors in document order.
+    pub fn probe_list(&self) -> Vec<Probe> {
+        self.model.probes.clone()
+    }
+
+    /// Removes every point monitor and writes the document back.
+    pub fn probe_clear(&mut self) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| model.probes.clear())
     }
 
     /// Configures passive scalar transport and writes the document back.

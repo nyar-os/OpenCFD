@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_csv, export_svg, export_vtk, solve, solve_pressure, solve_with, stream_function,
     transport_scalar, vorticity, Boundary, BoundaryKind, ConvectionScheme, ExportField, Mesh,
-    Model, Obstacle, PressureSettings, ScalarConfig, Solution, SolveOptions, CAPABILITIES_JSON,
-    VERSION,
+    Model, Obstacle, PressureSettings, Probe, ScalarConfig, Solution, SolveOptions,
+    CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -317,6 +317,8 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"probes\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"wallShear\": \"supported\""));
 }
 
 #[test]
@@ -725,6 +727,111 @@ fn scalar_front_sharpens_with_central_and_quick() {
         "QUICK gradient {} should exceed 1.5x upwind {upwind_gradient}",
         gradient(&fields[2])
     );
+}
+
+#[test]
+fn probe_series_records_every_sample_point() {
+    let mut model = mesh_model(16, 16);
+    model.time.steps = 40;
+    model.time.pressure_iterations = 60;
+    model.probes = vec![Probe {
+        id: "centre".to_string(),
+        x: 0.5,
+        y: 0.5,
+    }];
+
+    let solution = solve(&model).expect("solve");
+    assert_eq!(solution.report.probes.len(), 1);
+    let probe = &solution.report.probes[0];
+    assert_eq!(probe.id, "centre");
+    assert_eq!(probe.x, 0.5);
+    assert_eq!(probe.cell, [8, 8]);
+    assert!(!probe.history.is_empty());
+    assert_eq!(
+        probe.history.last().map(|sample| sample.step),
+        Some(solution.report.steps)
+    );
+    for sample in &probe.history {
+        assert!(sample.u.is_finite() && sample.v.is_finite());
+        assert!(sample.pressure.is_finite());
+        assert!(sample.temperature.is_none());
+        assert!(sample.time > 0.0);
+        assert!((sample.speed - sample.u.hypot(sample.v)).abs() < 1e-12);
+    }
+    let value = serde_json::to_value(&solution.report).expect("report json");
+    assert!(value.get("probes").is_some());
+    assert!(value.get("wallShear").is_some());
+}
+
+#[test]
+fn probe_outside_the_domain_or_inside_an_obstacle_is_rejected() {
+    let mut model = mesh_model(12, 12);
+    model.probes = vec![Probe {
+        id: "outside".to_string(),
+        x: 1.5,
+        y: 0.5,
+    }];
+    assert_eq!(model.validate().expect_err("outside").code, "probe/invalid");
+
+    model.probes = vec![Probe {
+        id: "blocked".to_string(),
+        x: 0.5,
+        y: 0.5,
+    }];
+    model.obstacles = vec![Obstacle::Rect {
+        id: "block".to_string(),
+        x0: 0.4,
+        y0: 0.4,
+        x1: 0.6,
+        y1: 0.6,
+    }];
+    assert_eq!(model.validate().expect_err("blocked").code, "probe/invalid");
+    assert_eq!(solve(&model).expect_err("solve").code, "probe/invalid");
+}
+
+#[test]
+fn wall_shear_reports_moving_lid_drag_and_zero_when_at_rest() {
+    let mut model = mesh_model(16, 16);
+    model.time.steps = 80;
+    model.time.pressure_iterations = 60;
+
+    let solution = solve(&model).expect("solve");
+    let shear = &solution.report.wall_shear;
+    assert_eq!(shear.len(), 4, "all four sides are walls by default");
+    for item in shear {
+        assert!(item.mean_shear.is_finite());
+        assert!(item.max_shear.is_finite());
+        assert!(item.friction_coefficient.is_finite());
+        assert!(item.max_shear >= item.mean_shear.abs() - 1e-12);
+    }
+    let find = |side: &str| {
+        shear
+            .iter()
+            .find(|item| item.side == side)
+            .unwrap_or_else(|| panic!("missing {side} wall shear"))
+    };
+    let top = find("top");
+    let bottom = find("bottom");
+    assert!(top.mean_shear > 0.0, "top mean shear {}", top.mean_shear);
+    // The lid drives a clockwise vortex: the bottom wall retards a negative-x
+    // flow, so it also exerts a positive-x shear on the fluid.
+    assert!(
+        bottom.mean_shear > 0.0,
+        "bottom mean shear {}",
+        bottom.mean_shear
+    );
+    assert!(top.friction_coefficient > 0.0);
+    assert!(top.max_shear > 0.0);
+
+    let mut still = mesh_model(16, 16);
+    still.time.steps = 30;
+    still.boundaries.top = Boundary::wall();
+    let still_solution = solve(&still).expect("still solve");
+    for item in &still_solution.report.wall_shear {
+        assert!(item.mean_shear.abs() < 1e-12, "{} {:?}", item.side, item);
+        assert!(item.max_shear.abs() < 1e-12);
+        assert!(item.friction_coefficient.abs() < 1e-12);
+    }
 }
 
 #[test]

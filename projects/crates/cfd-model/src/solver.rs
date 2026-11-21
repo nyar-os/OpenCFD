@@ -96,6 +96,63 @@ pub struct ObstacleNusselt {
     pub nusselt: f64,
 }
 
+/// One sampled probe reading.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeSample {
+    /// One-based time step of the sample.
+    pub step: usize,
+    /// Physical time of the sample, `step × dt` (s).
+    pub time: f64,
+    /// Cell-centred x velocity (m/s).
+    pub u: f64,
+    /// Cell-centred y velocity (m/s).
+    pub v: f64,
+    /// Speed `√(u² + v²)` (m/s).
+    pub speed: f64,
+    /// Cell-centred gauge pressure (Pa).
+    pub pressure: f64,
+    /// Cell-centred temperature (K), or `null` when no scalar is configured.
+    pub temperature: Option<f64>,
+}
+
+/// Time series recorded at one point monitor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeSeries {
+    /// Stable probe identifier.
+    pub id: String,
+    /// Probe x coordinate (m).
+    pub x: f64,
+    /// Probe y coordinate (m).
+    pub y: f64,
+    /// Cell `[i, j]` whose centre is nearest to the probe.
+    pub cell: [usize; 2],
+    /// Samples in time order (bounded).
+    pub history: Vec<ProbeSample>,
+}
+
+/// Wall shear and friction summary of one domain side.
+///
+/// Only sides whose boundary kind is `wall` are reported. `meanShear` is the
+/// length-averaged tangential stress the wall exerts on the fluid, positive
+/// along the side's positive tangent (`+y` on the left and right sides, `+x` on
+/// the top and bottom sides) in pascals. `frictionCoefficient` is
+/// `meanShear / (0.5 ρ U²)` with `U` the same reference speed used by the force
+/// coefficients.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WallShear {
+    /// Side identifier (`left`, `right`, `top` or `bottom`).
+    pub side: String,
+    /// Length-averaged wall shear stress (Pa).
+    pub mean_shear: f64,
+    /// Largest absolute wall shear stress along the side (Pa).
+    pub max_shear: f64,
+    /// Friction coefficient `meanShear / (0.5 ρ U²)`.
+    pub friction_coefficient: f64,
+}
+
 /// Summary of a completed simulation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +207,12 @@ pub struct Report {
     pub pressure_residual_initial: f64,
     /// Per-obstacle forces and coefficients, in document order.
     pub forces: Vec<ObstacleForce>,
+    /// Point monitor time series, in document order.
+    #[serde(default)]
+    pub probes: Vec<ProbeSeries>,
+    /// Wall shear and friction summary of every wall side, in side order.
+    #[serde(default)]
+    pub wall_shear: Vec<WallShear>,
     /// Convection scheme used by the run (`upwind`, `central` or `quick`).
     #[serde(default = "default_convection_name")]
     pub convection: String,
@@ -326,6 +389,8 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
     let mut steady_state = false;
     let mut residual_history = Vec::new();
     let mut force_samples: Vec<Vec<ForceSample>> = vec![Vec::new(); model.obstacles.len()];
+    let probe_cells = locate_probes(&mesh, model)?;
+    let mut probe_samples: Vec<Vec<ProbeSample>> = vec![Vec::new(); model.probes.len()];
 
     for step in 1..=steps {
         u_previous.copy_from_slice(&u);
@@ -409,6 +474,17 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
                 step,
                 &mut force_samples,
             );
+            append_probe_samples(
+                &mesh,
+                model,
+                &u,
+                &v,
+                &p,
+                temperature.as_deref(),
+                step,
+                &probe_cells,
+                &mut probe_samples,
+            );
         }
 
         if let Some(tolerance) = options.tolerance {
@@ -429,6 +505,8 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
     let (vorticity_min, vorticity_max) = pressure_range(&mesh, &vorticity_field);
     let (stream_function_min, stream_function_max) = pressure_range(&mesh, &stream_function_field);
     let forces = build_forces(&mesh, model, &u, &v, &p, eddy.as_deref(), &force_samples);
+    let probes = build_probes(model, &probe_cells, &probe_samples);
+    let wall_shear_summary = wall_shear(&mesh, model, &u, &v);
     let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
     let nusselt = compute_nusselt(&mesh, model, &u, &v, temperature.as_deref());
 
@@ -459,6 +537,8 @@ pub fn solve_with(model: &Model, options: &SolveOptions) -> Result<Solution, Cfd
         pressure_residual: last_stats.residual,
         pressure_residual_initial: last_stats.initial_residual,
         forces,
+        probes,
+        wall_shear: wall_shear_summary,
         convection: model.convection.as_str().to_string(),
         turbulence_model: model
             .turbulence
@@ -1762,6 +1842,148 @@ fn build_forces(
         .collect()
 }
 
+/// Resolves every probe to the nearest pressure cell.
+///
+/// A probe is rejected with `probe/invalid` when that cell is solid, which
+/// keeps the recorded series on the fluid side of every obstacle.
+fn locate_probes(mesh: &Mesh, model: &Model) -> Result<Vec<(usize, usize)>, CfdError> {
+    model
+        .probes
+        .iter()
+        .map(|probe| {
+            let i = ((probe.x / mesh.dx).floor() as isize).clamp(0, mesh.nx as isize - 1) as usize;
+            let j = ((probe.y / mesh.dy).floor() as isize).clamp(0, mesh.ny as isize - 1) as usize;
+            if mesh.is_solid(i, j) {
+                return Err(CfdError::new(
+                    "probe/invalid",
+                    format!(
+                        "probe ({}, {}) lands in a solid cell; move it into the fluid",
+                        probe.x, probe.y
+                    ),
+                ));
+            }
+            Ok((i, j))
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_probe_samples(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    p: &[f64],
+    temperature: Option<&[f64]>,
+    step: usize,
+    cells: &[(usize, usize)],
+    samples: &mut [Vec<ProbeSample>],
+) {
+    for (index, &(i, j)) in cells.iter().enumerate() {
+        let cell = mesh.pressure_index(i, j);
+        let (u_value, v_value) = mesh.cell_velocity(u, v, i, j);
+        samples[index].push(ProbeSample {
+            step,
+            time: step as f64 * model.time.dt,
+            u: u_value,
+            v: v_value,
+            speed: u_value.hypot(v_value),
+            pressure: p[cell],
+            temperature: temperature.map(|field| field[cell]),
+        });
+    }
+}
+
+fn build_probes(
+    model: &Model,
+    cells: &[(usize, usize)],
+    samples: &[Vec<ProbeSample>],
+) -> Vec<ProbeSeries> {
+    model
+        .probes
+        .iter()
+        .enumerate()
+        .map(|(index, probe)| {
+            let id = if probe.id().is_empty() {
+                format!("probe-{}", index + 1)
+            } else {
+                probe.id().to_string()
+            };
+            let cell = cells.get(index).copied().unwrap_or((0, 0));
+            ProbeSeries {
+                id,
+                x: probe.x,
+                y: probe.y,
+                cell: [cell.0, cell.1],
+                history: samples.get(index).cloned().unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Length-averaged wall shear and friction coefficient of every wall side.
+///
+/// The tangential gradient uses the half-cell distance from the wall to the
+/// adjacent cell centre, so a linear tangential profile is reproduced exactly.
+/// Solid cells along the side are skipped, and a side without fluid-adjacent
+/// boundary cells is omitted. Only the molecular viscosity contributes; eddy
+/// viscosity vanishes at a wall by construction.
+fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear> {
+    let speed = reference_speed(model);
+    let scale = 0.5 * model.fluid.density * speed * speed;
+    let mu = model.fluid.viscosity;
+    let mut report = Vec::new();
+    for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+        let boundary = model.boundaries.get(side);
+        if boundary.kind != BoundaryKind::Wall {
+            continue;
+        }
+        let mut sum = 0.0;
+        let mut peak = 0.0_f64;
+        let mut count = 0_usize;
+        match side {
+            Side::Left | Side::Right => {
+                let column = if side == Side::Left { 0 } else { mesh.nx - 1 };
+                for j in 0..mesh.ny {
+                    if mesh.is_solid(column, j) {
+                        continue;
+                    }
+                    let centre =
+                        0.5 * (v[mesh.v_index(column, j)] + v[mesh.v_index(column, j + 1)]);
+                    let shear = mu * (boundary.velocity[1] - centre) / (0.5 * mesh.dx);
+                    sum += shear;
+                    peak = peak.max(shear.abs());
+                    count += 1;
+                }
+            }
+            Side::Top | Side::Bottom => {
+                let row = if side == Side::Top { mesh.ny - 1 } else { 0 };
+                for i in 0..mesh.nx {
+                    if mesh.is_solid(i, row) {
+                        continue;
+                    }
+                    let centre = 0.5 * (u[mesh.u_index(i, row)] + u[mesh.u_index(i + 1, row)]);
+                    let shear = mu * (boundary.velocity[0] - centre) / (0.5 * mesh.dy);
+                    sum += shear;
+                    peak = peak.max(shear.abs());
+                    count += 1;
+                }
+            }
+        }
+        if count == 0 {
+            continue;
+        }
+        let mean = sum / count as f64;
+        report.push(WallShear {
+            side: side.as_str().to_string(),
+            mean_shear: mean,
+            max_shear: peak,
+            friction_coefficient: if scale > 0.0 { mean / scale } else { 0.0 },
+        });
+    }
+    report
+}
+
 /// Returns `(fx, fy, cd, cl)` for every obstacle in document order.
 fn raw_forces(
     mesh: &Mesh,
@@ -2065,7 +2287,7 @@ fn rms(values: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::MeshConfig;
+    use crate::model::{Boundary, MeshConfig, Probe};
 
     fn mesh() -> Mesh {
         Mesh::new(&MeshConfig {
@@ -2138,5 +2360,140 @@ mod tests {
         let upwind = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Upwind);
         let quick = u_convective_derivative(&mesh, &u, 1, 0, 1.0, ConvectionScheme::Quick);
         assert_eq!(upwind, quick);
+    }
+
+    #[test]
+    fn probe_samples_the_nearest_cell() {
+        let mesh = mesh();
+        let mut model = Model::new();
+        model.mesh.nx = 10;
+        model.mesh.ny = 6;
+        model.time.dt = 0.5;
+        model.probes = vec![Probe {
+            id: "p".to_string(),
+            x: 0.05,
+            y: 0.95,
+        }];
+        let cells = locate_probes(&mesh, &model).expect("locate probe");
+        assert_eq!(cells, vec![(0, 5)]);
+
+        let mut u = vec![0.0; mesh.u_count()];
+        let mut v = vec![0.0; mesh.v_count()];
+        let mut p = vec![0.0; mesh.pressure_count()];
+        u[mesh.u_index(0, 5)] = 0.2;
+        u[mesh.u_index(1, 5)] = 0.4;
+        v[mesh.v_index(0, 5)] = 0.1;
+        v[mesh.v_index(0, 6)] = 0.3;
+        p[mesh.pressure_index(0, 5)] = 12.5;
+        let temperature = vec![300.0; mesh.pressure_count()];
+
+        let mut samples = vec![Vec::new()];
+        append_probe_samples(
+            &mesh,
+            &model,
+            &u,
+            &v,
+            &p,
+            Some(&temperature),
+            3,
+            &cells,
+            &mut samples,
+        );
+        let sample = &samples[0][0];
+        assert_eq!(sample.step, 3);
+        assert!((sample.time - 1.5).abs() < 1e-12);
+        assert!((sample.u - 0.3).abs() < 1e-12, "u = {}", sample.u);
+        assert!((sample.v - 0.2).abs() < 1e-12, "v = {}", sample.v);
+        assert!(
+            (sample.speed - 0.13_f64.sqrt()).abs() < 1e-12,
+            "speed = {}",
+            sample.speed
+        );
+        assert_eq!(sample.pressure, 12.5);
+        assert_eq!(sample.temperature, Some(300.0));
+    }
+
+    #[test]
+    fn probe_inside_a_solid_cell_is_rejected() {
+        let mut mesh = mesh();
+        mesh.apply_obstacles(&[crate::model::Obstacle::Rect {
+            id: "block".to_string(),
+            x0: 0.0,
+            y0: 0.9,
+            x1: 0.2,
+            y1: 1.0,
+        }])
+        .expect("obstacles");
+        let mut model = Model::new();
+        model.mesh.nx = 10;
+        model.mesh.ny = 6;
+        model.probes = vec![Probe {
+            id: "blocked".to_string(),
+            x: 0.05,
+            y: 0.95,
+        }];
+        let error = locate_probes(&mesh, &model).expect_err("solid probe");
+        assert_eq!(error.code, "probe/invalid");
+    }
+
+    #[test]
+    fn wall_shear_reproduces_a_linear_tangential_profile() {
+        let mesh = mesh();
+        let mut model = Model::new();
+        model.mesh.nx = 10;
+        model.mesh.ny = 6;
+        model.fluid.density = 1.0;
+        model.fluid.viscosity = 0.02;
+        model.boundaries.top = Boundary {
+            kind: BoundaryKind::Wall,
+            velocity: [1.0, 0.0],
+        };
+        model.boundaries.bottom = Boundary {
+            kind: BoundaryKind::Wall,
+            velocity: [0.0, 0.0],
+        };
+        model.boundaries.left = Boundary {
+            kind: BoundaryKind::Wall,
+            velocity: [0.0, 0.0],
+        };
+        model.boundaries.right = Boundary {
+            kind: BoundaryKind::Inlet,
+            velocity: [0.0, 0.0],
+        };
+
+        // Tangential profiles u = y and v = x have unit slope, so the wall
+        // shear is exactly ±mu with the half-cell gradient.
+        let mut u = vec![0.0; mesh.u_count()];
+        for j in 0..mesh.ny {
+            for i in 0..=mesh.nx {
+                let (_, y) = mesh.u_position(i, j);
+                u[mesh.u_index(i, j)] = y;
+            }
+        }
+        let mut v = vec![0.0; mesh.v_count()];
+        for j in 0..=mesh.ny {
+            for i in 0..mesh.nx {
+                let (x, _) = mesh.v_position(i, j);
+                v[mesh.v_index(i, j)] = x;
+            }
+        }
+
+        let shear = wall_shear(&mesh, &model, &u, &v);
+        assert_eq!(shear.len(), 3, "the inlet side must be skipped");
+        let mu = model.fluid.viscosity;
+        let find = |side: &str| {
+            shear
+                .iter()
+                .find(|item| item.side == side)
+                .unwrap_or_else(|| panic!("missing {side} wall shear"))
+        };
+        let top = find("top");
+        assert!((top.mean_shear - mu).abs() < 1e-12, "top {top:?}");
+        assert!((top.max_shear - mu).abs() < 1e-12);
+        assert!((top.friction_coefficient - 2.0 * mu).abs() < 1e-12);
+        let bottom = find("bottom");
+        assert!((bottom.mean_shear + mu).abs() < 1e-12, "bottom {bottom:?}");
+        let left = find("left");
+        assert!((left.mean_shear + mu).abs() < 1e-12, "left {left:?}");
     }
 }

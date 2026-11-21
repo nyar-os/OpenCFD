@@ -36,16 +36,16 @@ pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
 pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
-    MeshConfig, Model, Obstacle, ScalarConfig, Side, SideThermal, ThermalConfig, TimeSettings,
-    Turbulence, TurbulenceModel, Units, FORMAT, VERSION,
+    MeshConfig, Model, Obstacle, Probe, ScalarConfig, Side, SideThermal, ThermalConfig,
+    TimeSettings, Turbulence, TurbulenceModel, Units, FORMAT, VERSION,
 };
 pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
 pub use crate::solver::{
     solve, solve_pressure, solve_with, transport_scalar, transport_thermal, ForceSample,
-    ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats, Report, ResidualSample,
-    Solution, SolveOptions, REPORT_FORMAT, REPORT_VERSION,
+    ObstacleForce, ObstacleNusselt, PressureSettings, PressureStats, ProbeSample, ProbeSeries,
+    Report, ResidualSample, Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -63,6 +63,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "vorticity": "supported",
     "streamFunction": "supported",
     "convectionSchemes": "supported",
+    "probes": "supported",
+    "wallShear": "supported",
     "buoyancy": "unsupported",
     "compressible": "unsupported",
     "turbulence": "supported",

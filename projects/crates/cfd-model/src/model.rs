@@ -474,6 +474,73 @@ impl Obstacle {
     }
 }
 
+/// Point monitor sampled during the solve.
+///
+/// The probe is bound to the cell whose centre is nearest to `(x, y)`. It must
+/// lie inside the domain and outside every obstacle, so the recorded value
+/// always belongs to a fluid cell. When `id` is empty the report names the
+/// probe `probe-N` by its one-based document position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Probe {
+    /// Stable identifier used by probe reports; empty means `probe-N`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    /// Probe x coordinate (m).
+    pub x: f64,
+    /// Probe y coordinate (m).
+    pub y: f64,
+}
+
+impl Probe {
+    /// Stable identifier, or an empty string when the document omitted it.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns a copy of this probe carrying `id`.
+    pub fn with_id(self, id: String) -> Self {
+        Self { id, ..self }
+    }
+
+    /// Checks that the probe lies inside the domain and outside every obstacle.
+    pub fn validate(
+        &self,
+        length_x: f64,
+        length_y: f64,
+        obstacles: &[Obstacle],
+    ) -> Result<(), CfdError> {
+        if !self.x.is_finite() || !self.y.is_finite() {
+            return Err(CfdError::new(
+                "probe/invalid",
+                "probe coordinates must be finite",
+            ));
+        }
+        if self.x < 0.0 || self.y < 0.0 || self.x > length_x || self.y > length_y {
+            return Err(CfdError::new(
+                "probe/invalid",
+                format!(
+                    "probe ({}, {}) lies outside the {}×{} m domain",
+                    self.x, self.y, length_x, length_y
+                ),
+            ));
+        }
+        if obstacles
+            .iter()
+            .any(|obstacle| obstacle.contains(self.x, self.y))
+        {
+            return Err(CfdError::new(
+                "probe/invalid",
+                format!(
+                    "probe ({}, {}) lies inside an obstacle; move it into the fluid",
+                    self.x, self.y
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Passive scalar (temperature) transport settings.
 ///
 /// The scalar is advected with the computed velocity and diffuses with a
@@ -711,6 +778,9 @@ pub struct Model {
     /// Solid obstacles, applied in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub obstacles: Vec<Obstacle>,
+    /// Point monitors sampled during the solve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<Probe>,
     /// Optional passive scalar (temperature) transport.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scalar: Option<ScalarConfig>,
@@ -750,6 +820,7 @@ impl Model {
             boundaries,
             initial: None,
             obstacles: Vec::new(),
+            probes: Vec::new(),
             scalar: None,
             turbulence: None,
             thermal: None,
@@ -899,6 +970,13 @@ impl Model {
         }
         for obstacle in &self.obstacles {
             if let Err(error) = obstacle.validate(self.mesh.length_x, self.mesh.length_y) {
+                report.push(Issue::error(error.code, error.message));
+            }
+        }
+        for probe in &self.probes {
+            if let Err(error) =
+                probe.validate(self.mesh.length_x, self.mesh.length_y, &self.obstacles)
+            {
                 report.push(Issue::error(error.code, error.message));
             }
         }
