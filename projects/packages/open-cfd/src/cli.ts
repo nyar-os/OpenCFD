@@ -519,12 +519,12 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log(JSON.stringify(document.listObstacles(), null, 2));
                 return 0;
             }
-            if (action !== 'add') {
+            if (action !== 'add' && action !== 'update') {
                 throw cliError(
                     'cli/unknown-command',
                     action === undefined
-                        ? '`obstacle` needs the `add` or `list` subcommand'
-                        : `\`obstacle\` subcommand \`${action}\` does not exist; use add or list`,
+                        ? '`obstacle` needs the `add`, `update` or `list` subcommand'
+                        : `\`obstacle\` subcommand \`${action}\` does not exist; use add, update or list`,
                 );
             }
             const parsed = parseArguments(rest.slice(1), [
@@ -541,9 +541,20 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'obstacle add <file> --kind rect|circle ... [--id <name>]',
+                action === 'add'
+                    ? 'obstacle add <file> --kind rect|circle ... [--id <name>]'
+                    : 'obstacle update <file> --id <name> --kind rect|circle ...',
             );
             const document = await session.open(file);
+            if (action === 'update') {
+                const id = requiredOption(parsed, '--id');
+                const summary = document.updateObstacle(id, parseObstacle(parsed));
+                const updated = summary.obstacles.find((obstacle) => obstacle.id === id);
+                console.log(
+                    `updated ${updated?.kind ?? 'obstacle'} obstacle ${id}; ${summary.obstacles.length} total`,
+                );
+                return 0;
+            }
             const summary = document.addObstacle(parseObstacle(parsed));
             const added = summary.obstacles[summary.obstacles.length - 1];
             console.log(

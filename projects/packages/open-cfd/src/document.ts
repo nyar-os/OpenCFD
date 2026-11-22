@@ -133,6 +133,12 @@ export class CfdCase {
         return this.adopt(service.obstacleAdd(this.handle, obstacle));
     }
 
+    /** Replaces one solid obstacle in place, keeping its id and position order. */
+    updateObstacle(id: string, obstacle: Obstacle): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.obstacleUpdate(this.handle, id, obstacle));
+    }
+
     /** Returns the solid obstacles in document order. */
     listObstacles(): readonly Obstacle[] {
         this.assertOpen();

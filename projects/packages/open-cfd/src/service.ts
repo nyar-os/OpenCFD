@@ -217,6 +217,17 @@ export function obstacleAdd(handle: number, obstacle: Obstacle): CaseSummary {  
     );
 }
 
+/** Replaces one solid obstacle in place and writes the document back. */
+export function obstacleUpdate(
+    handle: number,
+    id: string,
+    obstacle: Obstacle,
+): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('obstacle.update').obstacle_update(handle, id, JSON.stringify(obstacle)),
+    );
+}
+
 /** Returns the solid obstacles in document order. */
 export function obstacleList(handle: number): readonly Obstacle[] {
     return decode<readonly Obstacle[]>(() => binding('obstacle.list').obstacle_list(handle));

@@ -554,22 +554,28 @@ impl OpenCfd {
     /// only the first match is ever removed.
     pub fn obstacle_remove(&mut self, id: &str) -> Result<CaseSummary, CfdError> {
         self.bound_path()?;
-        let index = self
-            .model
-            .obstacles
-            .iter()
-            .position(|obstacle| obstacle.id() == id)
-            .ok_or_else(|| {
-                CfdError::new(
-                    "obstacle/not-found",
-                    format!(
-                        "no obstacle has id `{id}`; available ids: {}",
-                        available_ids(self.model.obstacles.iter().map(Obstacle::id))
-                    ),
-                )
-            })?;
+        let index = self.obstacle_index(id)?;
         self.edit(|model| {
             model.obstacles.remove(index);
+        })
+    }
+
+    /// Replaces the first solid obstacle with `id` in place and writes the
+    /// document back.
+    ///
+    /// `obstacle` supplies the new geometry and keeps the stored `id`. Fails
+    /// with `obstacle/not-found` when no obstacle carries `id`, leaving the
+    /// document unchanged. The replacement goes through the same validation as
+    /// [`OpenCfd::obstacle_add`], and obstacles after it keep their position.
+    pub fn obstacle_update(
+        &mut self,
+        id: &str,
+        obstacle: Obstacle,
+    ) -> Result<CaseSummary, CfdError> {
+        self.bound_path()?;
+        let index = self.obstacle_index(id)?;
+        self.edit(|model| {
+            model.obstacles[index] = obstacle.with_id(id.to_string());
         })
     }
 

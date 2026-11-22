@@ -327,6 +327,21 @@ fn obstacle_remove(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Replaces one solid obstacle from a JSON request and returns the summary.
+#[function]
+fn obstacle_update(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let request = text(&ctx, 2)?;
+    let obstacle = serde_json::from_str::<Obstacle>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the obstacle request: {error}"
+        ))
+    })?;
+    let summary = with_session(handle, |session| session.obstacle_update(&id, obstacle))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Appends one point monitor from a JSON request and returns the summary.
 #[function]
 fn probe_add(ctx: CallContext) -> Result<JsValue> {

@@ -454,17 +454,18 @@ fn reference_set(args: &[String]) -> Result<i32, CfdError> {
 fn obstacle_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("add") => obstacle_add(&args[1..]),
+        Some("update") => obstacle_update(&args[1..]),
         Some("list") => obstacle_list(&args[1..]),
         Some("remove") => obstacle_remove(&args[1..]),
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
             format!(
-                "`obstacle` has no subcommand `{other}`; only add, remove and list are supported"
+                "`obstacle` has no subcommand `{other}`; only add, update, remove and list are supported"
             ),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`obstacle` requires a subcommand; only add, remove and list are supported",
+            "`obstacle` requires a subcommand; only add, update, remove and list are supported",
         )),
     }
 }
@@ -491,30 +492,7 @@ fn obstacle_add(args: &[String]) -> Result<i32, CfdError> {
         0,
         "obstacle add <file> --kind rect|circle ... [--id <name>]",
     )?;
-    let id = parsed.options.get("--id").cloned().unwrap_or_default();
-    let kind = required(&parsed, "--kind")?;
-    let obstacle = match kind {
-        "rect" => Obstacle::Rect {
-            id,
-            x0: required_number(&parsed, "--x0")?,
-            y0: required_number(&parsed, "--y0")?,
-            x1: required_number(&parsed, "--x1")?,
-            y1: required_number(&parsed, "--y1")?,
-            rotation: number(&parsed, "--rotation")?.unwrap_or(0.0),
-        },
-        "circle" => Obstacle::Circle {
-            id,
-            x: required_number(&parsed, "--x")?,
-            y: required_number(&parsed, "--y")?,
-            r: required_number(&parsed, "--r")?,
-        },
-        other => {
-            return Err(CfdError::new(
-                "cli/invalid-obstacle-kind",
-                format!("unknown obstacle kind `{other}`; only rect and circle are supported"),
-            ))
-        }
-    };
+    let obstacle = parse_obstacle(&parsed)?;
     let mut session = open_session(file)?;
     let summary = session.obstacle_add(obstacle)?;
     let added = summary
@@ -528,6 +506,70 @@ fn obstacle_add(args: &[String]) -> Result<i32, CfdError> {
         summary.obstacles.len()
     );
     Ok(0)
+}
+
+fn obstacle_update(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(
+        args,
+        &[
+            "--kind",
+            "--id",
+            "--x0",
+            "--y0",
+            "--x1",
+            "--y1",
+            "--rotation",
+            "--x",
+            "--y",
+            "--r",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "obstacle update <file> --id <name> --kind rect|circle ...",
+    )?;
+    let id = required(&parsed, "--id")?.to_string();
+    let obstacle = parse_obstacle(&parsed)?;
+    let mut session = open_session(file)?;
+    let summary = session.obstacle_update(&id, obstacle)?;
+    let updated = summary
+        .obstacles
+        .iter()
+        .find(|obstacle| obstacle.id() == id)
+        .expect("obstacle was just replaced");
+    println!(
+        "updated {} obstacle `{}`; {} total",
+        updated.kind(),
+        updated.id(),
+        summary.obstacles.len()
+    );
+    Ok(0)
+}
+
+fn parse_obstacle(parsed: &Parsed) -> Result<Obstacle, CfdError> {
+    let id = parsed.options.get("--id").cloned().unwrap_or_default();
+    match required(parsed, "--kind")? {
+        "rect" => Ok(Obstacle::Rect {
+            id,
+            x0: required_number(parsed, "--x0")?,
+            y0: required_number(parsed, "--y0")?,
+            x1: required_number(parsed, "--x1")?,
+            y1: required_number(parsed, "--y1")?,
+            rotation: number(parsed, "--rotation")?.unwrap_or(0.0),
+        }),
+        "circle" => Ok(Obstacle::Circle {
+            id,
+            x: required_number(parsed, "--x")?,
+            y: required_number(parsed, "--y")?,
+            r: required_number(parsed, "--r")?,
+        }),
+        other => Err(CfdError::new(
+            "cli/invalid-obstacle-kind",
+            format!("unknown obstacle kind `{other}`; only rect and circle are supported"),
+        )),
+    }
 }
 
 fn obstacle_list(args: &[String]) -> Result<i32, CfdError> {
