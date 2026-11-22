@@ -31,7 +31,8 @@ use crate::particles::{
 };
 use crate::quality::{mesh_quality as measure_quality, MeshQuality};
 use crate::solver::{
-    solve, solve_with, solve_with_checkpoint as solve_resuming, Report, SolveOptions,
+    reynolds_number, solve, solve_with, solve_with_checkpoint as solve_resuming, Report,
+    ReynoldsNumber, SolveOptions,
 };
 use crate::{CfdError, CAPABILITIES_JSON};
 
@@ -488,6 +489,17 @@ impl OpenCfd {
                 model.transient_inlets.retain(|inlet| inlet.side != current);
             }
         })
+    }
+
+    /// Reports the derived Reynolds number of the current document.
+    ///
+    /// The reference speed is the configured `reference.velocity`, otherwise
+    /// the fastest inlet speed, otherwise `1 m/s`. The reference length is
+    /// `reference.length`, otherwise the first obstacle's characteristic
+    /// length, otherwise the domain height. No time stepping runs.
+    pub fn reynolds(&self) -> Result<ReynoldsNumber, CfdError> {
+        self.model.validate()?;
+        Ok(reynolds_number(&self.model))
     }
 
     /// Validates the current document and returns its snapshot.

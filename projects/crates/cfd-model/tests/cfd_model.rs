@@ -6,13 +6,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
     export_particles, export_probes, export_residuals, export_streamlines, export_svg, export_vtk,
-    export_vtk_with_layout, mesh_quality, outlet_flows, solve, solve_pressure, solve_with,
-    solve_with_checkpoint, stream_function, trace_particles, transport_scalar, vorticity,
-    Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField,
-    ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle, ParticleConfig,
-    ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig, ScalarSource,
-    Side, SideThermal, Solution, SolveOptions, ThermalConfig, TimeSeries, TransientInlet,
-    WallFunction, CAPABILITIES_JSON, VERSION,
+    export_vtk_with_layout, mesh_quality, outlet_flows, reynolds_number, solve, solve_pressure,
+    solve_with, solve_with_checkpoint, stream_function, trace_particles, transport_scalar,
+    vorticity, Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme,
+    ExportField, ExportLayout, InitialField, InletProfile, Mesh, MeshConfig, Model, Obstacle,
+    ParticleConfig, ParticleSeed, PorousRegion, PressureSettings, Probe, Reference, ScalarConfig,
+    ScalarSource, Side, SideThermal, Solution, SolveOptions, ThermalConfig, TimeSeries,
+    TransientInlet, WallFunction, CAPABILITIES_JSON, VERSION,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -1471,6 +1471,59 @@ fn time_schemes_are_stable_and_rk2_reduces_temporal_error() {
         rk2_error < 0.5 * euler_error,
         "RK2 error {rk2_error} should be well below Euler error {euler_error}"
     );
+}
+
+#[test]
+fn reynolds_number_resolves_speed_and_length_sources() {
+    let mut model = mesh_model(12, 12);
+    let report = reynolds_number(&model);
+    assert_eq!(report.density, 1.0);
+    assert_eq!(report.dynamic_viscosity, 0.01);
+    assert_eq!(report.velocity, 1.0);
+    assert_eq!(report.velocity_source, "default");
+    assert_eq!(report.length, 1.0);
+    assert_eq!(report.length_source, "domainHeight");
+    assert!((report.kinematic_viscosity.expect("nu") - 0.01).abs() < 1e-12);
+    assert!((report.reynolds.expect("Re") - 100.0).abs() < 1e-12);
+
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [2.0, 0.0],
+        pressure: 0.0,
+    };
+    let report = reynolds_number(&model);
+    assert_eq!(report.velocity, 2.0);
+    assert_eq!(report.velocity_source, "inlet");
+    assert!((report.reynolds.expect("Re") - 200.0).abs() < 1e-12);
+
+    model.obstacles = vec![Obstacle::Circle {
+        id: "cyl".to_string(),
+        x: 0.5,
+        y: 0.5,
+        r: 0.1,
+    }];
+    let report = reynolds_number(&model);
+    assert_eq!(report.length, 0.2);
+    assert_eq!(report.length_source, "obstacle");
+    assert!((report.reynolds.expect("Re") - 40.0).abs() < 1e-12);
+
+    model.reference = Some(Reference {
+        velocity: Some(3.0),
+        area: None,
+        length: Some(0.5),
+    });
+    let report = reynolds_number(&model);
+    assert_eq!(report.velocity_source, "reference");
+    assert_eq!(report.length_source, "reference");
+    assert!((report.reynolds.expect("Re") - 150.0).abs() < 1e-12);
+    let value = serde_json::to_value(&report).expect("reynolds json");
+    assert_eq!(value["velocitySource"], "reference");
+    assert_eq!(value["lengthSource"], "reference");
+
+    model.fluid.viscosity = 0.0;
+    let report = reynolds_number(&model);
+    assert!(report.kinematic_viscosity.is_none());
+    assert!(report.reynolds.is_none());
 }
 
 #[test]

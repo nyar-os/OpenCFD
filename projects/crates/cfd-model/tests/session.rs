@@ -113,7 +113,13 @@ fn session_boundary_list_and_reset_round_trip_through_cli() {
     let mut session = OpenCfd::new(OpenCfdOptions::default());
     session.create(&path).expect("create");
     session
-        .boundary_set(Side::Right, BoundaryKind::Outlet, Some(2.0), None, Some(1.5))
+        .boundary_set(
+            Side::Right,
+            BoundaryKind::Outlet,
+            Some(2.0),
+            None,
+            Some(1.5),
+        )
         .expect("outlet");
     session
         .boundary_profile_set(Side::Left, InletProfile::Parabolic, Some(3.0))
@@ -141,7 +147,10 @@ fn session_boundary_list_and_reset_round_trip_through_cli() {
         .expect("reset right");
     assert_eq!(summary.boundaries.right, Boundary::wall());
     assert!(summary.transient_inlets.is_empty());
-    assert_eq!(summary.boundaries.inlet_profiles.left, InletProfile::Parabolic);
+    assert_eq!(
+        summary.boundaries.inlet_profiles.left,
+        InletProfile::Parabolic
+    );
 
     let summary = session.boundary_reset(None).expect("reset all");
     for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
@@ -172,14 +181,7 @@ fn session_boundary_list_and_reset_round_trip_through_cli() {
         String::from_utf8_lossy(&output.stderr)
     );
     let output = run_cli(&[
-        "inlet",
-        "series",
-        "set",
-        &cli,
-        "--side",
-        "right",
-        "--u",
-        "0:1,1:2",
+        "inlet", "series", "set", &cli, "--side", "right", "--u", "0:1,1:2",
     ]);
     assert!(
         output.status.success(),
@@ -204,6 +206,56 @@ fn session_boundary_list_and_reset_round_trip_through_cli() {
     let stored = Model::load(&cli_path).expect("load");
     assert_eq!(stored.boundaries.right, Boundary::wall());
     assert!(stored.transient_inlets.is_empty());
+}
+
+#[test]
+fn session_and_cli_report_the_same_reynolds_number() {
+    let directory = temporary_dir("reynolds");
+    let path = directory.join("reynolds.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.fluid_set(1.2, 0.02).expect("fluid");
+    session
+        .reference_set(Some(2.0), None, Some(0.5))
+        .expect("reference");
+    let report = session.reynolds().expect("reynolds");
+    assert_eq!(report.velocity_source, "reference");
+    assert_eq!(report.length_source, "reference");
+    assert!((report.reynolds.expect("Re") - 60.0).abs() < 1e-12);
+
+    let cli_path = directory.join("cli-reynolds.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&["fluid", "set", &cli, "--rho", "1.2", "--mu", "0.02"]);
+    assert!(
+        output.status.success(),
+        "ocfd fluid set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = run_cli(&[
+        "reference",
+        "set",
+        &cli,
+        "--velocity",
+        "2",
+        "--length",
+        "0.5",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd reference set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = run_cli(&["reynolds", &cli]);
+    assert!(
+        output.status.success(),
+        "ocfd reynolds failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cli_report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("reynolds JSON");
+    assert_eq!(cli_report["velocitySource"], "reference");
+    assert!((cli_report["reynolds"].as_f64().expect("Re") - 60.0).abs() < 1e-9);
 }
 
 #[test]

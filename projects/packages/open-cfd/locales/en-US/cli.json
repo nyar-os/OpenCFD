@@ -10,6 +10,7 @@
             "boundary-set": "Set one boundary kind and velocity of an existing case",
             "boundary-list": "Print the four side boundary conditions and inlet profiles",
             "boundary-reset": "Reset one side or every side to a stationary wall",
+            "reynolds": "Report the derived Reynolds number of an existing case",
             "validate": "Validate an existing case",
             "solve": "Solve a case and print the report",
             "export": "Solve a case and write a CSV or VTK field"

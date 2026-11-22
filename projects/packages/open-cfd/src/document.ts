@@ -27,6 +27,7 @@ import type {
     PressureGradientSetRequest,
     Boundaries,
     ReferenceSetRequest,
+    ReynoldsNumber,
     SaveReport,
     ScalarSetRequest,
     ScalarSource,
@@ -242,6 +243,12 @@ export class CfdCase {
     meshQuality(): MeshQuality {
         this.assertOpen();
         return service.meshQuality(this.handle);
+    }
+
+    /** Reports the derived Reynolds number of this case without solving it. */
+    reynolds(): ReynoldsNumber {
+        this.assertOpen();
+        return service.reynolds(this.handle);
     }
 
     /** Solves the document and returns the report. */

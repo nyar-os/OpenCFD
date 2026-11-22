@@ -46,7 +46,7 @@ await cfd.dispose();
 ```
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
-- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `listBoundaries`, `resetBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setBuoyancy`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `listBoundaries`, `resetBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setBuoyancy`, `setConvection`, `setPressureGradient`, `validate`, `meshQuality`, `reynolds`, `solve(options?)`, `export`, `save`, `close`.
 - `solve(options?)` accepts `steps`, `tolerance`, `checkEvery`, `restart` (checkpoint path to resume) and `checkpoint` (path that receives the final state). Resumed reports keep cumulative `steps`/`time`.
 - `setBoundary` accepts `wall`, `inlet`, `outlet`, `convective`, `slip` and `periodic`; `pressure` sets the outlet gauge pressure. Periodic sides must be paired. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setPressureGradient({dpdx, dpdy})` imposes a uniform pressure gradient in Pa/m as the momentum body force `-∇p/ρ`; setting both components to zero removes it. It drives pressure-driven channel flow, and combined with paired periodic sides it forms a fully developed periodic channel.
@@ -155,6 +155,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd wall function clear <file>` | Remove the wall-function section |
 | `ocfd validate <file>` | Structural validation; on failure prints a JSON error and returns exit code `1` |
 | `ocfd quality <file>` | Measure the mesh quality (`cells`, `fluidCells`, aspect-ratio extremes, non-orthogonality and skewness) and print the JSON report without solving |
+| `ocfd reynolds <file>` | Report `density`, `dynamicViscosity`, `kinematicViscosity`, the resolved `velocity`/`length` and `reynolds` without solving; `velocitySource` and `lengthSource` name the reference, inlet, obstacle or domain-height fallback used |
 | `ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]` | Solve and print an `open-cfd-report` JSON on stdout and a convergence/mass-balance summary on stderr; `--tolerance` enables steady-state early stopping, `--check-every` controls the sampling interval, `--restart` resumes from a checkpoint and `--checkpoint` writes the final state |
 | `ocfd export <file> --format csv [--layout cell\|node] --out <dir\|file.csv>` | After solving, write `x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction` rows at cell centres or mesh nodes |
 | `ocfd export <file> --format vtk [--layout cell\|node] --out <dir\|file.vtk>` | After solving, write legacy ASCII `UNSTRUCTURED_GRID` VTK with `pressure`, `velocity`, `magnitude`, `temperature`, `vorticity` and `streamFunction` point data over cell centres or mesh nodes |

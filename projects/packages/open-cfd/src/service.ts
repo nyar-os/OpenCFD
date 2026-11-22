@@ -28,6 +28,7 @@ import type {
     Probe,
     PressureGradientSetRequest,
     ReferenceSetRequest,
+    ReynoldsNumber,
     SaveReport,
     ScalarSetRequest,
     ScalarSource,
@@ -358,6 +359,11 @@ export function validate(handle: number): CaseSummary {
 /** Measures the mesh quality of one case without solving it. */
 export function meshQuality(handle: number): MeshQuality {
     return decode<MeshQuality>(() => binding('mesh.quality').mesh_quality(handle));
+}
+
+/** Reports the derived Reynolds number of one case without solving it. */
+export function reynolds(handle: number): ReynoldsNumber {
+    return decode<ReynoldsNumber>(() => binding('reynolds').reynolds(handle));
 }
 
 /** Solves one case and returns the report. */

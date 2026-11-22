@@ -77,11 +77,11 @@ pub use crate::session::{
     CaseSummary, ExportFormat, ExportReport, OpenCfd, OpenCfdOptions, SaveReport,
 };
 pub use crate::solver::{
-    outlet_flows, solve, solve_pressure, solve_with, solve_with_checkpoint, transport_scalar,
-    transport_thermal, ForceSample, InletHistory, InletSample, MassBalance, ObstacleForce,
-    ObstacleNusselt, OutletFlow, PorousSummary, PressureSettings, PressureStats, ProbeSample,
-    ProbeSeries, Report, ResidualSample, ScalarSourceSummary, Solution, SolveOptions, WallShear,
-    REPORT_FORMAT, REPORT_VERSION,
+    outlet_flows, reynolds_number, solve, solve_pressure, solve_with, solve_with_checkpoint,
+    transport_scalar, transport_thermal, ForceSample, InletHistory, InletSample, MassBalance,
+    ObstacleForce, ObstacleNusselt, OutletFlow, PorousSummary, PressureSettings, PressureStats,
+    ProbeSample, ProbeSeries, Report, ResidualSample, ReynoldsNumber, ScalarSourceSummary,
+    Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.

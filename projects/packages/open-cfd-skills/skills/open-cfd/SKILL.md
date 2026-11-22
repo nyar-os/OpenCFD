@@ -73,6 +73,7 @@ ocfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
 ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd quality <file>
+ocfd reynolds <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
 ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
@@ -179,6 +180,12 @@ them.
 - `wall function set` evaluates the reported wall shear from the log law
   `u⁺ = (1/κ)ln(y⁺) + B` above `minYPlus`; momentum keeps its no-slip ghost and
   every wall side also reports `meanYPlus`.
+- `reynolds <file>` reports `rho`, `mu`, `nu = mu/rho` and
+  `Re = rho·U·L/mu` without solving. The speed is `reference.velocity`, else the
+  fastest inlet speed, else `1 m/s`; the length is `reference.length`, else the
+  first obstacle's characteristic length, else the domain height. `velocitySource`
+  and `lengthSource` state which rule applied, and an inviscid case (`mu = 0`)
+  reports `null` for `kinematicViscosity` and `reynolds`.
 - `quality <file>` measures the mesh without solving and prints
   `meshQuality`-shaped JSON: non-orthogonality in degrees, cell aspect-ratio
   extremes and interior-face skewness. The mesh is uniform, so the values are

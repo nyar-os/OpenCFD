@@ -56,6 +56,7 @@ Usage:
   ocfd wall function clear <file>
   ocfd validate <file>
   ocfd quality <file>
+  ocfd reynolds <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
@@ -112,6 +113,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "wall" => wall_command(&args[1..]),
         "validate" => validate(&args[1..]),
         "quality" => quality(&args[1..]),
+        "reynolds" => reynolds(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "export" => export(&args[1..]),
         "compressible" => Err(not_implemented("compressible flow")),
@@ -321,9 +323,7 @@ fn boundary_command(args: &[String]) -> Result<i32, CfdError> {
         },
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!(
-                "`boundary` has no subcommand `{other}`; use set, list, reset or profile"
-            ),
+            format!("`boundary` has no subcommand `{other}`; use set, list, reset or profile"),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
@@ -362,9 +362,7 @@ fn boundary_reset(args: &[String]) -> Result<i32, CfdError> {
             "reset {} boundary to a stationary wall; dropped its transient drive",
             side.as_str()
         ),
-        None => println!(
-            "reset all boundaries to stationary walls; dropped all transient drives"
-        ),
+        None => println!("reset all boundaries to stationary walls; dropped all transient drives"),
     }
     Ok(0)
 }
@@ -1228,6 +1226,21 @@ fn quality(args: &[String]) -> Result<i32, CfdError> {
         CfdError::new(
             "document/serialize",
             format!("cannot serialize the mesh quality report: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn reynolds(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "reynolds <file>")?;
+    let session = open_session(file)?;
+    let report = session.reynolds()?;
+    let json = serde_json::to_string_pretty(&report).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize the Reynolds number report: {error}"),
         )
     })?;
     println!("{json}");

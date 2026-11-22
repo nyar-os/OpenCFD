@@ -521,6 +521,24 @@ export interface MeshQuality {
     readonly maxSkewness: number;
 }
 
+/** Derived Reynolds number, resolved from the fluid, reference and geometry. */
+export interface ReynoldsNumber {
+    readonly density: number;
+    readonly dynamicViscosity: number;
+    /** `mu / rho` in m²/s, or `null` for an inviscid case. */
+    readonly kinematicViscosity: number | null;
+    /** Reference speed in m/s. */
+    readonly velocity: number;
+    /** Reference length in m. */
+    readonly length: number;
+    /** `rho·U·L/mu`, or `null` for an inviscid case. */
+    readonly reynolds: number | null;
+    /** Where the speed came from. */
+    readonly velocitySource: 'reference' | 'inlet' | 'default';
+    /** Where the length came from. */
+    readonly lengthSource: 'reference' | 'obstacle' | 'domainHeight';
+}
+
 /** Solve-time overrides accepted by `CfdCase.solve()`. */
 export interface SolveOptions {
     /** Steps to advance; overrides `time.steps`. */

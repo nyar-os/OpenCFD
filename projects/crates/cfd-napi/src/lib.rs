@@ -288,6 +288,14 @@ fn mesh_quality(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(report))
 }
 
+/// Reports the derived Reynolds number of one session document.
+#[function]
+fn reynolds(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let report = with_session(handle, |session| session.reynolds())?;
+    respond(&ctx, &json!(report))
+}
+
 /// Appends one solid obstacle from a JSON request and returns the summary.
 #[function]
 fn obstacle_add(ctx: CallContext) -> Result<JsValue> {
@@ -572,6 +580,7 @@ register_module![
     reference_set,
     validate,
     mesh_quality,
+    reynolds,
     solve,
     export,
     close

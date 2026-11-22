@@ -445,6 +445,34 @@ pub struct Report {
     pub wall_function: bool,
 }
 
+/// Derived Reynolds number of a case.
+///
+/// The speed is the configured reference velocity, otherwise the fastest inlet
+/// velocity, otherwise `1 m/s`. The length is the configured reference length,
+/// otherwise the first obstacle's characteristic length, otherwise the domain
+/// height. An inviscid case (`viscosity = 0`) reports `null` for the kinematic
+/// viscosity and the Reynolds number instead of dividing by zero.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReynoldsNumber {
+    /// Density `rho` (kg/m³).
+    pub density: f64,
+    /// Dynamic viscosity `mu` (Pa·s).
+    pub dynamic_viscosity: f64,
+    /// Kinematic viscosity `nu = mu / rho` (m²/s), or `null` when inviscid.
+    pub kinematic_viscosity: Option<f64>,
+    /// Reference speed `U` (m/s).
+    pub velocity: f64,
+    /// Reference length `L` (m).
+    pub length: f64,
+    /// `Re = rho·U·L/mu`, or `null` when inviscid.
+    pub reynolds: Option<f64>,
+    /// Source of the reference speed: `reference`, `inlet` or `default`.
+    pub velocity_source: String,
+    /// Source of the reference length: `reference`, `obstacle` or `domainHeight`.
+    pub length_source: String,
+}
+
 /// A solved velocity, pressure and optional scalar field with its report.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solution {
@@ -3722,6 +3750,51 @@ fn reference_speed(model: &Model) -> f64 {
         inlet
     } else {
         1.0
+    }
+}
+
+/// Reports the derived Reynolds number of a case without solving it.
+///
+/// See [`ReynoldsNumber`] for how the reference speed and length are resolved.
+pub fn reynolds_number(model: &Model) -> ReynoldsNumber {
+    let (velocity, velocity_source) = match model.reference.as_ref().and_then(|r| r.velocity) {
+        Some(velocity) => (velocity, "reference"),
+        None => {
+            let inlet = [
+                &model.boundaries.left,
+                &model.boundaries.right,
+                &model.boundaries.top,
+                &model.boundaries.bottom,
+            ]
+            .iter()
+            .filter(|boundary| boundary.kind == BoundaryKind::Inlet)
+            .map(|boundary| boundary.velocity[0].hypot(boundary.velocity[1]))
+            .fold(0.0_f64, f64::max);
+            if inlet > 0.0 {
+                (inlet, "inlet")
+            } else {
+                (1.0, "default")
+            }
+        }
+    };
+    let (length, length_source) = match model.reference.as_ref().and_then(|r| r.length) {
+        Some(length) => (length, "reference"),
+        None => match model.obstacles.first() {
+            Some(obstacle) => (obstacle.characteristic_length(), "obstacle"),
+            None => (model.mesh.length_y, "domainHeight"),
+        },
+    };
+    let viscosity = model.fluid.viscosity;
+    let viscous = viscosity > 0.0;
+    ReynoldsNumber {
+        density: model.fluid.density,
+        dynamic_viscosity: viscosity,
+        kinematic_viscosity: viscous.then(|| viscosity / model.fluid.density),
+        velocity,
+        length,
+        reynolds: viscous.then(|| model.fluid.density * velocity * length / viscosity),
+        velocity_source: velocity_source.to_string(),
+        length_source: length_source.to_string(),
     }
 }
 
