@@ -1,31 +1,33 @@
 # @wae/open-cfd-skills
 
-Agent skills for OpenCFD. The package ships skill documents only; it is not a
-runtime library and contains no meshing, solver or export algorithms.
+Agent skill documents for OpenCFD. The package ships text only; it contains no
+solver, meshing or export code.
 
-## Status
+## When to use
 
-`skills/open-cfd/SKILL.md` records the routing and evidence rules for create,
-edit, validate, solve and export against the implemented session core. The CLI
-and SDK behind it create and reopen a `.ocfd` case, set mesh, fluid, time,
-boundary, obstacle, porous region, scalar, turbulence, wall function and thermal
-parameters, validate the case, solve it and export CSV, VTK or SVG. Turbulence is
-limited to the constant and mixing-length eddy-viscosity models; compressible
-flow, three-dimensional flow, coupled heat transfer, adaptive meshing and
-external format import are not implemented and report
-`capability/not-implemented`.
+Load `open-cfd` when a task needs a two-dimensional incompressible case:
+creating or editing a `.ocfd` document, running a cavity or channel, adding
+obstacles, porous regions or probes, configuring boundaries, scalar, thermal,
+buoyancy or turbulence settings, or exporting CSV, VTK, SVG or histories.
 
-## Layout
+## Invocation
+
+Point your agent at the installed package and give it the task:
 
 ```text
-packages/open-cfd-skills/
-├── package.json
-├── README.md
-└── skills/
-    └── open-cfd/
-        └── SKILL.md
+Read the open-cfd skill, then run a 24×24 lid-driven cavity at Re=100 and
+report the maximum velocity from the solve report.
 ```
 
-The skill must never be shipped claiming methods, commands or flags that the
-installed SDK/CLI does not expose. The capability matrix remains the only support
-claim; unsupported features reject with `capability/not-implemented`.
+The skill tells the agent to run `open-cfd capabilities` first, treat the
+capability matrix as the only support claim, and report the exact command and
+export path used.
+
+## Contents
+
+- [`skills/open-cfd/SKILL.md`](skills/open-cfd/SKILL.md) — routes, preflight,
+  solver and export limits, hard rules.
+
+See the [product README](../../README.md) for what OpenCFD supports and
+[documentation/capabilities.md](../../documentation/capabilities.md) for the
+capability matrix.
