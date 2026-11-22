@@ -100,3 +100,45 @@ test('wall function settings set and clear', { skip: !installed }, async () => {
         fs.rmSync(directory, { recursive: true, force: true });
     }
 });
+
+test('obstacles update in place, rotate and remove', { skip: !installed }, async () => {
+    const directory = workspace();
+    const cfd = new OpenCFD();
+    try {
+        const cfdCase = await cfd.create(path.join(directory, 'obstacles.ocfd'));
+        cfdCase.addObstacle({ kind: 'circle', id: 'cyl', x: 0.5, y: 0.5, r: 0.05 });
+        const added = cfdCase.addObstacle({
+            kind: 'rect',
+            id: 'bar',
+            x0: 0.3,
+            y0: 0.48,
+            x1: 0.7,
+            y1: 0.52,
+        });
+        assert.equal(added.obstacles.length, 2);
+
+        const updated = cfdCase.updateObstacle('bar', {
+            kind: 'rect',
+            x0: 0.3,
+            y0: 0.48,
+            x1: 0.7,
+            y1: 0.52,
+            rotation: 90,
+        });
+        assert.equal(updated.obstacles[0].id, 'cyl');
+        assert.equal(updated.obstacles[1].id, 'bar');
+        const rect = updated.obstacles[1];
+        assert.equal(rect.kind, 'rect');
+        if (rect.kind === 'rect') {
+            assert.equal(rect.rotation, 90);
+        }
+
+        const removed = cfdCase.removeObstacle('cyl');
+        assert.equal(removed.obstacles.length, 1);
+        assert.equal(removed.obstacles[0].id, 'bar');
+        assert.equal(cfdCase.listObstacles().length, 1);
+    } finally {
+        await cfd.dispose();
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});

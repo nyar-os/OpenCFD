@@ -56,7 +56,7 @@ native handle. `dispose()` closes every case it owns.
 | Mesh, fluid, references | `setMesh`, `setFluid`, `setReference` |
 | Time integration | `setTime`, `setTimeScheme`, `setTimeAdaptive` |
 | Boundaries | `setBoundary`, `listBoundaries`, `resetBoundary`, `setInletProfile` |
-| Obstacles | `addObstacle`, `updateObstacle`, `listObstacles` |
+| Obstacles | `addObstacle`, `updateObstacle`, `removeObstacle`, `listObstacles` |
 | Porous regions | `addPorous`, `listPorous`, `removePorous` |
 | Probes | `addProbe`, `updateProbe`, `removeProbe`, `listProbes`, `clearProbes` |
 | Scalar, sources, inlets | `setScalar`, `addScalarSource`, `listScalarSources`, `clearScalarSources`, `setTransientInlet`, `listTransientInlets`, `clearTransientInlets` |

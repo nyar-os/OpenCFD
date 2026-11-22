@@ -29,6 +29,7 @@ export interface NativeBinding {
     boundary_profile_set(handle: number, side: string, profile: string, exponent?: number): string;
     obstacle_add(handle: number, requestJson: string): string;
     obstacle_update(handle: number, id: string, requestJson: string): string;
+    obstacle_remove(handle: number, id: string): string;
     obstacle_list(handle: number): string;
     porous_add(handle: number, requestJson: string): string;
     porous_list(handle: number): string;

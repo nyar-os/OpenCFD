@@ -40,10 +40,11 @@ usage:
   open-cfd boundary list <file>
   open-cfd boundary reset <file> [--side left|right|top|bottom]
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
-  open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
+  open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   open-cfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>]
   open-cfd obstacle update <file> --id <name> --kind circle --x <m> --y <m> --r <m>
+  open-cfd obstacle remove <file> --id <name>
   open-cfd obstacle list <file>
   open-cfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
   open-cfd porous list <file>
@@ -330,6 +331,7 @@ function parseObstacle(parsed: ParsedArguments): Obstacle {
     const kind = requiredOption(parsed, '--kind');
     const id = parsed.options['--id'];
     if (kind === 'rect') {
+        const rotation = optionalNumber(parsed, '--rotation');
         return {
             kind: 'rect',
             ...(id === undefined ? {} : { id }),
@@ -337,6 +339,7 @@ function parseObstacle(parsed: ParsedArguments): Obstacle {
             y0: numberOption(parsed, '--y0'),
             x1: numberOption(parsed, '--x1'),
             y1: numberOption(parsed, '--y1'),
+            ...(rotation === undefined ? {} : { rotation }),
         };
     }
     if (kind === 'circle') {
@@ -580,12 +583,21 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log(JSON.stringify(document.listObstacles(), null, 2));
                 return 0;
             }
+            if (action === 'remove') {
+                const parsed = parseArguments(rest.slice(1), ['--id']);
+                const file = positional(parsed, 0, 'obstacle remove <file> --id <name>');
+                const id = requiredOption(parsed, '--id');
+                const document = await session.open(file);
+                const summary = document.removeObstacle(id);
+                console.log(`removed obstacle ${id}; ${summary.obstacles.length} total`);
+                return 0;
+            }
             if (action !== 'add' && action !== 'update') {
                 throw cliError(
                     'cli/unknown-command',
                     action === undefined
-                        ? '`obstacle` needs the `add`, `update` or `list` subcommand'
-                        : `\`obstacle\` subcommand \`${action}\` does not exist; use add, update or list`,
+                        ? '`obstacle` needs the `add`, `update`, `remove` or `list` subcommand'
+                        : `\`obstacle\` subcommand \`${action}\` does not exist; use add, update, remove or list`,
                 );
             }
             const parsed = parseArguments(rest.slice(1), [
@@ -595,6 +607,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 '--y0',
                 '--x1',
                 '--y1',
+                '--rotation',
                 '--x',
                 '--y',
                 '--r',
@@ -827,7 +840,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             });
             const thermal = summary.thermal;
             console.log(
-                `thermal set: cp=${thermal?.specificHeat} J/kgK, k=${thermal?.conductivity} W/mK, heatSource=${thermal?.heatSource} W/m3, obstacleTemperature=${thermal?.obstacleTemperature}, obstacleHeatFlux=${thermal?.obstacleHeatFlux}`,
+                `thermal set: cp=${thermal?.specificHeat} J/kgK, k=${thermal?.conductivity} W/mK, heatSource=${thermal?.heatSource} W/m3, obstacleTemperature=${thermal?.obstacleTemperature ?? 'none'}, obstacleHeatFlux=${thermal?.obstacleHeatFlux ?? 'none'}`,
             );
             return 0;
         }

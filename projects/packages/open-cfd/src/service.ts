@@ -238,6 +238,11 @@ export function obstacleList(handle: number): readonly Obstacle[] {
     return decode<readonly Obstacle[]>(() => binding('obstacle.list').obstacle_list(handle));
 }
 
+/** Removes one solid obstacle and writes the document back. */
+export function obstacleRemove(handle: number, id: string): CaseSummary {
+    return decode<CaseSummary>(() => binding('obstacle.remove').obstacle_remove(handle, id));
+}
+
 /** Appends one porous region and writes the document back. */
 export function porousAdd(handle: number, region: PorousRegion): CaseSummary {
     return decode<CaseSummary>(() =>

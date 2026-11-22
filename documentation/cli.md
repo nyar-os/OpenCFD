@@ -87,17 +87,21 @@ the `n` used by `powerLaw`.
 ### obstacle
 
 ```shell
-open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
+open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
 open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
-open-cfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m>
+open-cfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>]
 open-cfd obstacle update <file> --id <name> --kind circle --x <m> --y <m> --r <m>
+open-cfd obstacle remove <file> --id <name>
 open-cfd obstacle list <file>
 ```
 
 Rects and circles become solid cells by cell-centre containment and are
-stair-stepped. `obstacle list` prints the current geometry as JSON. The help text
-of `obstacle update` mentions `--rotation`, but the parser rejects it; rotation
-is only settable in the document or through the Rust `ocfd` binary.
+stair-stepped. `--rotation` turns a rectangle counter-clockwise about its
+centroid, in degrees. `obstacle update` replaces one obstacle in place: its id
+and position in the list are preserved, and an omitted `--rotation` resets it to
+`0`. `obstacle remove` deletes the obstacle and reports the remaining count; an
+unknown id fails with `obstacle/not-found`. `obstacle list` prints the current
+geometry as JSON.
 
 ### porous
 

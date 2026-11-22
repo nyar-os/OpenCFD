@@ -150,6 +150,12 @@ export class CfdCase {
         return service.obstacleList(this.handle);
     }
 
+    /** Removes one solid obstacle and writes the document back. */
+    removeObstacle(id: string): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.obstacleRemove(this.handle, id));
+    }
+
     /** Porous regions in document order. */
     get porous(): readonly PorousRegion[] {
         return this.state.porous;

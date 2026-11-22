@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    Model, OpenCfd, OpenCfdOptions, PorousRegion, SideThermal, ThermalConfig, WallFunction,
+    Model, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, SideThermal, ThermalConfig,
+    WallFunction,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -177,6 +178,62 @@ fn wall_function_surface_sets_validates_and_clears() {
     let summary = session.wall_function_clear().expect("clear");
     assert!(summary.wall_function.is_none());
     assert!(Model::load(&path).expect("load").wall_function.is_none());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+fn bar(rotation: f64) -> Obstacle {
+    Obstacle::Rect {
+        id: String::new(),
+        x0: 0.3,
+        y0: 0.48,
+        x1: 0.7,
+        y1: 0.52,
+        rotation,
+    }
+}
+
+#[test]
+fn obstacle_surface_updates_in_place_rotates_and_removes() {
+    let directory = temporary_dir("surface-obstacles");
+    let path = directory.join("obstacles.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "cyl".to_string(),
+            x: 0.5,
+            y: 0.5,
+            r: 0.05,
+        })
+        .expect("circle");
+    let summary = session.obstacle_add(bar(0.0)).expect("bar");
+    assert_eq!(summary.obstacles.len(), 2);
+    assert_eq!(summary.obstacles[1].id(), "obstacle-2");
+    assert!(summary.obstacles[1].contains(0.35, 0.5));
+
+    // Update in place: the id and position order are preserved, and the new
+    // rotation changes which points are solid.
+    let summary = session
+        .obstacle_update("obstacle-2", bar(90.0))
+        .expect("rotate");
+    assert_eq!(summary.obstacles.len(), 2);
+    assert_eq!(summary.obstacles[0].id(), "cyl");
+    assert_eq!(summary.obstacles[1].id(), "obstacle-2");
+    assert!(!summary.obstacles[1].contains(0.35, 0.5));
+    assert!(summary.obstacles[1].contains(0.5, 0.35));
+
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.obstacles, summary.obstacles);
+
+    let error = session.obstacle_remove("missing").expect_err("unknown id");
+    assert_eq!(error.code, "obstacle/not-found");
+    assert_eq!(session.obstacle_list().len(), 2);
+
+    let summary = session.obstacle_remove("cyl").expect("remove");
+    assert_eq!(summary.obstacles.len(), 1);
+    assert_eq!(summary.obstacles[0].id(), "obstacle-2");
 
     fs::remove_dir_all(directory).ok();
 }
