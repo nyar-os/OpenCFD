@@ -797,6 +797,273 @@ pub fn export_coefficients(solution: &Solution, path: &Path) -> Result<PathBuf, 
     Ok(target)
 }
 
+/// Straight sampling segment used by [`export_profile`].
+///
+/// The four coordinates are the start `(x0, y0)` and the end `(x1, y1)` in
+/// metres. Both endpoints must be finite and distinct.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProfileLine {
+    /// Start point x coordinate in metres.
+    pub x0: f64,
+    /// Start point y coordinate in metres.
+    pub y0: f64,
+    /// End point x coordinate in metres.
+    pub x1: f64,
+    /// End point y coordinate in metres.
+    pub y1: f64,
+}
+
+impl ProfileLine {
+    /// Builds a line from its start and end coordinates.
+    pub fn new(x0: f64, y0: f64, x1: f64, y1: f64) -> Self {
+        Self { x0, y0, x1, y1 }
+    }
+
+    /// Length of the segment in metres.
+    ///
+    /// Fails with `export/invalid-line` when a coordinate is not finite or the
+    /// two endpoints coincide.
+    pub fn length(self) -> Result<f64, CfdError> {
+        if ![self.x0, self.y0, self.x1, self.y1]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            return Err(CfdError::new(
+                "export/invalid-line",
+                "line coordinates must be finite numbers",
+            ));
+        }
+        let length = (self.x1 - self.x0).hypot(self.y1 - self.y0);
+        if length == 0.0 {
+            return Err(CfdError::new(
+                "export/invalid-line",
+                "line start and end must be different points",
+            ));
+        }
+        Ok(length)
+    }
+}
+
+/// Writes a cell-centred field sampled along a straight segment as CSV rows.
+///
+/// The rows are the `samples` equally spaced points with `t = i / (samples − 1)`
+/// from the start to the end of the line. The header is `distance,x,y,value`,
+/// where `distance` is the distance from the start in metres. The value is the
+/// field at the centre of the cell that contains the sample point, exactly the
+/// value the cell-centred CSV export reports. A sample outside the domain or
+/// inside a solid cell has no value, so its `value` column is left empty rather
+/// than written as zero. `samples` must be at least two. When `path` ends in
+/// `.csv` it is used as the output file; otherwise it is treated as a directory
+/// and `profile.csv` is created inside it.
+pub fn export_profile(
+    solution: &Solution,
+    path: &Path,
+    line: ProfileLine,
+    samples: usize,
+    field: ExportField,
+) -> Result<PathBuf, CfdError> {
+    let length = line.length()?;
+    if samples < 2 {
+        return Err(CfdError::new(
+            "export/invalid-samples",
+            "profile samples must be at least 2",
+        ));
+    }
+    let target = with_extension_or_file(path, "csv", "profile.csv");
+    let values = field_values(solution, field)?;
+    let mut text = String::from("distance,x,y,value\n");
+    let denominator = (samples - 1) as f64;
+    for sample in 0..samples {
+        let t = sample as f64 / denominator;
+        let x = line.x0 + t * (line.x1 - line.x0);
+        let y = line.y0 + t * (line.y1 - line.y0);
+        let distance = t * length;
+        match cell_value(solution, &values, x, y) {
+            Some(value) => {
+                let _ = writeln!(text, "{distance:.10e},{x:.10e},{y:.10e},{value:.10e}");
+            }
+            None => {
+                let _ = writeln!(text, "{distance:.10e},{x:.10e},{y:.10e},");
+            }
+        }
+    }
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
+/// Value of a cell-centred field at the fluid cell containing `(x, y)`.
+///
+/// A point outside the domain or inside a solid cell has no value and returns
+/// `None`, so callers never invent a zero for a non-fluid sample.
+fn cell_value(solution: &Solution, values: &[f64], x: f64, y: f64) -> Option<f64> {
+    let mesh = &solution.mesh;
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    if x < 0.0 || y < 0.0 || x > mesh.length_x || y > mesh.length_y {
+        return None;
+    }
+    let i = ((x / mesh.dx).floor() as isize).clamp(0, mesh.nx as isize - 1) as usize;
+    let j = ((y / mesh.dy).floor() as isize).clamp(0, mesh.ny as isize - 1) as usize;
+    let index = mesh.pressure_index(i, j);
+    if mesh.solid[index] {
+        return None;
+    }
+    let value = values[index];
+    value.is_finite().then_some(value)
+}
+
+/// Summary of one field over the fluid cells.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FieldSummary {
+    min: f64,
+    max: f64,
+    mean: f64,
+    rms: f64,
+    count: usize,
+}
+
+/// Writes deterministic statistics of every available field as JSON.
+///
+/// The document tag is `open-cfd-statistics` and the object starts with the mesh
+/// (`nx`, `ny`, `cells`, `fluidCells`) followed by one entry per field in a
+/// fixed order: `speed`, `pressure`, `u`, `v`, `vorticity`, `streamFunction`,
+/// and, when the case provides them, `temperature`, `turbulentKineticEnergy`
+/// and `turbulentDissipation`. Every entry is `{min, max, mean, rms, count}`
+/// over the fluid cells only, the same cells the CSV export writes. Solid cells
+/// and non-finite values are skipped. A field without a single fluid value
+/// reports `count: 0` and `null` statistics instead of an invented number.
+/// When `path` ends in `.json` it is used as the output file; otherwise it is
+/// treated as a directory and `statistics.json` is created inside it.
+pub fn export_statistics(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "json", "statistics.json");
+    let text = render_statistics(solution);
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
+fn render_statistics(solution: &Solution) -> String {
+    let mesh = &solution.mesh;
+    let fluid_cells = (0..mesh.pressure_count())
+        .filter(|index| !mesh.solid[*index])
+        .count();
+    let mut fields: Vec<(&str, Option<FieldSummary>)> = vec![
+        (
+            "speed",
+            summarize(mesh, |index| {
+                let (ux, uy) =
+                    mesh.cell_velocity(&solution.u, &solution.v, index % mesh.nx, index / mesh.nx);
+                ux.hypot(uy)
+            }),
+        ),
+        ("pressure", summarize(mesh, |index| solution.p[index])),
+        (
+            "u",
+            summarize(mesh, |index| {
+                mesh.cell_velocity(&solution.u, &solution.v, index % mesh.nx, index / mesh.nx)
+                    .0
+            }),
+        ),
+        (
+            "v",
+            summarize(mesh, |index| {
+                mesh.cell_velocity(&solution.u, &solution.v, index % mesh.nx, index / mesh.nx)
+                    .1
+            }),
+        ),
+        (
+            "vorticity",
+            summarize(mesh, |index| solution.vorticity[index]),
+        ),
+        (
+            "streamFunction",
+            summarize(mesh, |index| solution.stream_function[index]),
+        ),
+    ];
+    if let Some(values) = &solution.temperature {
+        fields.push(("temperature", summarize(mesh, |index| values[index])));
+    }
+    if let Some(values) = &solution.turbulent_kinetic_energy {
+        fields.push((
+            "turbulentKineticEnergy",
+            summarize(mesh, |index| values[index]),
+        ));
+    }
+    if let Some(values) = &solution.turbulent_dissipation {
+        fields.push((
+            "turbulentDissipation",
+            summarize(mesh, |index| values[index]),
+        ));
+    }
+
+    let mut text = String::new();
+    let _ = writeln!(text, "{{");
+    let _ = writeln!(text, "  \"format\": \"open-cfd-statistics\",");
+    let _ = writeln!(text, "  \"mesh\": {{");
+    let _ = writeln!(text, "    \"nx\": {},", mesh.nx);
+    let _ = writeln!(text, "    \"ny\": {},", mesh.ny);
+    let _ = writeln!(text, "    \"cells\": {},", mesh.pressure_count());
+    let _ = writeln!(text, "    \"fluidCells\": {fluid_cells}");
+    let _ = writeln!(text, "  }},");
+    let _ = writeln!(text, "  \"fields\": {{");
+    for (position, (name, summary)) in fields.iter().enumerate() {
+        let comma = if position + 1 == fields.len() {
+            ""
+        } else {
+            ","
+        };
+        let _ = writeln!(text, "    \"{name}\": {}{comma}", summary_json(*summary));
+    }
+    let _ = writeln!(text, "  }}");
+    let _ = writeln!(text, "}}");
+    text
+}
+
+/// Statistics of `value` over the fluid cells with a finite sample.
+fn summarize(mesh: &crate::mesh::Mesh, value: impl Fn(usize) -> f64) -> Option<FieldSummary> {
+    let mut summary = FieldSummary {
+        min: f64::INFINITY,
+        max: f64::NEG_INFINITY,
+        mean: 0.0,
+        rms: 0.0,
+        count: 0,
+    };
+    let mut sum = 0.0;
+    let mut square_sum = 0.0;
+    for index in 0..mesh.pressure_count() {
+        if mesh.solid[index] {
+            continue;
+        }
+        let sample = value(index);
+        if !sample.is_finite() {
+            continue;
+        }
+        summary.min = summary.min.min(sample);
+        summary.max = summary.max.max(sample);
+        sum += sample;
+        square_sum += sample * sample;
+        summary.count += 1;
+    }
+    if summary.count == 0 {
+        return None;
+    }
+    let count = summary.count as f64;
+    summary.mean = sum / count;
+    summary.rms = (square_sum / count).sqrt();
+    Some(summary)
+}
+
+fn summary_json(summary: Option<FieldSummary>) -> String {
+    match summary {
+        Some(summary) => format!(
+            "{{\"min\": {:.10e}, \"max\": {:.10e}, \"mean\": {:.10e}, \"rms\": {:.10e}, \"count\": {}}}",
+            summary.min, summary.max, summary.mean, summary.rms, summary.count
+        ),
+        None => "{\"min\": null, \"max\": null, \"mean\": null, \"rms\": null, \"count\": 0}"
+            .to_string(),
+    }
+}
+
 /// Writes every sampled probe reading as long-form CSV.
 ///
 /// The header is `probe,x,y,step,time,u,v,speed,pressure,temperature`; each

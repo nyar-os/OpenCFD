@@ -6,8 +6,8 @@ use std::process;
 use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
-    PorousRegion, Probe, ScalarSource, Side, SideThermal, SolveOptions, ThermalConfig, TimeScheme,
-    TimeSeries, TransientInlet, TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
+    PorousRegion, Probe, ProfileLine, ScalarSource, Side, SideThermal, SolveOptions, ThermalConfig,
+    TimeScheme, TimeSeries, TransientInlet, TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
 };
 
 const USAGE: &str = "\
@@ -63,7 +63,7 @@ Usage:
   ocfd reynolds <file>
   ocfd stability <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -1421,6 +1421,8 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
             "--out",
             "--field",
             "--layout",
+            "--line",
+            "--samples",
             "--seed",
             "--particle-steps",
         ],
@@ -1429,13 +1431,15 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
-    let field = match parsed.options.get("--field") {
-        Some(value) => value.parse::<ExportField>()?,
-        None => ExportField::Pressure,
-    };
+    let selected_field = parsed
+        .options
+        .get("--field")
+        .map(|value| value.parse::<ExportField>())
+        .transpose()?;
+    let field = selected_field.unwrap_or(ExportField::Pressure);
     let layout = match parsed.options.get("--layout") {
         Some(value) => value.parse::<ExportLayout>()?,
         None => ExportLayout::Cell,
@@ -1443,6 +1447,25 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let out = required(&parsed, "--out")?;
     let session = open_session(file)?;
     let report = match format {
+        ExportFormat::Profile => {
+            let line = profile_line(required(&parsed, "--line")?)?;
+            let samples = match parsed.options.get("--samples") {
+                Some(raw) => raw.parse::<usize>().map_err(|_| {
+                    CfdError::new(
+                        "cli/invalid-number",
+                        format!("value `{raw}` of `--samples` is not a positive integer"),
+                    )
+                })?,
+                None => 101,
+            };
+            session.export_profile(
+                Path::new(out),
+                line,
+                samples,
+                selected_field.unwrap_or(ExportField::Speed),
+            )?
+        }
+        ExportFormat::Statistics => session.export_statistics(Path::new(out))?,
         ExportFormat::Particles => {
             let seeds = parsed
                 .options
@@ -1498,8 +1521,37 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         }
         ExportFormat::Probes => println!("exported probe history CSV: {}", report.path),
         ExportFormat::Particles => println!("exported particle trajectories CSV: {}", report.path),
+        ExportFormat::Profile => println!(
+            "exported line profile CSV ({}): {}",
+            selected_field.unwrap_or(ExportField::Speed).as_str(),
+            report.path
+        ),
+        ExportFormat::Statistics => {
+            println!("exported field statistics JSON: {}", report.path)
+        }
     }
     Ok(0)
+}
+
+/// Parses one `x0,y0,x1,y1` profile segment.
+fn profile_line(raw: &str) -> Result<ProfileLine, CfdError> {
+    let parts: Vec<&str> = raw.split(',').collect();
+    if parts.len() != 4 {
+        return Err(CfdError::new(
+            "cli/invalid-line",
+            format!("profile line `{raw}` must look like `x0,y0,x1,y1`"),
+        ));
+    }
+    let mut values = [0.0_f64; 4];
+    for (position, part) in parts.iter().enumerate() {
+        values[position] = part.trim().parse::<f64>().map_err(|_| {
+            CfdError::new(
+                "cli/invalid-line",
+                format!("profile line coordinate `{}` is not a number", part.trim()),
+            )
+        })?;
+    }
+    Ok(ProfileLine::new(values[0], values[1], values[2], values[3]))
 }
 
 /// Parses `x,y` seeds separated by semicolons.

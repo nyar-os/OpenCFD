@@ -16,8 +16,8 @@ use serde::Serialize;
 use crate::checkpoint::Checkpoint;
 use crate::export::{
     export_coefficients, export_contours, export_csv_with_layout, export_forces, export_probes,
-    export_residuals, export_streamlines, export_svg, export_vtk_with_layout, ExportField,
-    ExportLayout,
+    export_profile as write_profile, export_residuals, export_statistics as write_statistics,
+    export_streamlines, export_svg, export_vtk_with_layout, ExportField, ExportLayout, ProfileLine,
 };
 use crate::mesh::Mesh;
 use crate::model::{
@@ -59,6 +59,10 @@ pub enum ExportFormat {
     Probes,
     /// Traced particle trajectories as CSV rows.
     Particles,
+    /// One cell-centred field sampled along a straight segment as CSV rows.
+    Profile,
+    /// Per-field statistics over the fluid cells as a JSON document.
+    Statistics,
 }
 
 impl ExportFormat {
@@ -75,6 +79,8 @@ impl ExportFormat {
             Self::Coefficients => "coefficients",
             Self::Probes => "probes",
             Self::Particles => "particles",
+            Self::Profile => "profile",
+            Self::Statistics => "statistics",
         }
     }
 }
@@ -94,16 +100,18 @@ impl FromStr for ExportFormat {
             "coefficients" | "coefficient" | "cdcl" => Ok(Self::Coefficients),
             "probes" | "probe" => Ok(Self::Probes),
             "particles" | "particle" | "tracers" => Ok(Self::Particles),
+            "profile" | "profiles" => Ok(Self::Profile),
+            "statistics" | "stats" => Ok(Self::Statistics),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes or particles are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes, particles, profile or statistics are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes or particles are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes, particles, profile or statistics are supported"
                 ),
             )),
         }
@@ -934,6 +942,13 @@ impl OpenCfd {
             ExportFormat::Forces => export_forces(&solution, out)?,
             ExportFormat::Coefficients => export_coefficients(&solution, out)?,
             ExportFormat::Probes => export_probes(&solution, out)?,
+            ExportFormat::Profile => {
+                return Err(CfdError::new(
+                    "export/needs-line",
+                    "profile export needs a line and sample count; use OpenCfd::export_profile",
+                ))
+            }
+            ExportFormat::Statistics => write_statistics(&solution, out)?,
             ExportFormat::Particles => {
                 let config = ParticleConfig {
                     seeds: Vec::new(),
@@ -946,6 +961,49 @@ impl OpenCfd {
         Ok(ExportReport {
             format: format.as_str().to_string(),
             layout: layout.as_str().to_string(),
+            path: written.display().to_string(),
+        })
+    }
+
+    /// Solves and samples one cell-centred field along a straight segment.
+    ///
+    /// The line is sampled at `samples` equally spaced points; values come from
+    /// the fluid cell containing each point, and a sample outside the domain or
+    /// inside a solid cell is written as an empty CSV value. The line is
+    /// validated before the solve, so invalid arguments never write a file.
+    pub fn export_profile(
+        &self,
+        out: &Path,
+        line: ProfileLine,
+        samples: usize,
+        field: ExportField,
+    ) -> Result<ExportReport, CfdError> {
+        line.length()?;
+        if samples < 2 {
+            return Err(CfdError::new(
+                "export/invalid-samples",
+                "profile samples must be at least 2",
+            ));
+        }
+        let solution = solve(&self.model)?;
+        let written = write_profile(&solution, out, line, samples, field)?;
+        Ok(ExportReport {
+            format: ExportFormat::Profile.as_str().to_string(),
+            layout: ExportLayout::Cell.as_str().to_string(),
+            path: written.display().to_string(),
+        })
+    }
+
+    /// Solves and writes deterministic per-field statistics as JSON.
+    ///
+    /// Only fluid cells contribute, and non-finite values are skipped. See
+    /// `crate::export::export_statistics` for the document shape.
+    pub fn export_statistics(&self, out: &Path) -> Result<ExportReport, CfdError> {
+        let solution = solve(&self.model)?;
+        let written = write_statistics(&solution, out)?;
+        Ok(ExportReport {
+            format: ExportFormat::Statistics.as_str().to_string(),
+            layout: ExportLayout::Cell.as_str().to_string(),
             path: written.display().to_string(),
         })
     }

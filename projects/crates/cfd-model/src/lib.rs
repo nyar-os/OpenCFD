@@ -56,8 +56,9 @@ pub use crate::checkpoint::{Checkpoint, CheckpointMesh, CHECKPOINT_FORMAT, CHECK
 pub use crate::error::CfdError;
 pub use crate::export::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
-    export_probes, export_residuals, export_streamlines, export_svg, export_vtk,
-    export_vtk_with_layout, write_atomic, ExportField, ExportLayout,
+    export_probes, export_profile, export_residuals, export_statistics, export_streamlines,
+    export_svg, export_vtk, export_vtk_with_layout, write_atomic, ExportField, ExportLayout,
+    ProfileLine,
 };
 pub use crate::fields::{stream_function, vorticity};
 pub use crate::mesh::Mesh;
@@ -139,6 +140,8 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "probes": "supported",
     "coefficients": "supported",
     "contours": "supported",
+    "profile": "supported",
+    "statistics": "supported",
     "restart": "supported",
     "particles": "supported",
     "inp": "unsupported",

@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cfd_model::{
     Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Model, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
-    PorousRegion, Probe, Side, SolveOptions, TimeScheme, TimeSeries, TransientInlet,
+    PorousRegion, Probe, ProfileLine, Side, SolveOptions, TimeScheme, TimeSeries, TransientInlet,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -689,6 +689,187 @@ fn session_create_edit_solve_export_matches_cli() {
     let summary = session.probe_clear().expect("probe clear");
     assert!(summary.probes.is_empty());
     assert!(session.probe_list().is_empty());
+}
+
+#[test]
+fn session_profile_and_statistics_exports_are_deterministic() {
+    let directory = temporary_dir("profile-statistics");
+    let path = directory.join("case.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.mesh_set(10, 8, 1.0, 1.0).expect("mesh");
+    session.fluid_set(1.0, 0.01).expect("fluid");
+    session.time_set(0.01, 3, 10, Some(1e-3)).expect("time");
+    session
+        .boundary_set(Side::Top, BoundaryKind::Wall, Some(1.0), Some(0.0), None)
+        .expect("lid");
+
+    let profile_path = directory.join("profile.csv");
+    let report = session
+        .export_profile(
+            &profile_path,
+            ProfileLine::new(0.0, 0.5, 1.0, 0.5),
+            11,
+            ExportField::Speed,
+        )
+        .expect("profile export");
+    assert_eq!(report.format, "profile");
+    assert_eq!(report.layout, "cell");
+    let profile = fs::read_to_string(&profile_path).expect("read profile");
+    let lines: Vec<&str> = profile.lines().collect();
+    assert_eq!(lines[0], "distance,x,y,value");
+    assert_eq!(lines.len(), 12, "one header plus 11 samples");
+    let mut previous_distance = -1.0;
+    for line in &lines[1..] {
+        let columns: Vec<&str> = line.split(',').collect();
+        assert_eq!(columns.len(), 4);
+        let distance = columns[0].parse::<f64>().expect("distance");
+        let x = columns[1].parse::<f64>().expect("x");
+        let y = columns[2].parse::<f64>().expect("y");
+        assert!(distance > previous_distance, "distance must increase");
+        previous_distance = distance;
+        assert!((y - 0.5).abs() < 1e-12, "y stays on the line");
+        assert!((0.0..=1.0).contains(&x), "x stays on the line");
+        assert!(
+            !columns[3].is_empty(),
+            "a fluid sample must report a value instead of an empty column"
+        );
+    }
+
+    let bad_path = directory.join("bad-profile.csv");
+    let error = session
+        .export_profile(
+            &bad_path,
+            ProfileLine::new(0.5, 0.5, 0.5, 0.5),
+            5,
+            ExportField::Speed,
+        )
+        .expect_err("coincident line must be rejected");
+    assert_eq!(error.code, "export/invalid-line");
+    assert!(!bad_path.exists(), "invalid line must not write a file");
+    let error = session
+        .export_profile(
+            &bad_path,
+            ProfileLine::new(0.0, 0.5, 1.0, 0.5),
+            1,
+            ExportField::Speed,
+        )
+        .expect_err("one sample must be rejected");
+    assert_eq!(error.code, "export/invalid-samples");
+    assert!(!bad_path.exists(), "invalid samples must not write a file");
+    let error = session
+        .export_profile(
+            &bad_path,
+            ProfileLine::new(f64::NAN, 0.5, 1.0, 0.5),
+            5,
+            ExportField::Speed,
+        )
+        .expect_err("non-finite line must be rejected");
+    assert_eq!(error.code, "export/invalid-line");
+    assert!(!bad_path.exists(), "non-finite line must not write a file");
+
+    let statistics_path = directory.join("statistics.json");
+    let report = session
+        .export_statistics(&statistics_path)
+        .expect("statistics export");
+    assert_eq!(report.format, "statistics");
+    let statistics: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&statistics_path).expect("read statistics"))
+            .expect("parse statistics");
+    assert_eq!(statistics["format"], "open-cfd-statistics");
+    assert_eq!(statistics["mesh"]["nx"], 10);
+    assert_eq!(statistics["mesh"]["ny"], 8);
+    assert_eq!(statistics["mesh"]["cells"], 80);
+    let fluid_cells = statistics["mesh"]["fluidCells"]
+        .as_u64()
+        .expect("fluid cells");
+    assert!(fluid_cells > 0);
+    let speed = &statistics["fields"]["speed"];
+    assert_eq!(speed["count"].as_u64(), Some(fluid_cells));
+    let min = speed["min"].as_f64().expect("minimum");
+    let max = speed["max"].as_f64().expect("maximum");
+    let mean = speed["mean"].as_f64().expect("mean");
+    let rms = speed["rms"].as_f64().expect("rms");
+    assert!(min <= mean && mean <= max, "min <= mean <= max");
+    assert!(rms >= mean.abs() - 1e-12, "rms covers the mean");
+    for field in ["speed", "pressure", "u", "v", "vorticity", "streamFunction"] {
+        assert_eq!(
+            statistics["fields"][field]["count"].as_u64(),
+            Some(fluid_cells),
+            "field `{field}` counts every fluid cell"
+        );
+    }
+
+    let repeated_path = directory.join("statistics-repeated.json");
+    session
+        .export_statistics(&repeated_path)
+        .expect("repeated statistics export");
+    assert_eq!(
+        fs::read_to_string(&statistics_path).expect("statistics"),
+        fs::read_to_string(&repeated_path).expect("repeated statistics"),
+        "statistics output must be deterministic"
+    );
+
+    let cli_profile_path = directory.join("cli-profile.csv");
+    let output = run_cli(&[
+        "export",
+        &text(&path),
+        "--format",
+        "profile",
+        "--line",
+        "0,0.5,1,0.5",
+        "--samples",
+        "5",
+        "--field",
+        "speed",
+        "--out",
+        &text(&cli_profile_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd profile export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&cli_profile_path)
+            .expect("CLI profile")
+            .lines()
+            .count(),
+        6
+    );
+
+    let cli_statistics_path = directory.join("cli-statistics.json");
+    let output = run_cli(&[
+        "export",
+        &text(&path),
+        "--format",
+        "statistics",
+        "--out",
+        &text(&cli_statistics_path),
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd statistics export failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&cli_statistics_path).expect("CLI statistics"),
+        fs::read_to_string(&statistics_path).expect("session statistics")
+    );
+
+    let invalid_path = directory.join("cli-invalid.csv");
+    let output = run_cli(&[
+        "export",
+        &text(&path),
+        "--format",
+        "profile",
+        "--line",
+        "0,0,0,0",
+        "--out",
+        &text(&invalid_path),
+    ]);
+    assert!(!output.status.success(), "coincident CLI line must fail");
+    assert!(!invalid_path.exists(), "failed CLI line must not write");
 }
 
 #[test]
