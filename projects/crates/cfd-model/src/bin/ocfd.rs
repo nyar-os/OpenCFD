@@ -22,7 +22,7 @@ Usage:
   ocfd time adaptive set <file> --cfl <n|off>
   ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
-  ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
+  ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
   ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
@@ -423,7 +423,16 @@ fn obstacle_add(args: &[String]) -> Result<i32, CfdError> {
     let parsed = parse(
         args,
         &[
-            "--kind", "--id", "--x0", "--y0", "--x1", "--y1", "--x", "--y", "--r",
+            "--kind",
+            "--id",
+            "--x0",
+            "--y0",
+            "--x1",
+            "--y1",
+            "--rotation",
+            "--x",
+            "--y",
+            "--r",
         ],
         &[],
     )?;
@@ -441,6 +450,7 @@ fn obstacle_add(args: &[String]) -> Result<i32, CfdError> {
             y0: required_number(&parsed, "--y0")?,
             x1: required_number(&parsed, "--x1")?,
             y1: required_number(&parsed, "--y1")?,
+            rotation: number(&parsed, "--rotation")?.unwrap_or(0.0),
         },
         "circle" => Obstacle::Circle {
             id,

@@ -4079,6 +4079,7 @@ mod tests {
             y0: 0.9,
             x1: 0.2,
             y1: 1.0,
+            rotation: 0.0,
         }])
         .expect("obstacles");
         let mut model = Model::new();

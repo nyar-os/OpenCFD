@@ -132,7 +132,7 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd time adaptive set <file> --cfl <n\|off>` | Enable adaptive stepping with a target convective CFL in `(0, 1]`, or disable it with `--cfl off` |
 | `ocfd boundary set <file> --side left\|right\|top\|bottom --kind wall\|inlet\|outlet\|convective\|slip\|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]` | Set a side's boundary type, velocity and outlet gauge pressure; omitted values are unchanged |
 | `ocfd boundary profile set <file> --side left\|right\|top\|bottom --profile uniform\|parabolic\|powerLaw [--exponent <n>]` | Shape the normal velocity of an inlet side; `parabolic` is Poiseuille, `powerLaw` uses `(1−\|2s−1\|)^(1/n)` |
-| `ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]` | Add a rectangular obstacle; omitting `--id` generates `obstacle-N` in order |
+| `ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]` | Add a rectangular obstacle, optionally rotated counter-clockwise about its centroid; omitting `--id` generates `obstacle-N` in order |
 | `ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]` | Add a circular obstacle |
 | `ocfd obstacle list <file>` | Print the obstacle JSON array in document order |
 | `ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]` | Add an isotropic Darcy–Forchheimer porous region; omitting `--id` generates `porous-N` in order |
@@ -228,7 +228,7 @@ The file is UTF-8 JSON with camelCase fields. A minimal document only needs `for
 | `time` | `dt`, step count `steps`, maximum pressure SOR sweeps per step `pressureIterations`, relative residual tolerance `tolerance`, the momentum time scheme `scheme` (`euler` default or `rk2`), adaptive stepping `adaptive` and its target convective CFL `targetCfl` in `(0, 1]` |
 | `boundaries` | One `kind`, velocity `[u, v]` and outlet `pressure` (Pa) for each of the four sides, plus `inletProfiles` with a `profile` per side (`uniform`, `parabolic`, `powerLaw`) and the shared power-law `exponent`. `kind` is `wall`, `inlet`, `outlet`, `convective`, `slip` or `periodic`; periodic sides must come in opposite pairs |
 | `initial` | Optional; uniform initial velocity `[u, v]`, at rest by default |
-| `obstacles` | Optional; rectangle `{kind:"rect",x0,y0,x1,y1}` or circle `{kind:"circle",x,y,r}`; `id` may be omitted and becomes `obstacle-N` in order |
+| `obstacles` | Optional; rectangle `{kind:"rect",x0,y0,x1,y1}` with optional counter-clockwise `rotation` in degrees about its centroid, or circle `{kind:"circle",x,y,r}`; `id` may be omitted and becomes `obstacle-N` in order |
 | `porous` | Optional; isotropic regions `{x0,y0,x1,y1,permeability,inertial}` with permeability `K` (m², positive) and Forchheimer coefficient `C_F` (default `0`); `id` may be omitted and becomes `porous-N` in order |
 | `probes` | Optional; point monitors `{id,x,y}` sampled during the solve; a probe must lie inside the domain and outside every obstacle, and `id` may be omitted and becomes `probe-N` in order |
 | `scalar` | Optional; `diffusivity` (m²/s), `initial` and `inletValue`, enabling passive scalar transport |

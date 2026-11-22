@@ -103,7 +103,7 @@ export interface InitialField {
     readonly velocity: readonly [number, number];
 }
 
-/** Axis-aligned rectangular obstacle. */
+/** Rectangle obstacle, optionally rotated counter-clockwise about its centroid. */
 export interface RectObstacle {
     readonly kind: 'rect';
     /** Stable identifier; omitted means `obstacle-N` in document order. */
@@ -112,6 +112,8 @@ export interface RectObstacle {
     readonly y0: number;
     readonly x1: number;
     readonly y1: number;
+    /** Counter-clockwise rotation about the centroid in degrees; default 0. */
+    readonly rotation?: number;
 }
 
 /** Circular obstacle. */

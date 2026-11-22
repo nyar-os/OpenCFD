@@ -445,6 +445,7 @@ fn solid_cell_has_zero_velocity_and_divergence() {
         y0: 0.5,
         x1: 0.58,
         y1: 0.58,
+        rotation: 0.0,
     }];
 
     let solution = solve(&model).expect("solve");
@@ -557,6 +558,7 @@ fn reference_quantities_scale_force_and_moment_coefficients() {
         y0: 0.3,
         x1: 0.9,
         y1: 0.6,
+        rotation: 0.0,
     }];
 
     let base = solve(&model).expect("base solve");
@@ -1326,6 +1328,7 @@ fn probe_outside_the_domain_or_inside_an_obstacle_is_rejected() {
         y0: 0.4,
         x1: 0.6,
         y1: 0.6,
+        rotation: 0.0,
     }];
     assert_eq!(model.validate().expect_err("blocked").code, "probe/invalid");
     assert_eq!(solve(&model).expect_err("solve").code, "probe/invalid");
@@ -2223,6 +2226,7 @@ fn mesh_quality_excludes_solids_and_is_reported_after_a_solve() {
         y0: 0.2,
         x1: 0.4,
         y1: 0.4,
+        rotation: 0.0,
     });
     let solution = solve(&model).expect("solve");
     let quality = &solution.report.mesh_quality;
@@ -2290,6 +2294,7 @@ fn particles_stop_before_a_solid_cell() {
         y0: 0.35,
         x1: 0.55,
         y1: 0.55,
+        rotation: 0.0,
     }])
     .expect("obstacle");
     assert!(mesh.is_solid(4, 4));
@@ -2313,6 +2318,98 @@ fn particles_stop_before_a_solid_cell() {
         let j = ((sample.y / mesh.dy).floor() as usize).min(mesh.ny - 1);
         assert!(!mesh.is_solid(i, j), "a trajectory entered a solid cell");
     }
+}
+
+#[test]
+fn rotated_rectangle_contains_its_rotated_corners_only() {
+    let rectangle = Obstacle::Rect {
+        id: "plate".to_string(),
+        x0: 0.4,
+        y0: 0.45,
+        x1: 0.6,
+        y1: 0.55,
+        rotation: 45.0,
+    };
+    let unrotated = Obstacle::Rect {
+        id: "plate".to_string(),
+        x0: 0.4,
+        y0: 0.45,
+        x1: 0.6,
+        y1: 0.55,
+        rotation: 0.0,
+    };
+    let (cx, cy) = rectangle.centroid();
+    assert_eq!((cx, cy), (0.5, 0.5));
+    let (sin, cos) = 45.0_f64.to_radians().sin_cos();
+    for (dx, dy) in [(-0.1, -0.05), (0.1, -0.05), (0.1, 0.05), (-0.1, 0.05)] {
+        let x = cx + dx * cos - dy * sin;
+        let y = cy + dx * sin + dy * cos;
+        assert!(rectangle.contains(x, y), "corner ({x}, {y}) must be inside");
+    }
+    let (probe_x, probe_y) = (0.59, 0.46);
+    assert!(unrotated.contains(probe_x, probe_y));
+    assert!(
+        !rectangle.contains(probe_x, probe_y),
+        "a point inside the unrotated box but outside the rotated one must be excluded"
+    );
+}
+
+#[test]
+fn rotated_rectangle_validate_rejects_a_corner_outside_the_domain() {
+    let rotated = Obstacle::Rect {
+        id: String::new(),
+        x0: 0.0,
+        y0: 0.9,
+        x1: 0.2,
+        y1: 1.0,
+        rotation: 45.0,
+    };
+    let error = rotated
+        .validate(1.0, 1.0)
+        .expect_err("a rotated corner leaves the domain");
+    assert_eq!(error.code, "obstacle/invalid");
+
+    let unrotated = Obstacle::Rect {
+        id: String::new(),
+        x0: 0.0,
+        y0: 0.9,
+        x1: 0.2,
+        y1: 1.0,
+        rotation: 0.0,
+    };
+    unrotated.validate(1.0, 1.0).expect("unrotated fits");
+}
+
+#[test]
+fn rotated_bar_marks_a_diagonal_band_of_solid_cells() {
+    let mut mesh = Mesh::new(&MeshConfig {
+        nx: 10,
+        ny: 10,
+        length_x: 1.0,
+        length_y: 1.0,
+    })
+    .expect("mesh");
+    mesh.apply_obstacles(&[Obstacle::Rect {
+        id: "bar".to_string(),
+        x0: 0.2,
+        y0: 0.45,
+        x1: 0.8,
+        y1: 0.55,
+        rotation: 45.0,
+    }])
+    .expect("obstacle");
+    let solid = mesh.solid.iter().filter(|&&flag| flag).count();
+    assert_eq!(solid, 4, "the diagonal band must cover four cell centres");
+    for index in 3..=6 {
+        assert!(
+            mesh.is_solid(index, index),
+            "cell ({index}, {index}) must be solid"
+        );
+    }
+    assert!(
+        !mesh.is_solid(3, 5),
+        "cells off the diagonal must stay fluid"
+    );
 }
 
 #[test]

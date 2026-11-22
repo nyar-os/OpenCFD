@@ -695,6 +695,10 @@ pub struct InitialField {
     pub velocity: [f64; 2],
 }
 
+/// Tolerance that keeps a rotated rectangle edge inside after the point is
+/// rotated back into the rectangle frame.
+const EDGE_TOLERANCE: f64 = 1e-12;
+
 /// Solid obstacle embedded in the fluid domain.
 ///
 /// A cell is solid when its centre lies inside the obstacle. Obstacles are
@@ -703,7 +707,7 @@ pub struct InitialField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Obstacle {
-    /// Axis-aligned rectangle spanned by `(x0, y0)` and `(x1, y1)` (m).
+    /// Rectangle spanned by `(x0, y0)` and `(x1, y1)` (m), optionally rotated.
     Rect {
         /// Stable identifier used by force reports; empty means `obstacle-N`.
         #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -716,6 +720,9 @@ pub enum Obstacle {
         x1: f64,
         /// Upper y coordinate (m).
         y1: f64,
+        /// Counter-clockwise rotation about the centroid in degrees.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        rotation: f64,
     },
     /// Circle with centre `(x, y)` and radius `r` (m).
     Circle {
@@ -742,7 +749,21 @@ impl Obstacle {
     /// Returns a copy of this obstacle carrying `id`.
     pub fn with_id(self, id: String) -> Self {
         match self {
-            Self::Rect { x0, y0, x1, y1, .. } => Self::Rect { id, x0, y0, x1, y1 },
+            Self::Rect {
+                x0,
+                y0,
+                x1,
+                y1,
+                rotation,
+                ..
+            } => Self::Rect {
+                id,
+                x0,
+                y0,
+                x1,
+                y1,
+                rotation,
+            },
             Self::Circle { x, y, r, .. } => Self::Circle { id, x, y, r },
         }
     }
@@ -755,7 +776,8 @@ impl Obstacle {
         }
     }
 
-    /// Characteristic length `D` (m): rectangle height or circle diameter.
+    /// Characteristic length `D` (m): unrotated rectangle height or circle
+    /// diameter. Rotation does not change it.
     pub fn characteristic_length(&self) -> f64 {
         match self {
             Self::Rect { y0, y1, .. } => y1 - y0,
@@ -772,9 +794,30 @@ impl Obstacle {
     }
 
     /// Whether the point `(x, y)` lies inside the obstacle (edges included).
+    ///
+    /// A rotated rectangle rotates the query point back about its centroid
+    /// before the axis-aligned test.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         match self {
-            Self::Rect { x0, y0, x1, y1, .. } => x >= *x0 && x <= *x1 && y >= *y0 && y <= *y1,
+            Self::Rect {
+                x0,
+                y0,
+                x1,
+                y1,
+                rotation,
+                ..
+            } => {
+                let (cx, cy) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
+                let (sin, cos) = (-rotation.to_radians()).sin_cos();
+                let dx = x - cx;
+                let dy = y - cy;
+                let local_x = cx + dx * cos - dy * sin;
+                let local_y = cy + dx * sin + dy * cos;
+                local_x >= *x0 - EDGE_TOLERANCE
+                    && local_x <= *x1 + EDGE_TOLERANCE
+                    && local_y >= *y0 - EDGE_TOLERANCE
+                    && local_y <= *y1 + EDGE_TOLERANCE
+            }
             Self::Circle {
                 x: cx, y: cy, r, ..
             } => {
@@ -785,14 +828,25 @@ impl Obstacle {
         }
     }
 
-    /// Checks positive size and that the obstacle lies inside the domain.
+    /// Checks finite values, positive size and that every rotated corner lies
+    /// inside the domain.
     pub fn validate(&self, length_x: f64, length_y: f64) -> Result<(), CfdError> {
         match self {
-            Self::Rect { x0, y0, x1, y1, .. } => {
-                if ![x0, y0, x1, y1].iter().all(|value| value.is_finite()) {
+            Self::Rect {
+                x0,
+                y0,
+                x1,
+                y1,
+                rotation,
+                ..
+            } => {
+                if ![x0, y0, x1, y1, rotation]
+                    .iter()
+                    .all(|value| value.is_finite())
+                {
                     return Err(CfdError::new(
                         "obstacle/invalid",
-                        "rectangle obstacle coordinates must be finite",
+                        "rectangle obstacle coordinates and rotation must be finite",
                     ));
                 }
                 if x1 <= x0 || y1 <= y0 {
@@ -801,14 +855,26 @@ impl Obstacle {
                         "rectangle obstacle must satisfy x1 > x0 and y1 > y0",
                     ));
                 }
-                if *x0 < 0.0 || *y0 < 0.0 || *x1 > length_x || *y1 > length_y {
-                    return Err(CfdError::new(
-                        "obstacle/invalid",
-                        format!(
-                            "rectangle obstacle ({x0}, {y0})-({x1}, {y1}) lies outside the {}×{} m domain",
-                            length_x, length_y
-                        ),
-                    ));
+                let (cx, cy) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
+                let (sin, cos) = rotation.to_radians().sin_cos();
+                let half_width = 0.5 * (x1 - x0);
+                let half_height = 0.5 * (y1 - y0);
+                for (sign_x, sign_y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                    let corner_x = cx + sign_x * half_width * cos - sign_y * half_height * sin;
+                    let corner_y = cy + sign_x * half_width * sin + sign_y * half_height * cos;
+                    if corner_x < -EDGE_TOLERANCE
+                        || corner_y < -EDGE_TOLERANCE
+                        || corner_x > length_x + EDGE_TOLERANCE
+                        || corner_y > length_y + EDGE_TOLERANCE
+                    {
+                        return Err(CfdError::new(
+                            "obstacle/invalid",
+                            format!(
+                                "rectangle obstacle ({x0}, {y0})-({x1}, {y1}) rotated by {rotation}° lies outside the {}×{} m domain",
+                                length_x, length_y
+                            ),
+                        ));
+                    }
                 }
             }
             Self::Circle { x, y, r, .. } => {
@@ -1871,6 +1937,10 @@ impl Model {
 
 fn finite_positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 fn default_format() -> String {

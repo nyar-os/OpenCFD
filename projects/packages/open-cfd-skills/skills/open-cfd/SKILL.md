@@ -44,7 +44,7 @@ ocfd time scheme set <file> --scheme euler|rk2
 ocfd time adaptive set <file> --cfl <n|off>
 ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
 ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
-ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
+ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
 ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
@@ -152,6 +152,10 @@ rename. Confirm the path before running them.
   and `maxDt`.
 - Inlet profiles (`uniform`, `parabolic`, `powerLaw`) shape only the normal
   velocity of an `inlet` side.
+- `obstacle add ... --kind rect --rotation <deg>` rotates a rectangle
+  counter-clockwise about its centroid before cell masking, so a bar can be
+  modelled as an inclined plate; `rotation` defaults to `0`, is omitted from
+  JSON when zero, and the characteristic length stays the unrotated height.
 - `pressure gradient set --dpdx ... --dpdy ...` imposes a uniform pressure
   gradient in Pa/m as the body force `-∇p/ρ`; `0 0` clears it. It is constant in
   space and time and is not a general body-force field.
