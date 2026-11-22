@@ -18,6 +18,7 @@ TypeScript SDK and the `open-cfd` CLI, plus a developer `ocfd` binary.
 | [documentation/architecture.md](documentation/architecture.md) | Case model, module boundaries, data flow |
 | [documentation/capabilities.md](documentation/capabilities.md) | Supported features, report fields, numerical method, tests, limitations |
 | [documentation/cli.md](documentation/cli.md) | Command and flag reference |
+| [documentation/development.md](documentation/development.md) | Build, tests, addon staging, CI and release |
 | [documentation/README.md](documentation/README.md) | Maintainer doc index |
 
 ## Architecture invariants

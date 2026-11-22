@@ -8,6 +8,7 @@ you only want to run a case, start with the [project README](../README.md).
 | [architecture.md](architecture.md) | Case model, module boundaries, the model → Node-API → SDK/CLI flow, determinism and restart semantics, workspace layout |
 | [capabilities.md](capabilities.md) | Capability matrix, report and export fields, numerical method, validation map, limitations |
 | [cli.md](cli.md) | Full `open-cfd` command reference, plus the developer-only `ocfd` binary |
+| [development.md](development.md) | Environment, build, tests, addon staging, CI and release |
 | [AGENTS.md](../AGENTS.md) | Rules, verified commands and commit style for coding agents |
 | [package README](../projects/packages/open-cfd/README.md) | Registry page for `@wae/open-cfd` |
 
