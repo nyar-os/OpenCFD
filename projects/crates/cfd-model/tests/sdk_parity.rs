@@ -8,7 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cfd_model::{Model, OpenCfd, OpenCfdOptions, PorousRegion};
+use cfd_model::{
+    Model, OpenCfd, OpenCfdOptions, PorousRegion, SideThermal, ThermalConfig, WallFunction,
+};
 
 fn temporary_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -90,6 +92,91 @@ fn porous_validation_stays_in_the_model() {
     let after = fs::read_to_string(&path).expect("read document after");
     assert_eq!(before, after, "a rejected edit must not touch the document");
     assert!(session.porous_list().is_empty());
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn thermal_surface_requires_scalar_and_persists_settings() {
+    let directory = temporary_dir("surface-thermal");
+    let path = directory.join("thermal.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+
+    let error = session
+        .thermal_set(ThermalConfig::default(), None)
+        .expect_err("thermal without scalar");
+    assert_eq!(error.code, "thermal/invalid");
+
+    let thermal = ThermalConfig {
+        specific_heat: 1000.0,
+        conductivity: Some(0.6),
+        heat_source: 2.0,
+        left: SideThermal {
+            temperature: Some(320.0),
+            heat_flux: None,
+        },
+        ..ThermalConfig::default()
+    };
+    let summary = session
+        .thermal_set(thermal.clone(), Some(1.0e-3))
+        .expect("thermal with diffusivity");
+    assert_eq!(
+        summary.scalar.as_ref().map(|scalar| scalar.diffusivity),
+        Some(1.0e-3)
+    );
+    assert_eq!(summary.thermal.as_ref(), Some(&thermal));
+
+    let stored = Model::load(&path).expect("load");
+    assert_eq!(stored.thermal.as_ref(), Some(&thermal));
+
+    let error = session
+        .thermal_set(
+            ThermalConfig {
+                specific_heat: 0.0,
+                ..ThermalConfig::default()
+            },
+            None,
+        )
+        .expect_err("non-positive specific heat");
+    assert_eq!(error.code, "thermal/invalid");
+    assert_eq!(
+        Model::load(&path).expect("reload").thermal.as_ref(),
+        Some(&thermal)
+    );
+
+    fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn wall_function_surface_sets_validates_and_clears() {
+    let directory = temporary_dir("surface-wall-function");
+    let path = directory.join("wall.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+
+    let settings = WallFunction {
+        kappa: 0.4,
+        intercept: 5.0,
+        min_y_plus: 12.0,
+    };
+    let summary = session
+        .wall_function_set(settings.kappa, settings.intercept, settings.min_y_plus)
+        .expect("wall function");
+    assert_eq!(summary.wall_function.as_ref(), Some(&settings));
+
+    let error = session
+        .wall_function_set(0.0, 5.0, 12.0)
+        .expect_err("non-positive kappa");
+    assert_eq!(error.code, "wallFunction/invalid");
+    assert_eq!(
+        session.summary().expect("summary").wall_function.as_ref(),
+        Some(&settings)
+    );
+
+    let summary = session.wall_function_clear().expect("clear");
+    assert!(summary.wall_function.is_none());
+    assert!(Model::load(&path).expect("load").wall_function.is_none());
 
     fs::remove_dir_all(directory).ok();
 }

@@ -57,3 +57,46 @@ test('porous regions round-trip through the SDK', { skip: !installed }, async ()
         fs.rmSync(directory, { recursive: true, force: true });
     }
 });
+
+test('thermal settings require scalar transport', { skip: !installed }, async () => {
+    const directory = workspace();
+    const cfd = new OpenCFD();
+    try {
+        const cfdCase = await cfd.create(path.join(directory, 'thermal.ocfd'));
+        const summary = cfdCase.setThermal({
+            specificHeat: 1000,
+            conductivity: 0.6,
+            heatSource: 2,
+            left: { temperature: 320 },
+            right: {},
+            top: {},
+            bottom: {},
+            referenceTemperature: 300,
+            diffusivity: 1e-3,
+        });
+        assert.equal(summary.thermal?.specificHeat, 1000);
+        assert.equal(summary.thermal?.left.temperature, 320);
+        assert.equal(summary.scalar?.diffusivity, 1e-3);
+    } finally {
+        await cfd.dispose();
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('wall function settings set and clear', { skip: !installed }, async () => {
+    const directory = workspace();
+    const cfd = new OpenCFD();
+    try {
+        const cfdCase = await cfd.create(path.join(directory, 'wall.ocfd'));
+        const summary = cfdCase.setWallFunction({ kappa: 0.4 });
+        assert.equal(summary.wallFunction?.kappa, 0.4);
+        assert.equal(summary.wallFunction?.intercept, 5.2);
+        assert.equal(summary.wallFunction?.minYPlus, 11.06);
+
+        const cleared = cfdCase.clearWallFunction();
+        assert.equal(cleared.wallFunction, undefined);
+    } finally {
+        await cfd.dispose();
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});

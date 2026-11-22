@@ -43,6 +43,8 @@ import type {
     TimeSetRequest,
     TransientInlet,
     TurbulenceSetRequest,
+    ThermalSetRequest,
+    WallFunctionSetRequest,
 } from './types.js';
 
 /** Result of creating or opening a case. */
@@ -360,6 +362,38 @@ export function buoyancySet(handle: number, request: BuoyancySetRequest): CaseSu
             request.gx,
             request.gy,
         ),
+    );
+}
+
+/** Configures thermal boundaries and source and writes the document back. */
+export function thermalSet(handle: number, request: ThermalSetRequest): CaseSummary {
+    const { diffusivity, ...thermal } = request;
+    return decode<CaseSummary>(() =>
+        diffusivity === undefined
+            ? binding('thermal.set').thermal_set(handle, JSON.stringify(thermal))
+            : binding('thermal.set').thermal_set(handle, JSON.stringify(thermal), diffusivity),
+    );
+}
+
+/** Configures the log-law wall function and writes the document back. */
+export function wallFunctionSet(
+    handle: number,
+    request: WallFunctionSetRequest,
+): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('wall.function.set').wall_function_set(
+            handle,
+            request.kappa,
+            request.intercept,
+            request.minYPlus,
+        ),
+    );
+}
+
+/** Removes the wall function and writes the document back. */
+export function wallFunctionClear(handle: number): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('wall.function.clear').wall_function_clear(handle),
     );
 }
 

@@ -23,6 +23,7 @@ import type {
     Obstacle,
     ProfileLine,
     Side,
+    SideThermal,
     TimeScheme,
 } from './types.js';
 
@@ -53,6 +54,9 @@ usage:
   open-cfd probe list <file>
   open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
+  open-cfd thermal set <file> [--specific-heat <J/kgK>] [--conductivity <W/mK>] [--diffusivity <m2/s>] [--heat-source <W/m3>] [--left-temperature <K>] [--right-temperature <K>] [--top-temperature <K>] [--bottom-temperature <K>] [--left-heat-flux <W/m2>] [--right-heat-flux <W/m2>] [--top-heat-flux <W/m2>] [--bottom-heat-flux <W/m2>] [--obstacle-temperature <K>] [--obstacle-heat-flux <W/m2>] [--reference-temperature <K>]
+  open-cfd wall-function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
+  open-cfd wall-function clear <file>
   open-cfd buoyancy set <file> --beta <1/K> --t-ref <K> --gx <m/s2> --gy <m/s2>
   open-cfd convection set <file> --scheme upwind|central|quick
   open-cfd pressure gradient set <file> --dpdx <Pa/m> --dpdy <Pa/m>
@@ -307,6 +311,19 @@ function parseProfileSamples(raw: string): number {
         );
     }
     return samples;
+}
+
+function parseSideThermal(
+    parsed: ParsedArguments,
+    temperatureOption: string,
+    heatFluxOption: string,
+): SideThermal {
+    const temperature = optionalNumber(parsed, temperatureOption);
+    const heatFlux = optionalNumber(parsed, heatFluxOption);
+    return {
+        ...(temperature === undefined ? {} : { temperature }),
+        ...(heatFlux === undefined ? {} : { heatFlux }),
+    };
 }
 
 function parseObstacle(parsed: ParsedArguments): Obstacle {
@@ -757,6 +774,103 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             );
             return 0;
         }
+        case 'thermal':
+        case 'heat': {
+            expectSet(rest, 'thermal');
+            const parsed = parseArguments(rest.slice(1), [
+                '--specific-heat',
+                '--conductivity',
+                '--diffusivity',
+                '--heat-source',
+                '--left-temperature',
+                '--right-temperature',
+                '--top-temperature',
+                '--bottom-temperature',
+                '--left-heat-flux',
+                '--right-heat-flux',
+                '--top-heat-flux',
+                '--bottom-heat-flux',
+                '--obstacle-temperature',
+                '--obstacle-heat-flux',
+                '--reference-temperature',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'thermal set <file> [--specific-heat <J/kgK>] [--conductivity <W/mK>] [thermal options]',
+            );
+            const document = await session.open(file);
+            const specificHeat = optionalNumber(parsed, '--specific-heat') ?? 1;
+            const conductivity = optionalNumber(parsed, '--conductivity');
+            let diffusivity = optionalNumber(parsed, '--diffusivity');
+            if (diffusivity === undefined && conductivity !== undefined) {
+                const density = document.summary.fluid.density;
+                if (density * specificHeat > 0) {
+                    diffusivity = conductivity / (density * specificHeat);
+                }
+            }
+            const obstacleTemperature = optionalNumber(parsed, '--obstacle-temperature');
+            const obstacleHeatFlux = optionalNumber(parsed, '--obstacle-heat-flux');
+            const referenceTemperature = optionalNumber(parsed, '--reference-temperature');
+            const summary = document.setThermal({
+                specificHeat,
+                ...(conductivity === undefined ? {} : { conductivity }),
+                heatSource: optionalNumber(parsed, '--heat-source') ?? 0,
+                left: parseSideThermal(parsed, '--left-temperature', '--left-heat-flux'),
+                right: parseSideThermal(parsed, '--right-temperature', '--right-heat-flux'),
+                top: parseSideThermal(parsed, '--top-temperature', '--top-heat-flux'),
+                bottom: parseSideThermal(parsed, '--bottom-temperature', '--bottom-heat-flux'),
+                ...(obstacleTemperature === undefined ? {} : { obstacleTemperature }),
+                ...(obstacleHeatFlux === undefined ? {} : { obstacleHeatFlux }),
+                ...(referenceTemperature === undefined ? {} : { referenceTemperature }),
+                ...(diffusivity === undefined ? {} : { diffusivity }),
+            });
+            const thermal = summary.thermal;
+            console.log(
+                `thermal set: cp=${thermal?.specificHeat} J/kgK, k=${thermal?.conductivity} W/mK, heatSource=${thermal?.heatSource} W/m3, obstacleTemperature=${thermal?.obstacleTemperature}, obstacleHeatFlux=${thermal?.obstacleHeatFlux}`,
+            );
+            return 0;
+        }
+        case 'wall-function': {
+            const action = rest[0];
+            if (action === 'clear') {
+                const parsed = parseArguments(rest.slice(1), []);
+                const file = positional(parsed, 0, 'wall-function clear <file>');
+                const document = await session.open(file);
+                document.clearWallFunction();
+                console.log('wall function cleared');
+                return 0;
+            }
+            if (action !== 'set') {
+                throw cliError(
+                    'cli/unknown-command',
+                    action === undefined
+                        ? '`wall-function` needs the `set` or `clear` subcommand'
+                        : `\`wall-function\` subcommand \`${action}\` does not exist; use set or clear`,
+                );
+            }
+            const parsed = parseArguments(rest.slice(1), [
+                '--kappa',
+                '--intercept',
+                '--min-y-plus',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'wall-function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]',
+            );
+            const document = await session.open(file);
+            const summary = document.setWallFunction({
+                kappa: optionalNumber(parsed, '--kappa'),
+                intercept: optionalNumber(parsed, '--intercept'),
+                minYPlus: optionalNumber(parsed, '--min-y-plus'),
+            });
+            const wall = summary.wallFunction;
+            console.log(
+                `wall function set: kappa=${wall?.kappa}, intercept=${wall?.intercept}, minYPlus=${wall?.minYPlus}`,
+            );
+            return 0;
+        }
         case 'buoyancy': {
             expectSet(rest, 'buoyancy');
             const parsed = parseArguments(rest.slice(1), [
@@ -990,9 +1104,6 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             throw new NotImplementedError('compressible flow');
         case 'turbulence':
             throw new NotImplementedError('turbulence models');
-        case 'heat':
-        case 'thermal':
-            throw new NotImplementedError('heat transfer');
         case '3d':
         case 'threeD':
             throw new NotImplementedError('three-dimensional flow');

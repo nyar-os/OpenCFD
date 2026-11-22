@@ -18,7 +18,8 @@ use std::sync::{Mutex, MutexGuard};
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, ProfileLine,
-    ScalarSource, Side, SolveOptions, TimeScheme, TransientInlet, TurbulenceModel,
+    ScalarSource, Side, SolveOptions, ThermalConfig, TimeScheme, TransientInlet, TurbulenceModel,
+    WallFunction,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -563,6 +564,46 @@ fn reference_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Configures thermal boundaries and source from a JSON request.
+///
+/// The optional diffusivity replaces the scalar transport coefficient before
+/// the thermal section is written; thermal validation stays in the model.
+#[function]
+fn thermal_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let request = text(&ctx, 1)?;
+    let thermal = serde_json::from_str::<ThermalConfig>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the thermal request: {error}"
+        ))
+    })?;
+    let diffusivity = optional_number(&ctx, 2)?;
+    let summary = with_session(handle, |session| session.thermal_set(thermal, diffusivity))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Configures the log-law wall function; omitted values keep the model defaults.
+#[function]
+fn wall_function_set(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let defaults = WallFunction::default();
+    let kappa = optional_number(&ctx, 1)?.unwrap_or(defaults.kappa);
+    let intercept = optional_number(&ctx, 2)?.unwrap_or(defaults.intercept);
+    let min_y_plus = optional_number(&ctx, 3)?.unwrap_or(defaults.min_y_plus);
+    let summary = with_session(handle, |session| {
+        session.wall_function_set(kappa, intercept, min_y_plus)
+    })?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Removes the wall function and returns the summary.
+#[function]
+fn wall_function_clear(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let summary = with_session(handle, |session| session.wall_function_clear())?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Solves one session document with optional solve-time overrides.
 #[function]
 fn solve(ctx: CallContext) -> Result<JsValue> {
@@ -688,6 +729,9 @@ register_module![
     transient_inlet_list,
     transient_inlet_clear,
     turbulence_set,
+    thermal_set,
+    wall_function_set,
+    wall_function_clear,
     buoyancy_set,
     convection_set,
     pressure_gradient_set,

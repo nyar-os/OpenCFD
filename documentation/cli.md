@@ -142,6 +142,41 @@ open-cfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 `buoyancy set` requires scalar transport to be configured. `reference set`
 requires at least one of `--velocity`, `--area` or `--length`.
 
+### thermal
+
+```shell
+open-cfd thermal set <file> [--specific-heat <J/kgK>] [--conductivity <W/mK>] \
+    [--diffusivity <m2/s>] [--heat-source <W/m3>] \
+    [--left-temperature <K>] [--right-temperature <K>] [--top-temperature <K>] \
+    [--bottom-temperature <K>] [--left-heat-flux <W/m2>] [--right-heat-flux <W/m2>] \
+    [--top-heat-flux <W/m2>] [--bottom-heat-flux <W/m2>] \
+    [--obstacle-temperature <K>] [--obstacle-heat-flux <W/m2>] \
+    [--reference-temperature <K>]
+```
+
+`thermal set` turns the scalar equation into an energy equation. It matches the
+developer `ocfd heat set` command: `--specific-heat` defaults to `1 J/(kg·K)`,
+`--heat-source` to `0 W/m³`, and every side accepts a fixed temperature (which
+takes precedence over a heat flux). When `--diffusivity` is omitted and
+`--conductivity` is given, the CLI derives the diffusivity as
+`k / (rho · cp)`, so scalar transport is configured at the same time. Thermal
+settings require scalar transport; without it the edit fails with
+`thermal/invalid` and the document is unchanged. `heat` is accepted as an alias.
+
+### wall-function
+
+```shell
+open-cfd wall-function set <file> [--kappa <n>] [--intercept <n>] [--min-y-plus <n>]
+open-cfd wall-function clear <file>
+```
+
+`wall-function set` evaluates the reported wall shear from the log law
+`u⁺ = (1/κ)·ln(y⁺) + B` above `minYPlus`; omitted values keep the model defaults
+`kappa 0.41`, `intercept 5.2` and `minYPlus 11.06`. `κ` must be positive or the
+edit fails with `wallFunction/invalid`. `wall-function clear` removes the
+section. The momentum step keeps its no-slip ghost, so the wall function changes
+the report, not the boundary layer.
+
 ## Checks
 
 ```shell

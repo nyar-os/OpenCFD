@@ -42,6 +42,8 @@ import type {
     TimeSetRequest,
     TransientInlet,
     TurbulenceSetRequest,
+    ThermalSetRequest,
+    WallFunctionSetRequest,
 } from './types.js';
 
 /** One open case. Owns exactly one native session handle. */
@@ -275,6 +277,24 @@ export class CfdCase {
     /** Configures Boussinesq buoyancy and writes the document back. */
     setBuoyancy(request: BuoyancySetRequest): CaseSummary {        this.assertOpen();
         return this.adopt(service.buoyancySet(this.handle, request));
+    }
+
+    /** Configures thermal boundaries and source and writes the document back. */
+    setThermal(request: ThermalSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.thermalSet(this.handle, request));
+    }
+
+    /** Configures the log-law wall function and writes the document back. */
+    setWallFunction(request: WallFunctionSetRequest): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.wallFunctionSet(this.handle, request));
+    }
+
+    /** Removes the wall function and writes the document back. */
+    clearWallFunction(): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.wallFunctionClear(this.handle));
     }
 
     /** Validates the document and returns its summary. */

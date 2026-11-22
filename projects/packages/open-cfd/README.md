@@ -60,7 +60,7 @@ native handle. `dispose()` closes every case it owns.
 | Porous regions | `addPorous`, `listPorous`, `removePorous` |
 | Probes | `addProbe`, `updateProbe`, `removeProbe`, `listProbes`, `clearProbes` |
 | Scalar, sources, inlets | `setScalar`, `addScalarSource`, `listScalarSources`, `clearScalarSources`, `setTransientInlet`, `listTransientInlets`, `clearTransientInlets` |
-| Physics models | `setConvection`, `setPressureGradient`, `setTurbulence`, `setBuoyancy` |
+| Physics models | `setConvection`, `setPressureGradient`, `setTurbulence`, `setBuoyancy`, `setThermal`, `setWallFunction`, `clearWallFunction` |
 | Checks | `validate`, `meshQuality`, `reynolds`, `stability` |
 | Solve and deliver | `solve`, `export`, `exportProfile`, `exportStatistics`, `save` |
 

@@ -830,3 +830,23 @@ export interface BuoyancySetRequest {    /** Thermal expansion coefficient in 1/
     /** Gravity y component in m/s². */
     readonly gy: number;
 }
+
+/**
+ * Arguments of `CfdCase.setThermal()`. Requires scalar transport; when
+ * `diffusivity` is omitted the CLI derives it from `conductivity`, density and
+ * `specificHeat`.
+ */
+export interface ThermalSetRequest extends ThermalConfig {
+    /** Scalar/thermal diffusivity in m²/s; omitted keeps the stored value. */
+    readonly diffusivity?: number;
+}
+
+/** Arguments of `CfdCase.setWallFunction()`; omitted values keep model defaults. */
+export interface WallFunctionSetRequest {
+    /** von Kármán constant κ; defaults to `0.41`. */
+    readonly kappa?: number;
+    /** Log-law additive constant B; defaults to `5.2`. */
+    readonly intercept?: number;
+    /** `y⁺` below which the viscous sublayer estimate is used; defaults to `11.06`. */
+    readonly minYPlus?: number;
+}

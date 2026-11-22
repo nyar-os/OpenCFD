@@ -54,6 +54,14 @@ export interface NativeBinding {
         epsilon?: number,
     ): string;
     buoyancy_set(handle: number, beta: number, tRef: number, gx: number, gy: number): string;
+    thermal_set(handle: number, requestJson: string, diffusivity?: number): string;
+    wall_function_set(
+        handle: number,
+        kappa?: number,
+        intercept?: number,
+        minYPlus?: number,
+    ): string;
+    wall_function_clear(handle: number): string;
     convection_set(handle: number, scheme: string): string;
     pressure_gradient_set(handle: number, dpdx: number, dpdy: number): string;
     reference_set(handle: number, velocity?: number, area?: number, length?: number): string;

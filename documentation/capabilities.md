@@ -539,7 +539,7 @@ cargo build -p cfd-model --offline
 - No graphical interface; use ParaView to open exported VTK.
 - The TypeScript SDK and the `open-cfd` CLI expose mesh, fluid, time,
   boundaries, obstacles, porous regions, probes, scalar transport and sources,
-  transient inlets, turbulence, buoyancy, references, solve and export. Thermal
-  (`heat`) settings, wall-function settings, obstacle removal and obstacle
-  rotation have no SDK method or `open-cfd` flag: author them in the `.ocfd`
-  document or use the Rust `ocfd` binary.
+  thermal settings, the wall function, transient inlets, turbulence, buoyancy,
+  references, solve and export. Obstacle removal and obstacle rotation have no
+  SDK method or `open-cfd` flag: author them in the `.ocfd` document or use the
+  Rust `ocfd` binary.
