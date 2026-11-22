@@ -5,8 +5,8 @@ use crate::checkpoint::Checkpoint;
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, ScalarConfig, ScalarSource, Side,
-    ThermalConfig, TimeScheme, Turbulence, TurbulenceModel, WallFunction,
+    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, Probe, ScalarConfig, ScalarSource,
+    Side, ThermalConfig, TimeScheme, Turbulence, TurbulenceModel, WallFunction,
 };
 use crate::quality::{mesh_quality, MeshQuality};
 use crate::CfdError;
@@ -249,15 +249,16 @@ pub struct ProbeSample {
     pub step: usize,
     /// Physical time of the sample, `step × dt` (s).
     pub time: f64,
-    /// Cell-centred x velocity (m/s).
+    /// Bilinearly interpolated x velocity (m/s).
     pub u: f64,
-    /// Cell-centred y velocity (m/s).
+    /// Bilinearly interpolated y velocity (m/s).
     pub v: f64,
     /// Speed `√(u² + v²)` (m/s).
     pub speed: f64,
-    /// Cell-centred gauge pressure (Pa).
+    /// Bilinearly interpolated gauge pressure (Pa).
     pub pressure: f64,
-    /// Cell-centred temperature (K), or `null` when no scalar is configured.
+    /// Bilinearly interpolated temperature (K), or `null` when no scalar is
+    /// configured.
     pub temperature: Option<f64>,
 }
 
@@ -271,7 +272,9 @@ pub struct ProbeSeries {
     pub x: f64,
     /// Probe y coordinate (m).
     pub y: f64,
-    /// Cell `[i, j]` whose centre is nearest to the probe.
+    /// Cell `[i, j]` that contains the probe. Samples are bilinearly
+    /// interpolated from the surrounding cell centres, clamped at the domain
+    /// edge and restricted to fluid cells.
     pub cell: [usize; 2],
     /// Samples in time order (bounded).
     pub history: Vec<ProbeSample>,
@@ -850,6 +853,7 @@ pub fn solve_with_checkpoint(
                 temperature.as_deref(),
                 step,
                 simulated_time,
+                &model.probes,
                 &probe_cells,
                 &mut probe_samples,
             );
@@ -3352,22 +3356,103 @@ fn append_probe_samples(
     temperature: Option<&[f64]>,
     step: usize,
     time: f64,
+    probes: &[Probe],
     cells: &[(usize, usize)],
     samples: &mut [Vec<ProbeSample>],
 ) {
-    for (index, &(i, j)) in cells.iter().enumerate() {
-        let cell = mesh.pressure_index(i, j);
-        let (u_value, v_value) = mesh.cell_velocity(u, v, i, j);
+    for (index, (probe, &(i, j))) in probes.iter().zip(cells).enumerate() {
+        let stencil = probe_stencil(mesh, probe.x, probe.y);
+        let (u_value, v_value) = stencil.velocity(mesh, u, v, (i, j));
         samples[index].push(ProbeSample {
             step,
             time,
             u: u_value,
             v: v_value,
             speed: u_value.hypot(v_value),
-            pressure: p[cell],
-            temperature: temperature.map(|field| field[cell]),
+            pressure: stencil.scalar(mesh, p, (i, j)),
+            temperature: temperature.map(|field| stencil.scalar(mesh, field, (i, j))),
         });
     }
+}
+
+/// Bilinear weights over the four pressure cell centres around a point.
+///
+/// Indices are clamped to the domain, weights of solid cells are dropped and
+/// the remaining weights are renormalised. A probe validated by
+/// [`locate_probes`] always lands in a fluid cell, so at least one weight is
+/// non-zero and the containing cell is used as a safe fallback.
+struct ProbeStencil {
+    cells: [(usize, usize); 4],
+    weights: [f64; 4],
+    total: f64,
+}
+
+impl ProbeStencil {
+    fn velocity(&self, mesh: &Mesh, u: &[f64], v: &[f64], fallback: (usize, usize)) -> (f64, f64) {
+        let (mut sum_u, mut sum_v) = (0.0, 0.0);
+        for (&(i, j), weight) in self.cells.iter().zip(self.weights) {
+            if weight <= 0.0 {
+                continue;
+            }
+            let (cell_u, cell_v) = mesh.cell_velocity(u, v, i, j);
+            sum_u += weight * cell_u;
+            sum_v += weight * cell_v;
+        }
+        if self.total <= 0.0 {
+            return mesh.cell_velocity(u, v, fallback.0, fallback.1);
+        }
+        (sum_u / self.total, sum_v / self.total)
+    }
+
+    fn scalar(&self, mesh: &Mesh, field: &[f64], fallback: (usize, usize)) -> f64 {
+        let mut sum = 0.0;
+        for (&(i, j), weight) in self.cells.iter().zip(self.weights) {
+            if weight > 0.0 {
+                sum += weight * field[mesh.pressure_index(i, j)];
+            }
+        }
+        if self.total <= 0.0 {
+            return field[mesh.pressure_index(fallback.0, fallback.1)];
+        }
+        sum / self.total
+    }
+}
+
+fn probe_stencil(mesh: &Mesh, x: f64, y: f64) -> ProbeStencil {
+    let (i0, i1, tx) = axis_stencil(x, mesh.dx, mesh.nx);
+    let (j0, j1, ty) = axis_stencil(y, mesh.dy, mesh.ny);
+    let mut cells = [(i0, j0), (i1, j0), (i0, j1), (i1, j1)];
+    let mut weights = [
+        (1.0 - tx) * (1.0 - ty),
+        tx * (1.0 - ty),
+        (1.0 - tx) * ty,
+        tx * ty,
+    ];
+    for (cell, weight) in cells.iter_mut().zip(weights.iter_mut()) {
+        if mesh.is_solid(cell.0, cell.1) {
+            *weight = 0.0;
+        }
+    }
+    let total = weights.iter().sum();
+    ProbeStencil {
+        cells,
+        weights,
+        total,
+    }
+}
+
+fn axis_stencil(position: f64, spacing: f64, count: usize) -> (usize, usize, f64) {
+    let center_max = (count as f64 - 0.5) * spacing;
+    let clamped = position.clamp(0.5 * spacing, center_max);
+    let scaled = clamped / spacing - 0.5;
+    let lower = (scaled.floor() as usize).min(count - 1);
+    let upper = (lower + 1).min(count - 1);
+    let weight = if upper == lower {
+        0.0
+    } else {
+        (scaled - lower as f64).clamp(0.0, 1.0)
+    };
+    (lower, upper, weight)
 }
 
 fn build_probes(
@@ -4230,6 +4315,7 @@ mod tests {
             Some(temperature.as_slice()),
             3,
             1.5,
+            &model.probes,
             &cells,
             &mut samples,
         );
@@ -4245,6 +4331,66 @@ mod tests {
         );
         assert_eq!(sample.pressure, 12.5);
         assert_eq!(sample.temperature, Some(300.0));
+    }
+
+    #[test]
+    fn probe_bilinear_interpolation_reproduces_a_linear_field() {
+        let mesh = mesh();
+        let mut model = Model::new();
+        model.mesh.nx = 10;
+        model.mesh.ny = 6;
+        model.probes = vec![Probe {
+            id: "linear".to_string(),
+            x: 0.37,
+            y: 0.45,
+        }];
+        let cells = locate_probes(&mesh, &model).expect("locate probe");
+        assert_eq!(cells, vec![(3, 2)]);
+
+        let mut u = vec![0.0; mesh.u_count()];
+        for j in 0..mesh.ny {
+            for i in 0..=mesh.nx {
+                u[mesh.u_index(i, j)] = 2.0 * i as f64 * mesh.dx + 1.0;
+            }
+        }
+        let mut v = vec![0.0; mesh.v_count()];
+        for j in 0..=mesh.ny {
+            for i in 0..mesh.nx {
+                v[mesh.v_index(i, j)] = 3.0 * j as f64 * mesh.dy + 2.0;
+            }
+        }
+        let mut p = vec![0.0; mesh.pressure_count()];
+        let mut temperature = vec![0.0; mesh.pressure_count()];
+        for j in 0..mesh.ny {
+            for i in 0..mesh.nx {
+                let (xc, yc) = mesh.cell_center(i, j);
+                p[mesh.pressure_index(i, j)] = 10.0 * xc - 5.0 * yc + 7.0;
+                temperature[mesh.pressure_index(i, j)] = 100.0 + xc + 2.0 * yc;
+            }
+        }
+
+        let mut samples = vec![Vec::new()];
+        append_probe_samples(
+            &mesh,
+            &u,
+            &v,
+            &p,
+            Some(temperature.as_slice()),
+            1,
+            mesh.dx,
+            &model.probes,
+            &cells,
+            &mut samples,
+        );
+        let sample = &samples[0][0];
+        assert!((sample.u - 1.74).abs() < 1e-12, "u = {}", sample.u);
+        assert!((sample.v - 3.35).abs() < 1e-12, "v = {}", sample.v);
+        assert!(
+            (sample.pressure - 8.45).abs() < 1e-12,
+            "pressure = {}",
+            sample.pressure
+        );
+        assert!((sample.temperature.expect("temperature") - 101.27).abs() < 1e-12);
     }
 
     #[test]
