@@ -921,6 +921,244 @@ fn session_obstacle_remove_unknown_id_leaves_the_case_unchanged() {
 }
 
 #[test]
+fn session_obstacle_update_keeps_id_and_position_order() {
+    let directory = temporary_dir("obstacle-update");
+    let path = directory.join("obstacles.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "first".to_string(),
+            x: 0.2,
+            y: 0.5,
+            r: 0.1,
+        })
+        .expect("first obstacle");
+    session
+        .obstacle_add(Obstacle::Rect {
+            id: "second".to_string(),
+            x0: 0.5,
+            y0: 0.4,
+            x1: 0.7,
+            y1: 0.6,
+            rotation: 0.0,
+        })
+        .expect("second obstacle");
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "third".to_string(),
+            x: 0.9,
+            y: 0.5,
+            r: 0.05,
+        })
+        .expect("third obstacle");
+
+    let summary = session
+        .obstacle_update(
+            "second",
+            Obstacle::Circle {
+                id: "ignored".to_string(),
+                x: 0.6,
+                y: 0.5,
+                r: 0.05,
+            },
+        )
+        .expect("update second");
+    assert_eq!(summary.obstacles.len(), 3);
+    let ids: Vec<&str> = summary.obstacles.iter().map(Obstacle::id).collect();
+    assert_eq!(ids, ["first", "second", "third"]);
+    assert_eq!(summary.obstacles[1].kind(), "circle");
+    match &summary.obstacles[1] {
+        Obstacle::Circle { x, y, r, .. } => {
+            assert_eq!(*x, 0.6);
+            assert_eq!(*y, 0.5);
+            assert_eq!(*r, 0.05);
+        }
+        other => panic!("expected a circle, got {:?}", other.kind()),
+    }
+
+    let reloaded = Model::load(&path).expect("reload");
+    assert_eq!(
+        reloaded
+            .obstacles
+            .iter()
+            .map(Obstacle::id)
+            .collect::<Vec<_>>(),
+        ["first", "second", "third"]
+    );
+
+    let error = session
+        .obstacle_update(
+            "missing",
+            Obstacle::Circle {
+                id: String::new(),
+                x: 0.4,
+                y: 0.4,
+                r: 0.05,
+            },
+        )
+        .expect_err("unknown obstacle id");
+    assert_eq!(error.code, "obstacle/not-found");
+    assert!(error.message.contains("`missing`"), "{}", error.message);
+
+    let before = fs::read_to_string(&path).expect("read document before");
+    let error = session
+        .obstacle_update(
+            "first",
+            Obstacle::Rect {
+                id: String::new(),
+                x0: 0.6,
+                y0: 0.4,
+                x1: 0.4,
+                y1: 0.6,
+                rotation: 0.0,
+            },
+        )
+        .expect_err("invalid geometry");
+    assert_eq!(error.code, "obstacle/invalid");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read document after"),
+        before
+    );
+    assert_eq!(session.obstacle_list().len(), 3);
+}
+
+#[test]
+fn session_probe_update_and_remove_edit_one_probe() {
+    let directory = temporary_dir("probe-edit");
+    let path = directory.join("probes.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.mesh_set(10, 10, 1.0, 1.0).expect("mesh");
+    session
+        .probe_add(Probe {
+            id: "wake".to_string(),
+            x: 0.2,
+            y: 0.2,
+        })
+        .expect("wake probe");
+    session
+        .probe_add(Probe {
+            id: "tail".to_string(),
+            x: 0.5,
+            y: 0.5,
+        })
+        .expect("tail probe");
+
+    let summary = session
+        .probe_update("wake", 0.8, 0.8)
+        .expect("move wake probe");
+    assert_eq!(summary.probes.len(), 2);
+    assert_eq!(summary.probes[0].id, "wake");
+    assert_eq!(summary.probes[0].x, 0.8);
+    assert_eq!(summary.probes[0].y, 0.8);
+    assert_eq!(summary.probes[1].id, "tail");
+
+    let error = session
+        .probe_update("missing", 0.4, 0.4)
+        .expect_err("unknown probe id");
+    assert_eq!(error.code, "probe/not-found");
+    assert!(error.message.contains("`missing`"), "{}", error.message);
+
+    let before = fs::read_to_string(&path).expect("read document before");
+    let error = session
+        .probe_update("wake", 2.0, 0.5)
+        .expect_err("probe outside the domain");
+    assert_eq!(error.code, "probe/invalid");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read document after"),
+        before
+    );
+
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "solid".to_string(),
+            x: 0.25,
+            y: 0.75,
+            r: 0.1,
+        })
+        .expect("obstacle");
+    let error = session
+        .probe_update("tail", 0.25, 0.75)
+        .expect_err("probe inside an obstacle");
+    assert_eq!(error.code, "probe/invalid");
+    assert_eq!(session.probe_list().len(), 2);
+
+    let summary = session.probe_remove("tail").expect("remove tail probe");
+    assert_eq!(summary.probes.len(), 1);
+    assert_eq!(summary.probes[0].id, "wake");
+    let error = session
+        .probe_remove("tail")
+        .expect_err("removed probe is gone");
+    assert_eq!(error.code, "probe/not-found");
+    assert_eq!(session.probe_list().len(), 1);
+
+    let reloaded = Model::load(&path).expect("reload");
+    assert_eq!(reloaded.probes.len(), 1);
+    assert_eq!(reloaded.probes[0].id, "wake");
+}
+
+#[test]
+fn session_stability_reports_limits_without_writing() {
+    let directory = temporary_dir("stability");
+    let path = directory.join("stability.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session.mesh_set(10, 10, 1.0, 1.0).expect("mesh");
+    session.fluid_set(1.0, 0.01).expect("fluid");
+    session.time_set(0.01, 5, 20, None).expect("time");
+
+    let before = fs::read_to_string(&path).expect("read document before");
+    let report = session.stability().expect("stability");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read document after"),
+        before
+    );
+    assert_eq!(report.cells, 100);
+    assert_eq!(report.fluid_cells, 100);
+    assert!((report.dx - 0.1).abs() < 1e-12);
+    assert!((report.dy - 0.1).abs() < 1e-12);
+    assert!(report.max_velocity > 0.0);
+    assert!((report.dt - 0.01).abs() < 1e-12);
+    assert!(report.cfl <= 1.0 && report.diffusion_number <= 0.5);
+    assert!(report.stable);
+    let max_stable_dt = report.max_stable_dt.expect("a stable step bound");
+    assert!(max_stable_dt.is_finite() && max_stable_dt > 0.0);
+    assert!(report.scalar_diffusion_number.is_none());
+    assert!(report.porous_number.is_none());
+
+    session.time_set(5.0, 5, 20, None).expect("large dt");
+    session
+        .scalar_set(1.0e-3, Some(300.0), Some(300.0))
+        .expect("scalar");
+    session
+        .porous_add(PorousRegion {
+            id: "filter".to_string(),
+            x0: 0.2,
+            y0: 0.2,
+            x1: 0.8,
+            y1: 0.8,
+            permeability: 1.0e-3,
+            inertial: 0.0,
+        })
+        .expect("porous");
+
+    let before = fs::read_to_string(&path).expect("read document before");
+    let report = session.stability().expect("stability with limits");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read document after"),
+        before
+    );
+    assert_eq!(session.summary().expect("summary").version, 1);
+    assert!(report.cfl > 1.0);
+    assert!(!report.stable);
+    let max_stable_dt = report.max_stable_dt.expect("a finite bound");
+    assert!(max_stable_dt.is_finite() && max_stable_dt > 0.0 && max_stable_dt < 5.0);
+    assert!(report.scalar_diffusion_number.is_some());
+    assert!(report.porous_number.is_some());
+}
+
+#[test]
 fn session_porous_remove_keeps_the_remaining_region() {
     let directory = temporary_dir("porous-remove");
     let path = directory.join("porous.ocfd");

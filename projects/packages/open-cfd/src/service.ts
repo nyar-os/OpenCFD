@@ -35,6 +35,7 @@ import type {
     Side,
     SolveOptions,
     SolveReport,
+    StabilityLimits,
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
@@ -387,6 +388,11 @@ export function meshQuality(handle: number): MeshQuality {
 /** Reports the derived Reynolds number of one case without solving it. */
 export function reynolds(handle: number): ReynoldsNumber {
     return decode<ReynoldsNumber>(() => binding('reynolds').reynolds(handle));
+}
+
+/** Reports the explicit time-step stability limits without solving. */
+export function stability(handle: number): StabilityLimits {
+    return decode<StabilityLimits>(() => binding('stability').stability(handle));
 }
 
 /** Solves one case and returns the report. */

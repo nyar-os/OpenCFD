@@ -61,6 +61,7 @@ Usage:
   ocfd validate <file>
   ocfd quality <file>
   ocfd reynolds <file>
+  ocfd stability <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
@@ -118,6 +119,7 @@ fn dispatch(args: &[String]) -> Result<i32, CfdError> {
         "validate" => validate(&args[1..]),
         "quality" => quality(&args[1..]),
         "reynolds" => reynolds(&args[1..]),
+        "stability" => stability(&args[1..]),
         "solve" => solve_command(&args[1..]),
         "export" => export(&args[1..]),
         "compressible" => Err(not_implemented("compressible flow")),
@@ -1318,6 +1320,21 @@ fn reynolds(args: &[String]) -> Result<i32, CfdError> {
         CfdError::new(
             "document/serialize",
             format!("cannot serialize the Reynolds number report: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn stability(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "stability <file>")?;
+    let session = open_session(file)?;
+    let report = session.stability()?;
+    let json = serde_json::to_string_pretty(&report).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize the stability report: {error}"),
         )
     })?;
     println!("{json}");

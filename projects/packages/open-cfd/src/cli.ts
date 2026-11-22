@@ -56,6 +56,7 @@ usage:
   open-cfd validate <file>
   open-cfd quality <file>
   open-cfd reynolds <file>
+  open-cfd stability <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
   open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
   open-cfd capabilities
@@ -775,6 +776,13 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(parsed, 0, 'reynolds <file>');
             const document = await session.open(file);
             console.log(JSON.stringify(document.reynolds(), null, 2));
+            return 0;
+        }
+        case 'stability': {
+            const parsed = parseArguments(rest, []);
+            const file = positional(parsed, 0, 'stability <file>');
+            const document = await session.open(file);
+            console.log(JSON.stringify(document.stability(), null, 2));
             return 0;
         }
         case 'solve': {

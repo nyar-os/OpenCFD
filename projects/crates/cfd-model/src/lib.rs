@@ -78,10 +78,11 @@ pub use crate::session::{
 };
 pub use crate::solver::{
     outlet_flows, reynolds_number, solve, solve_pressure, solve_with, solve_with_checkpoint,
-    transport_scalar, transport_thermal, ForceSample, InletHistory, InletSample, MassBalance,
-    ObstacleForce, ObstacleNusselt, OutletFlow, PorousSummary, PressureSettings, PressureStats,
-    ProbeSample, ProbeSeries, Report, ResidualSample, ReynoldsNumber, ScalarSourceSummary,
-    Solution, SolveOptions, WallShear, REPORT_FORMAT, REPORT_VERSION,
+    stability_limits, transport_scalar, transport_thermal, ForceSample, InletHistory, InletSample,
+    MassBalance, ObstacleForce, ObstacleNusselt, OutletFlow, PorousSummary, PressureSettings,
+    PressureStats, ProbeSample, ProbeSeries, Report, ResidualSample, ReynoldsNumber,
+    ScalarSourceSummary, Solution, SolveOptions, StabilityLimits, WallShear, REPORT_FORMAT,
+    REPORT_VERSION,
 };
 
 /// Stable machine-readable capability matrix of this build.
@@ -94,6 +95,9 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "cavity2d": "supported",
     "couette2d": "supported",
     "obstacles": "supported",
+    "obstacleEditing": "supported",
+    "probeEditing": "supported",
+    "stabilityLimits": "supported",
     "porousMedia": "supported",
     "scalar": "supported",
     "scalarSources": "supported",

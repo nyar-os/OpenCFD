@@ -34,6 +34,7 @@ import type {
     Side,
     SolveOptions,
     SolveReport,
+    StabilityLimits,
     TimeAdaptiveSetRequest,
     TimeSchemeSetRequest,
     TimeSetRequest,
@@ -267,6 +268,12 @@ export class CfdCase {
     reynolds(): ReynoldsNumber {
         this.assertOpen();
         return service.reynolds(this.handle);
+    }
+
+    /** Reports the explicit time-step stability limits without solving. */
+    stability(): StabilityLimits {
+        this.assertOpen();
+        return service.stability(this.handle);
     }
 
     /** Solves the document and returns the report. */

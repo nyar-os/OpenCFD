@@ -2377,6 +2377,110 @@ fn check_porous_stability(model: &Model, max_speed: f64, dt: f64) -> Result<(), 
     Ok(())
 }
 
+/// Explicit time-step stability limits of the current document.
+///
+/// The report mirrors the guards [`solve`] runs before stepping: it measures
+/// the convective Courant number and the explicit diffusion numbers of the
+/// configured `time.dt` and derives the largest step that satisfies every
+/// checked bound. Only the molecular viscosity enters the diffusion number; the
+/// eddy viscosity of a turbulence model evolves during the solve and is checked
+/// there. `max_stable_dt` is `None` when no explicit term limits the step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StabilityLimits {
+    /// Cells of the structured mesh (`nx × ny`).
+    pub cells: usize,
+    /// Cells outside every solid obstacle.
+    pub fluid_cells: usize,
+    /// Cell size in x (m).
+    pub dx: f64,
+    /// Cell size in y (m).
+    pub dy: f64,
+    /// Fastest speed imposed by the initial field, boundaries or time series
+    /// (m/s), before any time stepping.
+    pub max_velocity: f64,
+    /// Configured time step (s).
+    pub dt: f64,
+    /// Convective Courant number `maxVelocity·dt/min(dx, dy)`.
+    pub cfl: f64,
+    /// Explicit diffusion number `ν·dt·(1/dx² + 1/dy²)`.
+    pub diffusion_number: f64,
+    /// Explicit scalar diffusion number, when scalar transport is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scalar_diffusion_number: Option<f64>,
+    /// Porous drag rate times `dt`, when porous regions are configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub porous_number: Option<f64>,
+    /// Largest `dt` that satisfies every checked bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_stable_dt: Option<f64>,
+    /// Whether the configured `time.dt` satisfies every checked bound.
+    pub stable: bool,
+}
+
+/// Measures the explicit stability limits of the current document.
+///
+/// No time stepping runs. The solid mask is applied first, so `fluidCells`
+/// matches the mesh [`solve`] would build.
+pub fn stability_limits(model: &Model) -> Result<StabilityLimits, CfdError> {
+    let mut mesh = Mesh::new(&model.mesh)?;
+    mesh.apply_obstacles(&model.obstacles)?;
+    let max_velocity = max_initial_speed(model).max(max_boundary_speed(model));
+    let dt = model.time.dt;
+    let h = mesh.dx.min(mesh.dy);
+    let cell_factor = 1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy);
+    let cfl = max_velocity * dt / h;
+    let diffusion_number = model.fluid.viscosity * dt * cell_factor;
+    let scalar_diffusion_number = model
+        .scalar
+        .as_ref()
+        .map(|_| scalar_diffusivity(model) * dt * cell_factor);
+    let porous_number = if model.porous.is_empty() {
+        None
+    } else {
+        Some(porous_rate(model, max_velocity) * dt)
+    };
+    let mut max_stable_dt = f64::INFINITY;
+    if max_velocity > 0.0 {
+        max_stable_dt = max_stable_dt.min(h / max_velocity);
+    }
+    if model.fluid.viscosity > 0.0 {
+        max_stable_dt = max_stable_dt.min(0.5 / (model.fluid.viscosity * cell_factor));
+    }
+    let diffusivity = scalar_diffusivity(model);
+    if diffusivity > 0.0 {
+        max_stable_dt = max_stable_dt.min(0.5 / (diffusivity * cell_factor));
+    }
+    let drag_rate = porous_rate(model, max_velocity);
+    if drag_rate > 0.0 {
+        max_stable_dt = max_stable_dt.min(1.0 / drag_rate);
+    }
+    let stable = cfl <= 1.0
+        && diffusion_number <= 0.5
+        && scalar_diffusion_number.map_or(true, |value| value <= 0.5)
+        && porous_number.map_or(true, |value| value <= 1.0);
+    Ok(StabilityLimits {
+        cells: mesh.pressure_count(),
+        fluid_cells: mesh.solid.iter().filter(|solid| !**solid).count(),
+        dx: mesh.dx,
+        dy: mesh.dy,
+        max_velocity,
+        dt,
+        cfl,
+        diffusion_number,
+        scalar_diffusion_number,
+        porous_number,
+        max_stable_dt: max_stable_dt.is_finite().then_some(max_stable_dt),
+        stable,
+    })
+}
+
+fn max_initial_speed(model: &Model) -> f64 {
+    model.initial.as_ref().map_or(0.0, |initial| {
+        initial.velocity[0].hypot(initial.velocity[1])
+    })
+}
+
 fn max_eddy_viscosity(eddy: Option<&[f64]>) -> f64 {
     eddy.map_or(0.0, |field| {
         field

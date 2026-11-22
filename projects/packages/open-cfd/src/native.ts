@@ -57,6 +57,7 @@ export interface NativeBinding {
     validate(handle: number): string;
     mesh_quality(handle: number): string;
     reynolds(handle: number): string;
+    stability(handle: number): string;
     solve(
         handle: number,
         steps?: number,

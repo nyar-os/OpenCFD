@@ -31,8 +31,8 @@ use crate::particles::{
 };
 use crate::quality::{mesh_quality as measure_quality, MeshQuality};
 use crate::solver::{
-    reynolds_number, solve, solve_with, solve_with_checkpoint as solve_resuming, Report,
-    ReynoldsNumber, SolveOptions,
+    reynolds_number, solve, solve_with, solve_with_checkpoint as solve_resuming, stability_limits,
+    Report, ReynoldsNumber, SolveOptions, StabilityLimits,
 };
 use crate::{CfdError, CAPABILITIES_JSON};
 
@@ -862,6 +862,16 @@ impl OpenCfd {
         let mut mesh = Mesh::new(&self.model.mesh)?;
         mesh.apply_obstacles(&self.model.obstacles)?;
         Ok(measure_quality(&mesh))
+    }
+
+    /// Reports the explicit time-step stability limits of the current document.
+    ///
+    /// The convective CFL number, the diffusion numbers of the configured
+    /// `time.dt` and the largest stable step are derived from the mesh, the
+    /// fluid and the fastest imposed speed. No time stepping runs.
+    pub fn stability(&self) -> Result<StabilityLimits, CfdError> {
+        self.model.validate()?;
+        stability_limits(&self.model)
     }
 
     /// Solves with solve-time overrides and returns the report.

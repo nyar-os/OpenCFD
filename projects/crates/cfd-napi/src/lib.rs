@@ -296,6 +296,14 @@ fn reynolds(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(report))
 }
 
+/// Reports the explicit time-step stability limits of one session document.
+#[function]
+fn stability(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let report = with_session(handle, |session| session.stability())?;
+    respond(&ctx, &json!(report))
+}
+
 /// Appends one solid obstacle from a JSON request and returns the summary.
 #[function]
 fn obstacle_add(ctx: CallContext) -> Result<JsValue> {
@@ -598,9 +606,12 @@ register_module![
     obstacle_add,
     obstacle_list,
     obstacle_remove,
+    obstacle_update,
     probe_add,
     probe_list,
     probe_clear,
+    probe_update,
+    probe_remove,
     scalar_set,
     scalar_source_add,
     scalar_source_list,
@@ -616,6 +627,7 @@ register_module![
     validate,
     mesh_quality,
     reynolds,
+    stability,
     solve,
     export,
     close

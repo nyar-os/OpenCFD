@@ -539,6 +539,39 @@ export interface ReynoldsNumber {
     readonly lengthSource: 'reference' | 'obstacle' | 'domainHeight';
 }
 
+/**
+ * Explicit time-step limits of the current document.
+ *
+ * The report mirrors the guards a solve runs before stepping; it is a
+ * pre-flight measurement, not an automatic time-step controller.
+ */
+export interface StabilityLimits {
+    /** Cells of the structured mesh (`nx × ny`). */
+    readonly cells: number;
+    /** Cells outside every solid obstacle. */
+    readonly fluidCells: number;
+    /** Cell size in x (m). */
+    readonly dx: number;
+    /** Cell size in y (m). */
+    readonly dy: number;
+    /** Fastest speed imposed by the initial field, boundaries or time series (m/s). */
+    readonly maxVelocity: number;
+    /** Configured time step (s). */
+    readonly dt: number;
+    /** Convective Courant number `maxVelocity·dt/min(dx, dy)`. */
+    readonly cfl: number;
+    /** Explicit diffusion number `ν·dt·(1/dx² + 1/dy²)`. */
+    readonly diffusionNumber: number;
+    /** Explicit scalar diffusion number, when scalar transport is configured. */
+    readonly scalarDiffusionNumber?: number;
+    /** Porous drag rate times `dt`, when porous regions are configured. */
+    readonly porousNumber?: number;
+    /** Largest `dt` that satisfies every checked bound, when one exists. */
+    readonly maxStableDt?: number;
+    /** Whether `time.dt` satisfies every checked bound. */
+    readonly stable: boolean;
+}
+
 /** Solve-time overrides accepted by `CfdCase.solve()`. */
 export interface SolveOptions {
     /** Steps to advance; overrides `time.steps`. */

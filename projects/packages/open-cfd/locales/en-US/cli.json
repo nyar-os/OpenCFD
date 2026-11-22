@@ -10,7 +10,11 @@
             "boundary-set": "Set one boundary kind and velocity of an existing case",
             "boundary-list": "Print the four side boundary conditions and inlet profiles",
             "boundary-reset": "Reset one side or every side to a stationary wall",
+            "obstacle-update": "Replace one solid obstacle in place, keeping its id and order",
+            "probe-update": "Move one point monitor to a new position",
+            "probe-remove": "Remove one point monitor by id",
             "reynolds": "Report the derived Reynolds number of an existing case",
+            "stability": "Report the explicit time-step stability limits without solving",
             "validate": "Validate an existing case",
             "solve": "Solve a case and print the report",
             "export": "Solve a case and write a CSV or VTK field"
@@ -30,6 +34,9 @@
             "kind": "Boundary kind: wall, inlet or outlet",
             "u": "Prescribed x velocity in m/s",
             "v": "Prescribed y velocity in m/s",
+            "id": "Stable identifier of an obstacle or point monitor",
+            "x": "Point or circle centre in x, in metres",
+            "y": "Point or circle centre in y, in metres",
             "out": "File to write",
             "format": "Export format: csv or vtk"
         }
