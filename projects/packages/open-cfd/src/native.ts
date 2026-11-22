@@ -67,6 +67,17 @@ export interface NativeBinding {
         checkpoint?: string,
     ): string;
     export(handle: number, format: string, out: string, field?: string, layout?: string): string;
+    export_profile(
+        handle: number,
+        out: string,
+        x0: number,
+        y0: number,
+        x1: number,
+        y1: number,
+        samples: number,
+        field?: string,
+    ): string;
+    export_statistics(handle: number, out: string): string;
     close(handle: number): boolean;
 }
 

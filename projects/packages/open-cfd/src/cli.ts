@@ -21,6 +21,7 @@ import type {
     ExportLayout,
     InletProfile,
     Obstacle,
+    ProfileLine,
     Side,
     TimeScheme,
 } from './types.js';
@@ -58,7 +59,7 @@ usage:
   open-cfd reynolds <file>
   open-cfd stability <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -226,11 +227,13 @@ function parseExportFormat(raw: string): ExportFormat {
         raw !== 'forces' &&
         raw !== 'coefficients' &&
         raw !== 'probes' &&
-        raw !== 'particles'
+        raw !== 'particles' &&
+        raw !== 'profile' &&
+        raw !== 'statistics'
     ) {
         throw cliError(
             'cli/unknown-format',
-            `unknown export format \`${raw}\`; use csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes or particles`,
+            `unknown export format \`${raw}\`; use csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes, particles, profile or statistics`,
         );
     }
     return raw;
@@ -264,6 +267,42 @@ function parseExportLayout(raw: string): ExportLayout {
         );
     }
     return raw as ExportLayout;
+}
+
+function parseProfileLine(raw: string): ProfileLine {
+    const parts = raw.split(',').map((part) => part.trim());
+    if (parts.length !== 4) {
+        throw cliError(
+            'cli/invalid-line',
+            `profile line \`${raw}\` must look like \`x0,y0,x1,y1\``,
+        );
+    }
+    const values = parts.map((part) => Number(part));
+    if (values.some((value) => !Number.isFinite(value))) {
+        throw cliError(
+            'cli/invalid-line',
+            `profile line \`${raw}\` must contain four finite numbers`,
+        );
+    }
+    const [x0, y0, x1, y1] = values as [number, number, number, number];
+    if (x0 === x1 && y0 === y1) {
+        throw cliError(
+            'cli/invalid-line',
+            'profile line start and end must be different points',
+        );
+    }
+    return { x0, y0, x1, y1 };
+}
+
+function parseProfileSamples(raw: string): number {
+    const samples = Number(raw);
+    if (!/^\d+$/.test(raw.trim()) || !Number.isInteger(samples) || samples < 2) {
+        throw cliError(
+            'cli/invalid-samples',
+            `profile samples \`${raw}\` must be an integer of at least 2`,
+        );
+    }
+    return samples;
 }
 
 function parseObstacle(parsed: ParsedArguments): Obstacle {
@@ -815,11 +854,18 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'export': {
-            const parsed = parseArguments(rest, ['--format', '--out', '--field', '--layout']);
+            const parsed = parseArguments(rest, [
+                '--format',
+                '--out',
+                '--field',
+                '--layout',
+                '--line',
+                '--samples',
+            ]);
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];
@@ -828,6 +874,32 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const layout = rawLayout === undefined ? undefined : parseExportLayout(rawLayout);
             const out = requiredOption(parsed, '--out');
             const document = await session.open(file);
+            if (format === 'profile') {
+                const rawLine = parsed.options['--line'];
+                if (rawLine === undefined) {
+                    throw cliError(
+                        'cli/missing-option',
+                        '`export --format profile` needs `--line <x0,y0,x1,y1>`',
+                    );
+                }
+                const rawSamples = parsed.options['--samples'];
+                const samples = rawSamples === undefined ? 101 : parseProfileSamples(rawSamples);
+                const profileField = field ?? 'speed';
+                const report = document.exportProfile(out, {
+                    line: parseProfileLine(rawLine),
+                    samples,
+                    field: profileField,
+                });
+                console.log(
+                    `exported line profile CSV (${profileField}, ${samples} samples): ${report.path}`,
+                );
+                return 0;
+            }
+            if (format === 'statistics') {
+                const report = document.exportStatistics(out);
+                console.log(`exported field statistics JSON: ${report.path}`);
+                return 0;
+            }
             const report = document.export(format, out, field, layout);
             const layoutLabel = report.layout === 'node' ? ' (nodes)' : '';
             if (format === 'csv') {

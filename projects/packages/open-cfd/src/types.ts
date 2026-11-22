@@ -376,7 +376,9 @@ export type ExportFormat =
     | 'forces'
     | 'coefficients'
     | 'probes'
-    | 'particles';
+    | 'particles'
+    | 'profile'
+    | 'statistics';
 
 /** Cell-centred field an SVG or contour export can visualise. */
 export type ExportField =
@@ -400,6 +402,27 @@ export interface ExportReport {
     /** Sampling layout of a CSV or VTK export; other formats report `cell`. */
     readonly layout: ExportLayout;
     readonly path: string;
+}
+
+/** Straight segment sampled by a `profile` export. */
+export interface ProfileLine {
+    /** Start point x coordinate in metres. */
+    readonly x0: number;
+    /** Start point y coordinate in metres. */
+    readonly y0: number;
+    /** End point x coordinate in metres. */
+    readonly x1: number;
+    /** End point y coordinate in metres. */
+    readonly y1: number;
+}
+
+/** Arguments of `CfdCase.exportProfile()`. */
+export interface ProfileExportRequest {
+    readonly line: ProfileLine;
+    /** Number of equally spaced samples; defaults to 101 and must be at least 2. */
+    readonly samples?: number;
+    /** Sampled field; defaults to `speed`. */
+    readonly field?: ExportField;
 }
 
 /** One sampled velocity residual. */

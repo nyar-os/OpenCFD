@@ -17,8 +17,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, ScalarSource, Side, SolveOptions,
-    TimeScheme, TransientInlet, TurbulenceModel,
+    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, ProfileLine, ScalarSource, Side,
+    SolveOptions, TimeScheme, TransientInlet, TurbulenceModel,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -572,6 +572,40 @@ fn export(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(report))
 }
 
+/// Solves and samples one field along a straight segment.
+///
+/// Arguments are the handle, output path, `x0`, `y0`, `x1`, `y1`, the sample
+/// count and an optional field identifier. The field defaults to `speed`.
+#[function]
+fn export_profile(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let out = text(&ctx, 1)?;
+    let line = ProfileLine::new(
+        number(&ctx, 2)?,
+        number(&ctx, 3)?,
+        number(&ctx, 4)?,
+        number(&ctx, 5)?,
+    );
+    let samples = unsigned(&ctx, 6)?;
+    let field = match optional_text(&ctx, 7)? {
+        Some(value) => value.parse::<ExportField>().map_err(fail)?,
+        None => ExportField::Speed,
+    };
+    let report = with_session(handle, |session| {
+        session.export_profile(Path::new(&out), line, samples, field)
+    })?;
+    respond(&ctx, &json!(report))
+}
+
+/// Solves and writes deterministic per-field statistics as JSON.
+#[function]
+fn export_statistics(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let out = text(&ctx, 1)?;
+    let report = with_session(handle, |session| session.export_statistics(Path::new(&out)))?;
+    respond(&ctx, &json!(report))
+}
+
 /// Releases one session handle.
 #[function]
 fn close(ctx: CallContext) -> Result<JsValue> {
@@ -630,5 +664,7 @@ register_module![
     stability,
     solve,
     export,
+    export_profile,
+    export_statistics,
     close
 ];

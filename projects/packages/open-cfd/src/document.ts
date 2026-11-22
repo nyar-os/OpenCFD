@@ -24,6 +24,7 @@ import type {
     MeshSetRequest,
     Obstacle,
     Probe,
+    ProfileExportRequest,
     PressureGradientSetRequest,
     Boundaries,
     ReferenceSetRequest,
@@ -295,6 +296,31 @@ export class CfdCase {
     ): ExportReport {
         this.assertOpen();
         return service.exportCase(this.handle, format, target, field, layout);
+    }
+
+    /**
+     * Solves and samples one field along a straight segment.
+     *
+     * The segment is sampled at `samples` equally spaced points (default 101)
+     * and the field defaults to `speed`. Values come from the fluid cell that
+     * contains each point; samples inside solids or outside the domain are
+     * written as empty CSV values.
+     */
+    exportProfile(target: string, request: ProfileExportRequest): ExportReport {
+        this.assertOpen();
+        return service.exportProfileCase(
+            this.handle,
+            target,
+            request.line,
+            request.samples ?? 101,
+            request.field ?? 'speed',
+        );
+    }
+
+    /** Solves and writes deterministic per-field statistics as JSON. */
+    exportStatistics(target: string): ExportReport {
+        this.assertOpen();
+        return service.exportStatisticsCase(this.handle, target);
     }
 
     /** Writes the document, optionally to a new path. */

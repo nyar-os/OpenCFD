@@ -17,7 +17,7 @@
             "stability": "Report the explicit time-step stability limits without solving",
             "validate": "Validate an existing case",
             "solve": "Solve a case and print the report",
-            "export": "Solve a case and write a CSV or VTK field"
+            "export": "Solve a case and write CSV, VTK, SVG, a line profile or field statistics"
         },
         "opt": {
             "nx": "Number of cells in x (at least 3)",
@@ -38,7 +38,9 @@
             "x": "Point or circle centre in x, in metres",
             "y": "Point or circle centre in y, in metres",
             "out": "File to write",
-            "format": "Export format: csv or vtk"
+            "format": "Export format: csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes, particles, profile or statistics",
+            "line": "Profile segment as x0,y0,x1,y1 in metres",
+            "samples": "Number of equally spaced profile samples (at least 2, default 101)"
         }
     }
 }

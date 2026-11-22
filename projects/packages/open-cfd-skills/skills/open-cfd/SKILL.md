@@ -1,6 +1,6 @@
 ---
 name: open-cfd
-description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets, convective outlets and periodic sides), pressure-driven flow, obstacle, porous region, passive scalar, buoyancy, turbulence (including standard k-epsilon), wall function or thermal settings, force/moment references, solver reports, mass balance, or CSV, VTK, SVG and streamline output.
+description: Create, edit, validate, solve and export two-dimensional incompressible Navier-Stokes cases with OpenCFD. Use when a task involves cavity or channel flow cases, mesh, fluid, time, boundary (including slip, pressure outlets, convective outlets and periodic sides), pressure-driven flow, obstacle, porous region, passive scalar, buoyancy, turbulence (including standard k-epsilon), wall function or thermal settings, force/moment references, solver reports, mass balance, line-profile sampling, field statistics, or CSV, VTK, SVG and streamline output.
 ---
 
 # open-cfd
@@ -16,8 +16,9 @@ force/moment reference, passive scalar, buoyancy, turbulence, wall function and
 thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV, force history CSV, a final drag/lift/moment
-summary CSV, point-monitor history CSV or Lagrangian particle trajectories as CSV. CSV and VTK can sample
-cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
+summary CSV, point-monitor history CSV, Lagrangian particle trajectories as CSV,
+line profiles as CSV or deterministic per-field statistics as JSON. CSV and VTK
+can sample cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
 with `meanYPlus` (`wallShear`), the optional log-law wall function flag
@@ -75,7 +76,7 @@ ocfd validate <file>
 ocfd quality <file>
 ocfd reynolds <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`,
@@ -139,7 +140,7 @@ them.
 - `inlet series clear` removes every transient drive and restores the stored
   static boundary values.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces`,
-  `coefficients`, `probes` and `particles` are
+  `coefficients`, `probes`, `particles`, `profile` and `statistics` are
   the only export targets. `inp` and `openfoam` reject with
   `capability/not-implemented`. Periodic sides must come in opposite pairs and
   are excluded from the boundary mass balance.
@@ -151,6 +152,23 @@ them.
   accepts the same `--field` names as `svg`, including `speed`.
   `--layout node` samples the `(nx+1)×(ny+1)` mesh vertices (each value is the
   mean of its adjacent fluid cells); `--layout cell` is the default.
+- `profile` samples one field along the straight segment `--line x0,y0,x1,y1`
+  at `--samples` equally spaced points (default 101, at least 2), with
+  `t = i/(samples−1)`. The header is `distance,x,y,value`, where `distance` is
+  the distance from the start in metres. The value is the cell-centred value of
+  the fluid cell containing the sample point, matching the CSV export. A sample
+  outside the domain or inside a solid cell is written as an empty `value`
+  column, never as zero. The field defaults to `speed` and accepts the same
+  `--field` names as `svg`. Both endpoints must be finite and distinct, and an
+  invalid line or sample count is rejected before any file is written.
+- `statistics` writes a deterministic JSON document tagged
+  `open-cfd-statistics`. It reports `mesh` (`nx`, `ny`, `cells`, `fluidCells`)
+  and one `{min,max,mean,rms,count}` entry per available field in this order:
+  `speed`, `pressure`, `u`, `v`, `vorticity`, `streamFunction`, then
+  `temperature`, `turbulentKineticEnergy` and `turbulentDissipation` when the
+  case provides them. Only fluid cells contribute and non-finite values are
+  skipped, so `speed.count` and the other counts equal `fluidCells` on a valid
+  run. A field with no fluid sample reports `count: 0` and `null` statistics.
 - Momentum time integration is `euler` (default) or `rk2`; both are explicit and
   share the same CFL and diffusion stability guards. Set `time.adaptive` with
   `time.targetCfl` in `(0, 1]` (or `--cfl <n>` / `--cfl off`) to clamp every

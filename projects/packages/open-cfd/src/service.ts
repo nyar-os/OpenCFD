@@ -26,6 +26,7 @@ import type {
     Obstacle,
     OpenCfdCapabilities,
     Probe,
+    ProfileLine,
     PressureGradientSetRequest,
     ReferenceSetRequest,
     ReynoldsNumber,
@@ -422,6 +423,33 @@ export function exportCase(
     return decode<ExportReport>(() =>
         binding('export').export(handle, format, target, field, layout),
     );
+}
+
+/** Solves one case and samples a field along a straight segment. */
+export function exportProfileCase(
+    handle: number,
+    target: string,
+    line: ProfileLine,
+    samples: number,
+    field: ExportField,
+): ExportReport {
+    return decode<ExportReport>(() =>
+        binding('export_profile').export_profile(
+            handle,
+            target,
+            line.x0,
+            line.y0,
+            line.x1,
+            line.y1,
+            samples,
+            field,
+        ),
+    );
+}
+
+/** Solves one case and writes per-field statistics as JSON. */
+export function exportStatisticsCase(handle: number, target: string): ExportReport {
+    return decode<ExportReport>(() => binding('export_statistics').export_statistics(handle, target));
 }
 
 /** Releases one case handle. */
