@@ -44,6 +44,9 @@ usage:
   open-cfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>]
   open-cfd obstacle update <file> --id <name> --kind circle --x <m> --y <m> --r <m>
   open-cfd obstacle list <file>
+  open-cfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
+  open-cfd porous list <file>
+  open-cfd porous remove <file> --id <name>
   open-cfd probe add <file> --x <m> --y <m> [--id <name>]
   open-cfd probe update <file> --id <name> --x <m> --y <m>
   open-cfd probe remove <file> --id <name>
@@ -600,6 +603,63 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const added = summary.obstacles[summary.obstacles.length - 1];
             console.log(
                 `added ${added.kind} obstacle ${added.id ?? ''}; ${summary.obstacles.length} total`,
+            );
+            return 0;
+        }
+        case 'porous': {
+            const action = rest[0];
+            if (action === 'list') {
+                const parsed = parseArguments(rest.slice(1), []);
+                const file = positional(parsed, 0, 'porous list <file>');
+                const document = await session.open(file);
+                console.log(JSON.stringify(document.listPorous(), null, 2));
+                return 0;
+            }
+            if (action === 'remove') {
+                const parsed = parseArguments(rest.slice(1), ['--id']);
+                const file = positional(parsed, 0, 'porous remove <file> --id <name>');
+                const id = requiredOption(parsed, '--id');
+                const document = await session.open(file);
+                const summary = document.removePorous(id);
+                console.log(`removed porous region ${id}; ${summary.porous.length} total`);
+                return 0;
+            }
+            if (action !== 'add') {
+                throw cliError(
+                    'cli/unknown-command',
+                    action === undefined
+                        ? '`porous` needs the `add`, `list` or `remove` subcommand'
+                        : `\`porous\` subcommand \`${action}\` does not exist; use add, list or remove`,
+                );
+            }
+            const parsed = parseArguments(rest.slice(1), [
+                '--id',
+                '--x0',
+                '--y0',
+                '--x1',
+                '--y1',
+                '--permeability',
+                '--inertial',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]',
+            );
+            const id = parsed.options['--id'];
+            const document = await session.open(file);
+            const summary = document.addPorous({
+                ...(id === undefined ? {} : { id }),
+                x0: numberOption(parsed, '--x0'),
+                y0: numberOption(parsed, '--y0'),
+                x1: numberOption(parsed, '--x1'),
+                y1: numberOption(parsed, '--y1'),
+                permeability: numberOption(parsed, '--permeability'),
+                inertial: optionalNumber(parsed, '--inertial') ?? 0,
+            });
+            const added = summary.porous[summary.porous.length - 1];
+            console.log(
+                `added porous region ${added.id ?? ''} with K=${added.permeability} m2 and C_F=${added.inertial}; ${summary.porous.length} total`,
             );
             return 0;
         }

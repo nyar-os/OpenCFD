@@ -99,6 +99,23 @@ stair-stepped. `obstacle list` prints the current geometry as JSON. The help tex
 of `obstacle update` mentions `--rotation`, but the parser rejects it; rotation
 is only settable in the document or through the Rust `ocfd` binary.
 
+### porous
+
+```shell
+open-cfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> \
+    --permeability <m2> [--inertial <n>] [--id <name>]
+open-cfd porous list <file>
+open-cfd porous remove <file> --id <name>
+```
+
+`porous add` appends an isotropic Darcy–Forchheimer region: `--permeability` is
+`K` in m² (positive) and `--inertial` is `C_F` (non-negative, default `0`).
+Omitting `--id` assigns `porous-N` in document order. Validation stays in the
+model, so a zero permeability, a region outside the domain or a negative `C_F`
+fails with `porous/invalid` and leaves the document unchanged. `porous list`
+prints the regions as JSON; `porous remove` deletes the first region with that
+id and fails with `porous/not-found` for an unknown id.
+
 ### probe
 
 ```shell

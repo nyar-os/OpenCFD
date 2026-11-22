@@ -17,8 +17,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, Probe, ProfileLine, ScalarSource, Side,
-    SolveOptions, TimeScheme, TransientInlet, TurbulenceModel,
+    InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, ProfileLine,
+    ScalarSource, Side, SolveOptions, TimeScheme, TransientInlet, TurbulenceModel,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -350,6 +350,37 @@ fn obstacle_update(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Appends one porous region from a JSON request and returns the summary.
+#[function]
+fn porous_add(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let request = text(&ctx, 1)?;
+    let region = serde_json::from_str::<PorousRegion>(&request).map_err(|error| {
+        Error::new(format!(
+            "session/argument-invalid: cannot decode the porous region request: {error}"
+        ))
+    })?;
+    let summary = with_session(handle, |session| session.porous_add(region))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Returns the porous regions of one session document as a JSON array.
+#[function]
+fn porous_list(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let regions = with_session(handle, |session| Ok(session.porous_list()))?;
+    respond(&ctx, &json!(regions))
+}
+
+/// Removes the first porous region with `id` and returns the summary.
+#[function]
+fn porous_remove(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let summary = with_session(handle, |session| session.porous_remove(&id))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Appends one point monitor from a JSON request and returns the summary.
 #[function]
 fn probe_add(ctx: CallContext) -> Result<JsValue> {
@@ -641,6 +672,9 @@ register_module![
     obstacle_list,
     obstacle_remove,
     obstacle_update,
+    porous_add,
+    porous_list,
+    porous_remove,
     probe_add,
     probe_list,
     probe_clear,

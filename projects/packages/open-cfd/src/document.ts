@@ -23,6 +23,7 @@ import type {
     MeshQuality,
     MeshSetRequest,
     Obstacle,
+    PorousRegion,
     Probe,
     ProfileExportRequest,
     PressureGradientSetRequest,
@@ -145,6 +146,29 @@ export class CfdCase {
     listObstacles(): readonly Obstacle[] {
         this.assertOpen();
         return service.obstacleList(this.handle);
+    }
+
+    /** Porous regions in document order. */
+    get porous(): readonly PorousRegion[] {
+        return this.state.porous;
+    }
+
+    /** Appends one porous region and writes the document back. */
+    addPorous(region: PorousRegion): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.porousAdd(this.handle, region));
+    }
+
+    /** Returns the porous regions in document order. */
+    listPorous(): readonly PorousRegion[] {
+        this.assertOpen();
+        return service.porousList(this.handle);
+    }
+
+    /** Removes the first porous region with `id` and writes the document back. */
+    removePorous(id: string): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.porousRemove(this.handle, id));
     }
 
     /** Point monitors in document order. */

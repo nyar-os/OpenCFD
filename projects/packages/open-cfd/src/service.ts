@@ -25,6 +25,7 @@ import type {
     MeshSetRequest,
     Obstacle,
     OpenCfdCapabilities,
+    PorousRegion,
     Probe,
     ProfileLine,
     PressureGradientSetRequest,
@@ -233,6 +234,25 @@ export function obstacleUpdate(
 /** Returns the solid obstacles in document order. */
 export function obstacleList(handle: number): readonly Obstacle[] {
     return decode<readonly Obstacle[]>(() => binding('obstacle.list').obstacle_list(handle));
+}
+
+/** Appends one porous region and writes the document back. */
+export function porousAdd(handle: number, region: PorousRegion): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('porous.add').porous_add(handle, JSON.stringify(region)),
+    );
+}
+
+/** Returns the porous regions in document order. */
+export function porousList(handle: number): readonly PorousRegion[] {
+    return decode<readonly PorousRegion[]>(() =>
+        binding('porous.list').porous_list(handle),
+    );
+}
+
+/** Removes one porous region and writes the document back. */
+export function porousRemove(handle: number, id: string): CaseSummary {
+    return decode<CaseSummary>(() => binding('porous.remove').porous_remove(handle, id));
 }
 
 /** Appends one point monitor and writes the document back. */
