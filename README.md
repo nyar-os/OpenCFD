@@ -84,7 +84,9 @@ A measured 24×24, `dt = 0.01 s`, 200-step, Re=100 cavity reports a maximum velo
 - [Capability matrix, numerical method and limitations](documentation/capabilities.md)
 - [Architecture and data flow](documentation/architecture.md)
 
-The full test suite lives in `projects/crates/cfd-model/tests/`; each file names the physical check it asserts.
+The Rust test suite lives in `projects/crates/cfd-model/tests/`; each file names
+the physical check it asserts. The SDK smoke test lives in
+`projects/packages/open-cfd/tests/` and skips when the native addon is absent.
 
 ## 📚 Documentation
 

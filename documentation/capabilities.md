@@ -434,8 +434,10 @@ cargo test -p cfd-model --offline
 41. **Reynolds number**: the report resolves the speed and length sources
     (`reference`, `inlet`, `default`; `reference`, `obstacle`, `domainHeight`).
 
-Unit tests in `projects/crates/cfd-model/src/solver.rs` cover the pieces that
-are easier to assert in isolation:
+Unit tests live in `projects/crates/cfd-model/tests/unit/`; `src/solver.rs` and
+`src/export.rs` declare them with `#[cfg(test)] #[path = "../tests/unit/..."]`,
+so no test file sits under `src/`. The solver module covers the pieces that are
+easier to assert in isolation:
 
 - `buoyancy_acceleration_points_away_from_gravity_when_hot`
 - `quick_and_central_are_exact_for_quadratic_profiles`
@@ -460,18 +462,28 @@ streamline/residual/force export`, comparing each item with the report and the
 quantities, inlet profiles, time schemes, adaptive settings, porous regions and
 the wall function through both entry points.
 
+`projects/crates/cfd-model/tests/sdk_parity.rs` pins the surface that the SDK
+and CLI map: generated porous and obstacle ids, document order, in-place
+obstacle update with rotation, thermal settings requiring scalar transport,
+wall-function set and clear, and the stable error codes of rejected edits (which
+must leave the file untouched).
+
 Node-API and TypeScript checks:
 
 ```shell
 cargo check -p open-cfd-napi --offline
-node --experimental-strip-types --check projects/packages/open-cfd/src/cli.ts
+pnpm --filter @wae/open-cfd run typecheck
+pnpm --filter @wae/open-cfd run test   # skips when the addon is not installed
 ```
+
+The smoke test compiles with `tsconfig.test.json` into `dist-test/` and runs
+under `node --test`; it skips every case when the native addon is absent.
 
 Formatting and building:
 
 ```shell
-cargo fmt -p cfd-model
-cargo build -p cfd-model --offline
+cargo fmt -p cfd-model -p open-cfd-napi
+cargo test -p cfd-model -p open-cfd-napi --offline
 ```
 
 ## Limitations
