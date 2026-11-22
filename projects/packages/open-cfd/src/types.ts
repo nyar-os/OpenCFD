@@ -375,6 +375,7 @@ export type ExportFormat =
     | 'residuals'
     | 'forces'
     | 'coefficients'
+    | 'probes'
     | 'particles';
 
 /** Cell-centred field an SVG or contour export can visualise. */

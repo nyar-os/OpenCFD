@@ -16,7 +16,7 @@ force/moment reference, passive scalar, buoyancy, turbulence, wall function and
 thermal settings, validate it, solve it and export CSV,
 legacy ASCII VTK, SVG field previews, filled-contour/iso-line SVG, SVG
 streamlines, residual history CSV, force history CSV, a final drag/lift/moment
-summary CSV or Lagrangian particle trajectories as CSV. CSV and VTK can sample
+summary CSV, point-monitor history CSV or Lagrangian particle trajectories as CSV. CSV and VTK can sample
 cell centres or mesh nodes (`--layout cell|node`). `solve` can resume from
 a checkpoint and write one back. The solve report also
 contains point monitor time series (`probes`), wall shear/friction summaries
@@ -72,7 +72,7 @@ ocfd reference set <file> [--velocity <m/s>] [--area <m2>] [--length <m>]
 ocfd validate <file>
 ocfd quality <file>
 ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
 
 Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
@@ -135,7 +135,7 @@ rename. Confirm the path before running them.
 - `inlet series clear` removes every transient drive and restores the stored
   static boundary values.
 - `csv`, `vtk`, `svg`, `contours`, `streamlines`, `residuals`, `forces`,
-  `coefficients` and `particles` are
+  `coefficients`, `probes` and `particles` are
   the only export targets. `inp` and `openfoam` reject with
   `capability/not-implemented`. Periodic sides must come in opposite pairs and
   are excluded from the boundary mass balance.

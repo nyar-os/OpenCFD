@@ -15,8 +15,9 @@ use serde::Serialize;
 
 use crate::checkpoint::Checkpoint;
 use crate::export::{
-    export_coefficients, export_contours, export_csv_with_layout, export_forces, export_residuals,
-    export_streamlines, export_svg, export_vtk_with_layout, ExportField, ExportLayout,
+    export_coefficients, export_contours, export_csv_with_layout, export_forces, export_probes,
+    export_residuals, export_streamlines, export_svg, export_vtk_with_layout, ExportField,
+    ExportLayout,
 };
 use crate::mesh::Mesh;
 use crate::model::{
@@ -53,6 +54,8 @@ pub enum ExportFormat {
     Forces,
     /// Final per-obstacle drag, lift and moment summary CSV rows.
     Coefficients,
+    /// Sampled point-monitor time-series CSV rows.
+    Probes,
     /// Traced particle trajectories as CSV rows.
     Particles,
 }
@@ -69,6 +72,7 @@ impl ExportFormat {
             Self::Residuals => "residuals",
             Self::Forces => "forces",
             Self::Coefficients => "coefficients",
+            Self::Probes => "probes",
             Self::Particles => "particles",
         }
     }
@@ -87,17 +91,18 @@ impl FromStr for ExportFormat {
             "residuals" | "residual" => Ok(Self::Residuals),
             "forces" | "force" => Ok(Self::Forces),
             "coefficients" | "coefficient" | "cdcl" => Ok(Self::Coefficients),
+            "probes" | "probe" => Ok(Self::Probes),
             "particles" | "particle" | "tracers" => Ok(Self::Particles),
             "inp" | "openfoam" => Err(CfdError::new(
                 "capability/not-implemented",
                 format!(
-                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients or particles are supported"
+                    "export format {value} is not implemented; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes or particles are supported"
                 ),
             )),
             other => Err(CfdError::new(
                 "cli/unknown-format",
                 format!(
-                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients or particles are supported"
+                    "unknown export format `{other}`; only csv, vtk, svg, contours, streamlines, residuals, forces, coefficients, probes or particles are supported"
                 ),
             )),
         }
@@ -847,6 +852,7 @@ impl OpenCfd {
             ExportFormat::Residuals => export_residuals(&solution, out)?,
             ExportFormat::Forces => export_forces(&solution, out)?,
             ExportFormat::Coefficients => export_coefficients(&solution, out)?,
+            ExportFormat::Probes => export_probes(&solution, out)?,
             ExportFormat::Particles => {
                 let config = ParticleConfig {
                     seeds: Vec::new(),

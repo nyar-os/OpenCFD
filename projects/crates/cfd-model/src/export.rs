@@ -797,6 +797,42 @@ pub fn export_coefficients(solution: &Solution, path: &Path) -> Result<PathBuf, 
     Ok(target)
 }
 
+/// Writes every sampled probe reading as long-form CSV.
+///
+/// The header is `probe,x,y,step,time,u,v,speed,pressure,temperature`; each
+/// probe contributes one row per sample it recorded, grouped in document order.
+/// `temperature` is left empty when no scalar field is configured. When `path`
+/// ends in `.csv` it is used as the output file; otherwise it is treated as a
+/// directory and `probes.csv` is created inside it.
+pub fn export_probes(solution: &Solution, path: &Path) -> Result<PathBuf, CfdError> {
+    let target = with_extension_or_file(path, "csv", "probes.csv");
+    let mut text = String::from("probe,x,y,step,time,u,v,speed,pressure,temperature\n");
+    for probe in &solution.report.probes {
+        for sample in &probe.history {
+            let temperature = sample
+                .temperature
+                .map(|value| format!("{value:.10e}"))
+                .unwrap_or_default();
+            let _ = writeln!(
+                text,
+                "{},{:.10e},{:.10e},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{}",
+                probe.id,
+                probe.x,
+                probe.y,
+                sample.step,
+                sample.time,
+                sample.u,
+                sample.v,
+                sample.speed,
+                sample.pressure,
+                temperature
+            );
+        }
+    }
+    write_atomic(&target, &text)?;
+    Ok(target)
+}
+
 /// Writes a self-contained SVG of streamlines traced through the velocity field.
 ///
 /// Lines are seeded on a regular grid, integrated with a second-order midpoint

@@ -55,7 +55,7 @@ Usage:
   ocfd validate <file>
   ocfd quality <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -1279,7 +1279,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let field = match parsed.options.get("--field") {
@@ -1346,6 +1346,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
         ExportFormat::Coefficients => {
             println!("exported coefficient summary CSV: {}", report.path)
         }
+        ExportFormat::Probes => println!("exported probe history CSV: {}", report.path),
         ExportFormat::Particles => println!("exported particle trajectories CSV: {}", report.path),
     }
     Ok(0)

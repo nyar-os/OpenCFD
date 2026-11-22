@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     export_coefficients, export_contours, export_csv, export_csv_with_layout, export_forces,
-    export_particles, export_residuals, export_streamlines, export_svg, export_vtk,
+    export_particles, export_probes, export_residuals, export_streamlines, export_svg, export_vtk,
     export_vtk_with_layout, mesh_quality, outlet_flows, solve, solve_pressure, solve_with,
     solve_with_checkpoint, stream_function, trace_particles, transport_scalar, vorticity,
     Boundaries, Boundary, BoundaryKind, Buoyancy, Checkpoint, ConvectionScheme, ExportField,
@@ -1483,6 +1483,11 @@ fn history_exports_have_stable_csv_shapes() {
         y: 0.5,
         r: 0.1,
     }];
+    model.probes = vec![Probe {
+        id: "wake".to_string(),
+        x: 0.8,
+        y: 0.5,
+    }];
     let solution = solve_with(
         &model,
         &SolveOptions {
@@ -1549,6 +1554,31 @@ fn history_exports_have_stable_csv_shapes() {
     let force = &solution.report.forces[0];
     assert!((first[2].parse::<f64>().expect("cd") - force.cd).abs() < 1e-12);
     assert!((first[3].parse::<f64>().expect("cl") - force.cl).abs() < 1e-12);
+
+    let probe_path = export_probes(&solution, &directory).expect("probes");
+    assert_eq!(
+        probe_path.file_name().and_then(|name| name.to_str()),
+        Some("probes.csv")
+    );
+    let probes = fs::read_to_string(&probe_path).expect("read probes");
+    let probe_lines: Vec<&str> = probes.lines().collect();
+    assert_eq!(
+        probe_lines[0],
+        "probe,x,y,step,time,u,v,speed,pressure,temperature"
+    );
+    let samples: usize = solution
+        .report
+        .probes
+        .iter()
+        .map(|probe| probe.history.len())
+        .sum();
+    assert_eq!(probe_lines.len(), samples + 1);
+    assert!(samples > 0);
+    for line in &probe_lines[1..] {
+        assert_eq!(line.split(',').count(), 10);
+        assert!(line.starts_with("wake,"));
+        assert!(line.ends_with(','), "temperature is empty without a scalar");
+    }
 }
 
 #[test]
