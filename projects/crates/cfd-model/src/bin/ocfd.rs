@@ -21,6 +21,8 @@ Usage:
   ocfd time scheme set <file> --scheme euler|rk2
   ocfd time adaptive set <file> --cfl <n|off>
   ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  ocfd boundary list <file>
+  ocfd boundary reset <file> [--side left|right|top|bottom]
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -304,6 +306,8 @@ fn time_adaptive_set(args: &[String]) -> Result<i32, CfdError> {
 fn boundary_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("set") => boundary_set(&args[1..]),
+        Some("list") => boundary_list(&args[1..]),
+        Some("reset") => boundary_reset(&args[1..]),
         Some("profile") => match args.get(1).map(String::as_str) {
             Some("set") => boundary_profile_set(&args[2..]),
             Some(other) => Err(CfdError::new(
@@ -317,13 +321,52 @@ fn boundary_command(args: &[String]) -> Result<i32, CfdError> {
         },
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`boundary` has no subcommand `{other}`; only set and profile are supported"),
+            format!(
+                "`boundary` has no subcommand `{other}`; use set, list, reset or profile"
+            ),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`boundary` requires a subcommand; only set and profile are supported",
+            "`boundary` requires a subcommand; use set, list, reset or profile",
         )),
     }
+}
+
+fn boundary_list(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &[], &[])?;
+    let file = positional(&parsed, 0, "boundary list <file>")?;
+    let session = open_session(file)?;
+    let boundaries = session.boundary_list();
+    let json = serde_json::to_string_pretty(&boundaries).map_err(|error| {
+        CfdError::new(
+            "document/serialize",
+            format!("cannot serialize boundaries: {error}"),
+        )
+    })?;
+    println!("{json}");
+    Ok(0)
+}
+
+fn boundary_reset(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--side"], &[])?;
+    let file = positional(&parsed, 0, "boundary reset <file> [--side <side>]")?;
+    let side = parsed
+        .options
+        .get("--side")
+        .map(|value| value.parse::<Side>())
+        .transpose()?;
+    let mut session = open_session(file)?;
+    session.boundary_reset(side)?;
+    match side {
+        Some(side) => println!(
+            "reset {} boundary to a stationary wall; dropped its transient drive",
+            side.as_str()
+        ),
+        None => println!(
+            "reset all boundaries to stationary walls; dropped all transient drives"
+        ),
+    }
+    Ok(0)
 }
 
 fn boundary_profile_set(args: &[String]) -> Result<i32, CfdError> {

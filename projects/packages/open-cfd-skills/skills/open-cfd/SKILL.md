@@ -43,6 +43,8 @@ ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance
 ocfd time scheme set <file> --scheme euler|rk2
 ocfd time adaptive set <file> --cfl <n|off>
 ocfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+ocfd boundary list <file>
+ocfd boundary reset <file> [--side left|right|top|bottom]
 ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -75,9 +77,10 @@ ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart
 ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
 ```
 
-Every editing command except `capabilities`, `validate`, `obstacle list`, `probe list`, `solve`
-and `export` rewrites the input document in place through a temporary file and a
-rename. Confirm the path before running them.
+Every editing command except `capabilities`, `validate`, `obstacle list`,
+`boundary list`, `probe list`, `solve` and `export` rewrites the input document
+in place through a temporary file and a rename. Confirm the path before running
+them.
 
 ## Preflight
 

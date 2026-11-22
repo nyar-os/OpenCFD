@@ -239,6 +239,26 @@ fn boundary_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Returns the four side boundary conditions of one session document.
+#[function]
+fn boundary_list(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let boundaries = with_session(handle, |session| Ok(session.boundary_list()))?;
+    respond(&ctx, &json!(boundaries))
+}
+
+/// Resets one side or every side to a stationary wall.
+#[function]
+fn boundary_reset(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let side = match optional_text(&ctx, 1)? {
+        Some(value) => Some(value.parse::<Side>().map_err(fail)?),
+        None => None,
+    };
+    let summary = with_session(handle, |session| session.boundary_reset(side))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Sets the normal-velocity profile of one inlet side.
 #[function]
 fn boundary_profile_set(ctx: CallContext) -> Result<JsValue> {
@@ -529,6 +549,8 @@ register_module![
     time_scheme_set,
     time_adaptive_set,
     boundary_set,
+    boundary_list,
+    boundary_reset,
     boundary_profile_set,
     obstacle_add,
     obstacle_list,

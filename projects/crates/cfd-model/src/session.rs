@@ -21,10 +21,10 @@ use crate::export::{
 };
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField, InletProfile,
-    MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig, ScalarSource, Side,
-    ThermalConfig, TimeScheme, TimeSettings, TransientInlet, Turbulence, TurbulenceModel,
-    WallFunction,
+    Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
+    InletProfile, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig,
+    ScalarSource, Side, ThermalConfig, TimeScheme, TimeSettings, TransientInlet, Turbulence,
+    TurbulenceModel, WallFunction,
 };
 use crate::particles::{
     export_particles as write_particles, ParticleConfig, DEFAULT_PARTICLE_STEPS,
@@ -463,6 +463,29 @@ impl OpenCfd {
             }
             if let Some(pressure) = pressure {
                 boundary.pressure = pressure;
+            }
+        })
+    }
+
+    /// Returns the four side boundary conditions and the inlet profiles.
+    pub fn boundary_list(&self) -> Boundaries {
+        self.model.boundaries.clone()
+    }
+
+    /// Resets one side, or every side, to a stationary no-slip wall.
+    ///
+    /// The reset clears the side velocity and outlet pressure, restores the
+    /// uniform inlet profile and removes any transient drive for that side, so
+    /// a time series cannot keep overriding the wall during a transient solve.
+    pub fn boundary_reset(&mut self, side: Option<Side>) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            for current in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+                if side.is_some_and(|target| target != current) {
+                    continue;
+                }
+                *model.boundaries.get_mut(current) = Boundary::wall();
+                *model.boundaries.inlet_profiles.get_mut(current) = InletProfile::Uniform;
+                model.transient_inlets.retain(|inlet| inlet.side != current);
             }
         })
     }

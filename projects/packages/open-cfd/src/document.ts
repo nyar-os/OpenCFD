@@ -25,10 +25,12 @@ import type {
     Obstacle,
     Probe,
     PressureGradientSetRequest,
+    Boundaries,
     ReferenceSetRequest,
     SaveReport,
     ScalarSetRequest,
     ScalarSource,
+    Side,
     SolveOptions,
     SolveReport,
     TimeAdaptiveSetRequest,
@@ -99,6 +101,18 @@ export class CfdCase {
     setBoundary(request: BoundarySetRequest): CaseSummary {
         this.assertOpen();
         return this.adopt(service.boundarySet(this.handle, request));
+    }
+
+    /** Returns the four side boundary conditions and inlet profiles. */
+    listBoundaries(): Boundaries {
+        this.assertOpen();
+        return service.boundaryList(this.handle);
+    }
+
+    /** Resets one side, or every side, to a stationary wall and writes it back. */
+    resetBoundary(side?: Side): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.boundaryReset(this.handle, side));
     }
 
     /** Sets one inlet's normal-velocity profile and writes the document back. */

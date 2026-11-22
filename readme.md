@@ -46,7 +46,7 @@ await cfd.dispose();
 ```
 
 - Session: `capabilities()`, `create(path)`, `open(path)`, `dispose()`.
-- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setBuoyancy`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
+- Document: `id`, `summary`, `obstacles`, `probes`, `setMesh`, `setFluid`, `setReference`, `setTime`, `setTimeScheme`, `setBoundary`, `listBoundaries`, `resetBoundary`, `setInletProfile`, `addObstacle`, `listObstacles`, `addProbe`, `listProbes`, `clearProbes`, `setScalar`, `setBuoyancy`, `setConvection`, `setPressureGradient`, `validate`, `solve(options?)`, `export`, `save`, `close`.
 - `solve(options?)` accepts `steps`, `tolerance`, `checkEvery`, `restart` (checkpoint path to resume) and `checkpoint` (path that receives the final state). Resumed reports keep cumulative `steps`/`time`.
 - `setBoundary` accepts `wall`, `inlet`, `outlet`, `convective`, `slip` and `periodic`; `pressure` sets the outlet gauge pressure. Periodic sides must be paired. `setInletProfile` shapes the normal velocity of one inlet side with `uniform`, `parabolic` or `powerLaw` (plus `exponent`).
 - `setPressureGradient({dpdx, dpdy})` imposes a uniform pressure gradient in Pa/m as the momentum body force `-∇p/ρ`; setting both components to zero removes it. It drives pressure-driven channel flow, and combined with paired periodic sides it forms a fully developed periodic channel.
@@ -131,6 +131,8 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd time scheme set <file> --scheme euler\|rk2` | Select explicit Euler (default) or second-order Runge-Kutta (Heun) for the momentum step |
 | `ocfd time adaptive set <file> --cfl <n\|off>` | Enable adaptive stepping with a target convective CFL in `(0, 1]`, or disable it with `--cfl off` |
 | `ocfd boundary set <file> --side left\|right\|top\|bottom --kind wall\|inlet\|outlet\|convective\|slip\|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]` | Set a side's boundary type, velocity and outlet gauge pressure; omitted values are unchanged |
+| `ocfd boundary list <file>` | Print the four side boundary conditions and inlet profiles as JSON |
+| `ocfd boundary reset <file> [--side left\|right\|top\|bottom]` | Reset one side or every side to a stationary no-slip wall; clears its velocity, outlet pressure, inlet profile and transient drive |
 | `ocfd boundary profile set <file> --side left\|right\|top\|bottom --profile uniform\|parabolic\|powerLaw [--exponent <n>]` | Shape the normal velocity of an inlet side; `parabolic` is Poiseuille, `powerLaw` uses `(1−\|2s−1\|)^(1/n)` |
 | `ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]` | Add a rectangular obstacle, optionally rotated counter-clockwise about its centroid; omitting `--id` generates `obstacle-N` in order |
 | `ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]` | Add a circular obstacle |

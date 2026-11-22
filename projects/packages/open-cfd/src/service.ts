@@ -10,6 +10,7 @@
 import { NotImplementedError, OpenCFDError, errorCodes, type OpenCFDErrorCode } from './errors.js';
 import { nativeBinding } from './native.js';
 import type {
+    Boundaries,
     BoundaryProfileSetRequest,
     BoundarySetRequest,
     BuoyancySetRequest,
@@ -30,6 +31,7 @@ import type {
     SaveReport,
     ScalarSetRequest,
     ScalarSource,
+    Side,
     SolveOptions,
     SolveReport,
     TimeAdaptiveSetRequest,
@@ -170,6 +172,20 @@ export function boundarySet(handle: number, request: BoundarySetRequest): CaseSu
             request.v,
             request.pressure,
         ),
+    );
+}
+
+/** Returns the four side boundary conditions and inlet profiles. */
+export function boundaryList(handle: number): Boundaries {
+    return decode<Boundaries>(() => binding('boundary.list').boundary_list(handle));
+}
+
+/** Resets one side or every side to a stationary wall and writes the document back. */
+export function boundaryReset(handle: number, side?: Side): CaseSummary {
+    return decode<CaseSummary>(() =>
+        side === undefined
+            ? binding('boundary.reset').boundary_reset(handle)
+            : binding('boundary.reset').boundary_reset(handle, side),
     );
 }
 

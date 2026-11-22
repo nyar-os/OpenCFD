@@ -8,6 +8,8 @@
             "fluid-set": "Set density and dynamic viscosity of an existing case",
             "time-set": "Set time step, step count, pressure sweeps and tolerance",
             "boundary-set": "Set one boundary kind and velocity of an existing case",
+            "boundary-list": "Print the four side boundary conditions and inlet profiles",
+            "boundary-reset": "Reset one side or every side to a stationary wall",
             "validate": "Validate an existing case",
             "solve": "Solve a case and print the report",
             "export": "Solve a case and write a CSV or VTK field"

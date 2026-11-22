@@ -4,9 +4,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
-    BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
+    Boundary, BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Model, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
-    PorousRegion, Probe, Side, SolveOptions, TimeScheme,
+    PorousRegion, Probe, Side, SolveOptions, TimeScheme, TimeSeries, TransientInlet,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -104,6 +104,106 @@ fn session_slip_and_outlet_pressure_round_trip() {
     );
     let cli_stored = Model::load(&cli_path).expect("load CLI document");
     assert_eq!(cli_stored.boundaries.right.pressure, 1.5);
+}
+
+#[test]
+fn session_boundary_list_and_reset_round_trip_through_cli() {
+    let directory = temporary_dir("boundary-reset");
+    let path = directory.join("reset.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session
+        .boundary_set(Side::Right, BoundaryKind::Outlet, Some(2.0), None, Some(1.5))
+        .expect("outlet");
+    session
+        .boundary_profile_set(Side::Left, InletProfile::Parabolic, Some(3.0))
+        .expect("profile");
+    session
+        .transient_inlet_set(TransientInlet {
+            side: Side::Right,
+            u: Some(TimeSeries {
+                times: vec![0.0, 1.0],
+                values: vec![1.0, 2.0],
+            }),
+            v: None,
+            pressure: None,
+        })
+        .expect("transient");
+
+    let listed = session.boundary_list();
+    assert_eq!(listed.right.kind, BoundaryKind::Outlet);
+    assert_eq!(listed.right.pressure, 1.5);
+    assert_eq!(listed.inlet_profiles.left, InletProfile::Parabolic);
+    assert_eq!(listed.inlet_profiles.exponent, 3.0);
+
+    let summary = session
+        .boundary_reset(Some(Side::Right))
+        .expect("reset right");
+    assert_eq!(summary.boundaries.right, Boundary::wall());
+    assert!(summary.transient_inlets.is_empty());
+    assert_eq!(summary.boundaries.inlet_profiles.left, InletProfile::Parabolic);
+
+    let summary = session.boundary_reset(None).expect("reset all");
+    for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+        assert_eq!(summary.boundaries.get(side), &Boundary::wall());
+        assert_eq!(
+            summary.boundaries.inlet_profiles.get(side),
+            InletProfile::Uniform
+        );
+    }
+
+    let cli_path = directory.join("cli-reset.ocfd");
+    let cli = text(&cli_path);
+    assert!(run_cli(&["create", &cli]).status.success());
+    let output = run_cli(&[
+        "boundary",
+        "set",
+        &cli,
+        "--side",
+        "right",
+        "--kind",
+        "outlet",
+        "--pressure",
+        "1.5",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd boundary set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = run_cli(&[
+        "inlet",
+        "series",
+        "set",
+        &cli,
+        "--side",
+        "right",
+        "--u",
+        "0:1,1:2",
+    ]);
+    assert!(
+        output.status.success(),
+        "ocfd inlet series set failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = run_cli(&["boundary", "list", &cli]);
+    assert!(
+        output.status.success(),
+        "ocfd boundary list failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("boundary list JSON");
+    assert_eq!(listed["right"]["kind"], "outlet");
+    let output = run_cli(&["boundary", "reset", &cli, "--side", "right"]);
+    assert!(
+        output.status.success(),
+        "ocfd boundary reset failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stored = Model::load(&cli_path).expect("load");
+    assert_eq!(stored.boundaries.right, Boundary::wall());
+    assert!(stored.transient_inlets.is_empty());
 }
 
 #[test]

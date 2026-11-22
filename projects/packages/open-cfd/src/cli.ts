@@ -35,6 +35,8 @@ usage:
   open-cfd time scheme set <file> --scheme euler|rk2
   open-cfd time adaptive set <file> --cfl <n|off>
   open-cfd boundary set <file> --side left|right|top|bottom --kind wall|inlet|outlet|convective|slip|periodic [--u <m/s>] [--v <m/s>] [--pressure <Pa>]
+  open-cfd boundary list <file>
+  open-cfd boundary reset <file> [--side left|right|top|bottom]
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
@@ -417,6 +419,27 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             return 0;
         }
         case 'boundary': {
+            if (rest[0] === 'list') {
+                const parsed = parseArguments(rest.slice(1), []);
+                const file = positional(parsed, 0, 'boundary list <file>');
+                const document = await session.open(file);
+                console.log(JSON.stringify(document.listBoundaries(), null, 2));
+                return 0;
+            }
+            if (rest[0] === 'reset') {
+                const parsed = parseArguments(rest.slice(1), ['--side']);
+                const file = positional(parsed, 0, 'boundary reset <file> [--side <side>]');
+                const raw = parsed.options['--side'];
+                const side = raw === undefined ? undefined : parseSide(raw);
+                const document = await session.open(file);
+                document.resetBoundary(side);
+                console.log(
+                    side === undefined
+                        ? 'reset all boundaries to stationary walls; dropped all transient drives'
+                        : `reset ${side} boundary to a stationary wall; dropped its transient drive`,
+                );
+                return 0;
+            }
             if (rest[0] === 'profile') {
                 if (rest[1] !== 'set') {
                     throw cliError(
@@ -446,7 +469,14 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 );
                 return 0;
             }
-            expectSet(rest, 'boundary');
+            if (rest[0] !== 'set') {
+                throw cliError(
+                    'cli/unknown-command',
+                    rest[0] === undefined
+                        ? '`boundary` needs the `set`, `list`, `reset` or `profile` subcommand'
+                        : `\`boundary\` subcommand \`${rest[0]}\` does not exist; use set, list, reset or profile`,
+                );
+            }
             const parsed = parseArguments(rest.slice(1), [
                 '--side',
                 '--kind',
