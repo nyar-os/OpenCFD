@@ -290,6 +290,15 @@ fn obstacle_list(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(obstacles))
 }
 
+/// Removes the first solid obstacle with `id` and returns the summary.
+#[function]
+fn obstacle_remove(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let summary = with_session(handle, |session| session.obstacle_remove(&id))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Appends one point monitor from a JSON request and returns the summary.
 #[function]
 fn probe_add(ctx: CallContext) -> Result<JsValue> {
@@ -523,6 +532,7 @@ register_module![
     boundary_profile_set,
     obstacle_add,
     obstacle_list,
+    obstacle_remove,
     probe_add,
     probe_list,
     probe_clear,

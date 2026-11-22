@@ -135,8 +135,10 @@ A measured report summary from this repository (24×24, dt=0.01, 200 steps, Re=1
 | `ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]` | Add a rectangular obstacle, optionally rotated counter-clockwise about its centroid; omitting `--id` generates `obstacle-N` in order |
 | `ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]` | Add a circular obstacle |
 | `ocfd obstacle list <file>` | Print the obstacle JSON array in document order |
+| `ocfd obstacle remove <file> --id <name>` | Remove the first obstacle with that id and print the remaining count |
 | `ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]` | Add an isotropic Darcy–Forchheimer porous region; omitting `--id` generates `porous-N` in order |
 | `ocfd porous list <file>` | Print the porous-region JSON array in document order |
+| `ocfd porous remove <file> --id <name>` | Remove the first porous region with that id and print the remaining count |
 | `ocfd probe add <file> --x <m> --y <m> [--id <name>]` | Add a point monitor sampled during the solve; omitting `--id` generates `probe-N` in order |
 | `ocfd probe list <file>` | Print the probe JSON array in document order |
 | `ocfd probe clear <file>` | Remove every point monitor |

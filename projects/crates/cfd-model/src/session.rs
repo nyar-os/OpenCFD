@@ -507,6 +507,32 @@ impl OpenCfd {
         self.model.obstacles.clone()
     }
 
+    /// Removes the first solid obstacle with `id` and writes the document back.
+    ///
+    /// Fails with `obstacle/not-found` when no obstacle carries `id`, leaving
+    /// the document unchanged. Duplicate ids cannot be created by the model, so
+    /// only the first match is ever removed.
+    pub fn obstacle_remove(&mut self, id: &str) -> Result<CaseSummary, CfdError> {
+        self.bound_path()?;
+        let index = self
+            .model
+            .obstacles
+            .iter()
+            .position(|obstacle| obstacle.id() == id)
+            .ok_or_else(|| {
+                CfdError::new(
+                    "obstacle/not-found",
+                    format!(
+                        "no obstacle has id `{id}`; available ids: {}",
+                        available_ids(self.model.obstacles.iter().map(Obstacle::id))
+                    ),
+                )
+            })?;
+        self.edit(|model| {
+            model.obstacles.remove(index);
+        })
+    }
+
     /// Appends a porous region and writes the document back.
     ///
     /// An empty id is replaced by `porous-N`, where `N` is the one-based
@@ -525,6 +551,32 @@ impl OpenCfd {
     /// Returns the porous regions in document order.
     pub fn porous_list(&self) -> Vec<PorousRegion> {
         self.model.porous.clone()
+    }
+
+    /// Removes the first porous region with `id` and writes the document back.
+    ///
+    /// Fails with `porous/not-found` when no region carries `id`, leaving the
+    /// document unchanged. Duplicate ids cannot be created by the model, so
+    /// only the first match is ever removed.
+    pub fn porous_remove(&mut self, id: &str) -> Result<CaseSummary, CfdError> {
+        self.bound_path()?;
+        let index = self
+            .model
+            .porous
+            .iter()
+            .position(|region| region.id() == id)
+            .ok_or_else(|| {
+                CfdError::new(
+                    "porous/not-found",
+                    format!(
+                        "no porous region has id `{id}`; available ids: {}",
+                        available_ids(self.model.porous.iter().map(PorousRegion::id))
+                    ),
+                )
+            })?;
+        self.edit(|model| {
+            model.porous.remove(index);
+        })
     }
 
     /// Appends a point monitor and writes the document back.
@@ -852,5 +904,15 @@ impl OpenCfd {
                 "the session is not bound to a file; create or open an .ocfd document first",
             )
         })
+    }
+}
+
+/// Formats the ids of a document list for a not-found diagnostic.
+fn available_ids<'a>(ids: impl Iterator<Item = &'a str>) -> String {
+    let ids: Vec<String> = ids.map(|id| format!("`{id}`")).collect();
+    if ids.is_empty() {
+        "none".to_string()
+    } else {
+        ids.join(", ")
     }
 }

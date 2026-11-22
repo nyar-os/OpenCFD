@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cfd_model::{
     BoundaryKind, Checkpoint, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
-    InletProfile, Model, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed, PorousRegion,
-    Probe, Side, SolveOptions, TimeScheme,
+    InletProfile, Model, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
+    PorousRegion, Probe, Side, SolveOptions, TimeScheme,
 };
 
 fn temporary_dir(name: &str) -> PathBuf {
@@ -701,6 +701,119 @@ fn session_porous_region_round_trips_through_cli() {
     assert!(listed.status.success());
     let listing = String::from_utf8_lossy(&listed.stdout);
     assert!(listing.contains("\"filter\""), "listing {listing}");
+}
+
+#[test]
+fn session_obstacle_remove_keeps_the_remaining_obstacle() {
+    let directory = temporary_dir("obstacle-remove");
+    let path = directory.join("obstacles.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "first".to_string(),
+            x: 0.3,
+            y: 0.5,
+            r: 0.1,
+        })
+        .expect("first obstacle");
+    session
+        .obstacle_add(Obstacle::Rect {
+            id: "second".to_string(),
+            x0: 0.5,
+            y0: 0.4,
+            x1: 0.7,
+            y1: 0.6,
+            rotation: 0.0,
+        })
+        .expect("second obstacle");
+
+    let summary = session.obstacle_remove("first").expect("remove first");
+    assert_eq!(summary.obstacles.len(), 1);
+    assert_eq!(summary.obstacles[0].id(), "second");
+
+    let mut reopened = OpenCfd::new(OpenCfdOptions::default());
+    let reloaded = reopened.open(&path).expect("reload");
+    assert_eq!(reloaded.obstacles.len(), 1);
+    assert_eq!(reloaded.obstacles[0].id(), "second");
+}
+
+#[test]
+fn session_obstacle_remove_unknown_id_leaves_the_case_unchanged() {
+    let directory = temporary_dir("obstacle-remove-missing");
+    let path = directory.join("obstacles.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session
+        .obstacle_add(Obstacle::Circle {
+            id: "kept".to_string(),
+            x: 0.3,
+            y: 0.5,
+            r: 0.1,
+        })
+        .expect("obstacle");
+    let before = fs::read_to_string(&path).expect("read document before");
+
+    let error = session
+        .obstacle_remove("missing")
+        .expect_err("unknown obstacle id");
+    assert_eq!(error.code, "obstacle/not-found");
+    assert!(error.message.contains("`missing`"), "{}", error.message);
+    assert!(error.message.contains("`kept`"), "{}", error.message);
+
+    assert_eq!(
+        fs::read_to_string(&path).expect("read document after"),
+        before
+    );
+    assert_eq!(session.obstacle_list().len(), 1);
+}
+
+#[test]
+fn session_porous_remove_keeps_the_remaining_region() {
+    let directory = temporary_dir("porous-remove");
+    let path = directory.join("porous.ocfd");
+    let mut session = OpenCfd::new(OpenCfdOptions::default());
+    session.create(&path).expect("create");
+    session
+        .porous_add(PorousRegion {
+            id: "first".to_string(),
+            x0: 0.1,
+            y0: 0.1,
+            x1: 0.3,
+            y1: 0.3,
+            permeability: 1.0e-3,
+            inertial: 0.0,
+        })
+        .expect("first region");
+    session
+        .porous_add(PorousRegion {
+            id: "second".to_string(),
+            x0: 0.6,
+            y0: 0.6,
+            x1: 0.8,
+            y1: 0.8,
+            permeability: 2.0e-3,
+            inertial: 0.5,
+        })
+        .expect("second region");
+
+    let summary = session.porous_remove("first").expect("remove first");
+    assert_eq!(summary.porous.len(), 1);
+    assert_eq!(summary.porous[0].id, "second");
+    assert_eq!(summary.porous[0].permeability, 2.0e-3);
+
+    let mut reopened = OpenCfd::new(OpenCfdOptions::default());
+    let reloaded = reopened.open(&path).expect("reload");
+    assert_eq!(reloaded.porous.len(), 1);
+    assert_eq!(reloaded.porous[0].id, "second");
+
+    let error = session
+        .porous_remove("missing")
+        .expect_err("unknown porous id");
+    assert_eq!(error.code, "porous/not-found");
+    assert!(error.message.contains("`missing`"), "{}", error.message);
+    assert!(error.message.contains("`second`"), "{}", error.message);
+    assert_eq!(session.porous_list().len(), 1);
 }
 
 #[test]

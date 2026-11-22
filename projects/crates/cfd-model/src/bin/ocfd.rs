@@ -25,8 +25,10 @@ Usage:
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
   ocfd obstacle list <file>
+  ocfd obstacle remove <file> --id <name>
   ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
   ocfd porous list <file>
+  ocfd porous remove <file> --id <name>
   ocfd probe add <file> --x <m> --y <m> [--id <name>]
   ocfd probe list <file>
   ocfd probe clear <file>
@@ -408,13 +410,16 @@ fn obstacle_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("add") => obstacle_add(&args[1..]),
         Some("list") => obstacle_list(&args[1..]),
+        Some("remove") => obstacle_remove(&args[1..]),
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`obstacle` has no subcommand `{other}`; only add and list are supported"),
+            format!(
+                "`obstacle` has no subcommand `{other}`; only add, remove and list are supported"
+            ),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`obstacle` requires a subcommand; only add and list are supported",
+            "`obstacle` requires a subcommand; only add, remove and list are supported",
         )),
     }
 }
@@ -495,17 +500,30 @@ fn obstacle_list(args: &[String]) -> Result<i32, CfdError> {
     Ok(0)
 }
 
+fn obstacle_remove(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "obstacle remove <file> --id <name>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = open_session(file)?;
+    let summary = session.obstacle_remove(id)?;
+    println!("removed obstacle `{id}`; {} total", summary.obstacles.len());
+    Ok(0)
+}
+
 fn porous_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("add") => porous_add(&args[1..]),
         Some("list") => porous_list(&args[1..]),
+        Some("remove") => porous_remove(&args[1..]),
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`porous` has no subcommand `{other}`; only add and list are supported"),
+            format!(
+                "`porous` has no subcommand `{other}`; only add, remove and list are supported"
+            ),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`porous` requires a subcommand; only add and list are supported",
+            "`porous` requires a subcommand; only add, remove and list are supported",
         )),
     }
 }
@@ -563,6 +581,19 @@ fn porous_list(args: &[String]) -> Result<i32, CfdError> {
         )
     })?;
     println!("{json}");
+    Ok(0)
+}
+
+fn porous_remove(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "porous remove <file> --id <name>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = open_session(file)?;
+    let summary = session.porous_remove(id)?;
+    println!(
+        "removed porous region `{id}`; {} total",
+        summary.porous.len()
+    );
     Ok(0)
 }
 

@@ -47,8 +47,10 @@ ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|
 ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
 ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
 ocfd obstacle list <file>
+ocfd obstacle remove <file> --id <name>
 ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
 ocfd porous list <file>
+ocfd porous remove <file> --id <name>
 ocfd probe add <file> --x <m> --y <m> [--id <name>]
 ocfd probe list <file>
 ocfd probe clear <file>
@@ -159,6 +161,10 @@ rename. Confirm the path before running them.
 - `pressure gradient set --dpdx ... --dpdy ...` imposes a uniform pressure
   gradient in Pa/m as the body force `-∇p/ρ`; `0 0` clears it. It is constant in
   space and time and is not a general body-force field.
+- `obstacle remove --id <name>` and `porous remove --id <name>` delete the
+  first entry with that id and print the remaining count. An unknown id fails
+  with `obstacle/not-found` or `porous/not-found`, names the available ids and
+  leaves the document unchanged.
 - `porous add` installs an isotropic Darcy–Forchheimer sink
   `−(ν/K)U − (C_F/√K)|U|U` over the rectangle; `K` must be positive and `C_F`
   non-negative. The sink is explicit, so
