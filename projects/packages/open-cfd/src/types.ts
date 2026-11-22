@@ -28,10 +28,24 @@ export interface MeshConfig {
     readonly lengthY: number;
 }
 
-/** Constant-property Newtonian fluid. */
+/** Apparent-viscosity model of the fluid. */
+export type ViscosityModel = 'newtonian' | 'powerLaw';
+
+/** Fluid properties and apparent-viscosity model. */
 export interface Fluid {
     readonly density: number;
+    /** Constant dynamic viscosity; `0` means inviscid. Ignored by the power-law diffusion. */
     readonly viscosity: number;
+    /** Omitted in documents that keep the Newtonian default. */
+    readonly viscosityModel?: ViscosityModel;
+    /** Consistency coefficient `K` in Pa·sⁿ; required and positive for `powerLaw`. */
+    readonly consistency?: number;
+    /** Flow-behaviour index `n` in `(0, 2]`; required for `powerLaw`. */
+    readonly power?: number;
+    /** Lower apparent-viscosity clamp in Pa·s. */
+    readonly minViscosity?: number;
+    /** Upper apparent-viscosity clamp in Pa·s. */
+    readonly maxViscosity?: number;
 }
 
 /** Force and moment reference quantities; omitted values stay automatic. */
@@ -600,7 +614,15 @@ export interface StabilityLimits {
     readonly dt: number;
     /** Convective Courant number `maxVelocity·dt/min(dx, dy)`. */
     readonly cfl: number;
-    /** Explicit diffusion number `ν·dt·(1/dx² + 1/dy²)`. */
+    /** Apparent-viscosity model of the document. */
+    readonly viscosityModel: ViscosityModel;
+    /** Minimum apparent viscosity over fluid cells at the initial state in Pa·s. */
+    readonly apparentViscosityMin: number;
+    /** Maximum apparent viscosity over fluid cells at the initial state in Pa·s. */
+    readonly apparentViscosityMax: number;
+    /** Mean apparent viscosity over fluid cells at the initial state in Pa·s. */
+    readonly apparentViscosityMean: number;
+    /** Explicit diffusion number `nu_eff,max·dt·(1/dx² + 1/dy²)`. */
     readonly diffusionNumber: number;
     /** Explicit scalar diffusion number, when scalar transport is configured. */
     readonly scalarDiffusionNumber?: number;
@@ -694,6 +716,14 @@ export interface SolveReport {
     readonly timeScheme: TimeScheme;
     /** Turbulence model used by the run. */
     readonly turbulenceModel: TurbulenceModel;
+    /** Apparent-viscosity model used by the run. */
+    readonly viscosityModel: ViscosityModel;
+    /** Minimum apparent viscosity over fluid cells in Pa·s; equals the constant viscosity when Newtonian. */
+    readonly apparentViscosityMin: number;
+    /** Maximum apparent viscosity over fluid cells in Pa·s; equals the constant viscosity when Newtonian. */
+    readonly apparentViscosityMax: number;
+    /** Mean apparent viscosity over fluid cells in Pa·s; equals the constant viscosity when Newtonian. */
+    readonly apparentViscosityMean: number;
     /** Minimum eddy viscosity over fluid cells in m²/s. */
     readonly eddyViscosityMin: number;
     /** Maximum eddy viscosity over fluid cells in m²/s. */
@@ -730,6 +760,19 @@ export interface MeshSetRequest {
 export interface FluidSetRequest {
     readonly density: number;
     readonly viscosity: number;
+    /**
+     * Apparent-viscosity model. Omitted keeps the stored model; `newtonian`
+     * restores the constant viscosity and drops the power-law parameters.
+     */
+    readonly viscosityModel?: ViscosityModel;
+    /** Consistency coefficient `K` in Pa·sⁿ for `powerLaw`. */
+    readonly consistency?: number;
+    /** Flow-behaviour index `n` in `(0, 2]` for `powerLaw`. */
+    readonly power?: number;
+    /** Lower apparent-viscosity clamp in Pa·s. */
+    readonly minViscosity?: number;
+    /** Upper apparent-viscosity clamp in Pa·s. */
+    readonly maxViscosity?: number;
 }
 
 /** Arguments of `CfdCase.setTime()`. */

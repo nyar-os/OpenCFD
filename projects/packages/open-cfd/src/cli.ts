@@ -25,6 +25,7 @@ import type {
     Side,
     SideThermal,
     TimeScheme,
+    ViscosityModel,
 } from './types.js';
 
 const USAGE = `open-cfd - OpenCFD two-dimensional incompressible Navier-Stokes solver
@@ -33,6 +34,7 @@ usage:
   open-cfd create <file.ocfd>
   open-cfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
+  open-cfd fluid set <file> --viscosity-model power-law --consistency <K> --power <n> [--min-viscosity <Pa.s>] [--max-viscosity <Pa.s>]
   open-cfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   open-cfd time scheme set <file> --scheme euler|rk2
   open-cfd time adaptive set <file> --cfl <n|off>
@@ -86,6 +88,7 @@ const BOUNDARY_KINDS: readonly BoundaryKind[] = [
 const INLET_PROFILES: readonly InletProfile[] = ['uniform', 'parabolic', 'powerLaw'];
 const TIME_SCHEMES: readonly TimeScheme[] = ['euler', 'rk2'];
 const CONVECTION_SCHEMES: readonly ConvectionScheme[] = ['upwind', 'central', 'quick'];
+const VISCOSITY_MODELS: readonly ViscosityModel[] = ['newtonian', 'powerLaw'];
 
 interface ParsedArguments {
     readonly positionals: readonly string[];
@@ -219,6 +222,18 @@ function parseConvectionScheme(raw: string): ConvectionScheme {    if (!CONVECTI
         );
     }
     return raw as ConvectionScheme;
+}
+
+function parseViscosityModel(raw: string): ViscosityModel {
+    const normalized =
+        raw === 'power-law' || raw === 'power_law' ? 'powerLaw' : (raw as ViscosityModel);
+    if (!VISCOSITY_MODELS.includes(normalized)) {
+        throw cliError(
+            'fluid/invalid-viscosity-model',
+            `unknown viscosity model \`${raw}\`; use newtonian or power-law`,
+        );
+    }
+    return normalized;
 }
 
 function parseExportFormat(raw: string): ExportFormat {
@@ -400,16 +415,60 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
         }
         case 'fluid': {
             expectSet(rest, 'fluid');
-            const parsed = parseArguments(rest.slice(1), ['--rho', '--mu']);
-            const file = positional(parsed, 0, 'fluid set <file> --rho <kg/m3> --mu <Pa.s>');
-            const document = await session.open(file);
-            const summary = document.setFluid({
-                density: numberOption(parsed, '--rho'),
-                viscosity: numberOption(parsed, '--mu'),
-            });
-            console.log(
-                `fluid set: rho=${summary.fluid.density} kg/m3, mu=${summary.fluid.viscosity} Pa.s`,
+            const parsed = parseArguments(rest.slice(1), [
+                '--rho',
+                '--mu',
+                '--viscosity-model',
+                '--consistency',
+                '--power',
+                '--min-viscosity',
+                '--max-viscosity',
+            ]);
+            const file = positional(
+                parsed,
+                0,
+                'fluid set <file> --rho <kg/m3> --mu <Pa.s> | --viscosity-model power-law --consistency <K> --power <n>',
             );
+            const document = await session.open(file);
+            const modelRaw = parsed.options['--viscosity-model'];
+            if (modelRaw === undefined) {
+                const summary = document.setFluid({
+                    density: numberOption(parsed, '--rho'),
+                    viscosity: numberOption(parsed, '--mu'),
+                });
+                console.log(
+                    `fluid set: rho=${summary.fluid.density} kg/m3, mu=${summary.fluid.viscosity} Pa.s`,
+                );
+                return 0;
+            }
+            const current = document.summary.fluid;
+            const summary = document.setFluid({
+                density: optionalNumber(parsed, '--rho') ?? current.density,
+                viscosity: optionalNumber(parsed, '--mu') ?? current.viscosity,
+                viscosityModel: parseViscosityModel(modelRaw),
+                consistency: optionalNumber(parsed, '--consistency'),
+                power: optionalNumber(parsed, '--power'),
+                minViscosity: optionalNumber(parsed, '--min-viscosity'),
+                maxViscosity: optionalNumber(parsed, '--max-viscosity'),
+            });
+            const properties = [
+                `rho=${summary.fluid.density} kg/m3`,
+                `mu=${summary.fluid.viscosity} Pa.s`,
+                `viscosityModel=${summary.fluid.viscosityModel ?? 'newtonian'}`,
+            ];
+            if (summary.fluid.consistency !== undefined) {
+                properties.push(`consistency=${summary.fluid.consistency}`);
+            }
+            if (summary.fluid.power !== undefined) {
+                properties.push(`power=${summary.fluid.power}`);
+            }
+            if (summary.fluid.minViscosity !== undefined) {
+                properties.push(`minViscosity=${summary.fluid.minViscosity}`);
+            }
+            if (summary.fluid.maxViscosity !== undefined) {
+                properties.push(`maxViscosity=${summary.fluid.maxViscosity}`);
+            }
+            console.log(`fluid set: ${properties.join(', ')}`);
             return 0;
         }
         case 'time': {

@@ -123,10 +123,21 @@ export function meshSet(handle: number, request: MeshSetRequest): CaseSummary {
     );
 }
 
-/** Sets density and dynamic viscosity and writes the document back. */
+/** Sets density, dynamic viscosity and the apparent-viscosity model and writes the document back. */
 export function fluidSet(handle: number, request: FluidSetRequest): CaseSummary {
     return decode<CaseSummary>(() =>
-        binding('fluid.set').fluid_set(handle, request.density, request.viscosity),
+        request.viscosityModel === undefined
+            ? binding('fluid.set').fluid_set(handle, request.density, request.viscosity)
+            : binding('fluid.set').fluid_set(
+                  handle,
+                  request.density,
+                  request.viscosity,
+                  request.viscosityModel,
+                  request.consistency,
+                  request.power,
+                  request.minViscosity,
+                  request.maxViscosity,
+              ),
     );
 }
 

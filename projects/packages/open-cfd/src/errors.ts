@@ -23,6 +23,8 @@ export const errorCodes = [
     'io/write',
     'mesh/invalid',
     'fluid/invalid',
+    'fluid/invalid-viscosity',
+    'fluid/invalid-viscosity-model',
     'time/invalid',
     'boundary/invalid',
     'initial/invalid',

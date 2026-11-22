@@ -3,7 +3,7 @@
 //! This crate intentionally implements a small, verifiable subset of CFD:
 //!
 //! * two-dimensional, single-phase, incompressible flow;
-//! * constant density and constant dynamic viscosity (laminar);
+//! * constant density and constant or power-law apparent viscosity (laminar);
 //! * a structured Cartesian mesh with staggered pressure and velocity;
 //! * first-order explicit Euler or second-order Runge-Kutta time stepping with
 //!   the Chorin projection method;
@@ -66,8 +66,8 @@ pub use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, InletProfiles, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference,
     ScalarConfig, ScalarSource, Side, SideThermal, ThermalConfig, TimeScheme, TimeSeries,
-    TimeSettings, TransientInlet, Turbulence, TurbulenceModel, Units, WallFunction, FORMAT,
-    VERSION,
+    TimeSettings, TransientInlet, Turbulence, TurbulenceModel, Units, ViscosityModel, WallFunction,
+    FORMAT, VERSION,
 };
 pub use crate::particles::{
     export_particles, trace_particles, trace_solution_particles, ParticleConfig, ParticleSample,
@@ -128,6 +128,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "turbulence": "supported",
     "kEpsilonTurbulence": "supported",
     "heat": "supported",
+    "powerLawViscosity": "supported",
     "threeD": "unsupported"
   },
   "io": {

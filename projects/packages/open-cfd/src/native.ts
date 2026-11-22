@@ -19,7 +19,16 @@ export interface NativeBinding {
     open(path: string): string;
     save(handle: number, target?: string): string;
     mesh_set(handle: number, nx: number, ny: number, lengthX: number, lengthY: number): string;
-    fluid_set(handle: number, density: number, viscosity: number): string;
+    fluid_set(
+        handle: number,
+        density: number,
+        viscosity: number,
+        viscosityModel?: string,
+        consistency?: number,
+        power?: number,
+        minViscosity?: number,
+        maxViscosity?: number,
+    ): string;
     time_set(handle: number, dt: number, steps: number, pressureIterations: number, tolerance?: number): string;
     time_scheme_set(handle: number, scheme: string): string;
     time_adaptive_set(handle: number, enabled: boolean, targetCfl?: number): string;

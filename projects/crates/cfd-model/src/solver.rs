@@ -5,8 +5,9 @@ use crate::checkpoint::Checkpoint;
 use crate::fields::{stream_function, vorticity};
 use crate::mesh::Mesh;
 use crate::model::{
-    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Model, Probe, ScalarConfig, ScalarSource,
-    Side, ThermalConfig, TimeScheme, Turbulence, TurbulenceModel, WallFunction,
+    Boundaries, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, Model, Probe, ScalarConfig,
+    ScalarSource, Side, ThermalConfig, TimeScheme, Turbulence, TurbulenceModel, ViscosityModel,
+    WallFunction,
 };
 use crate::quality::{mesh_quality, MeshQuality};
 use crate::CfdError;
@@ -23,6 +24,12 @@ const MAX_HISTORY: usize = 1000;
 /// Default turbulence identifier for reports written before the field existed.
 fn default_turbulence_model_name() -> String {
     TurbulenceModel::None.as_str().to_string()
+}
+
+/// Default viscosity-model identifier for reports written before the field
+/// existed.
+fn default_viscosity_model_name() -> String {
+    ViscosityModel::Newtonian.as_str().to_string()
 }
 
 /// Default convection identifier for reports written before the field existed.
@@ -425,6 +432,21 @@ pub struct Report {
     /// Turbulence model identifier (`none`, `constant` or `mixingLength`).
     #[serde(default = "default_turbulence_model_name")]
     pub turbulence_model: String,
+    /// Apparent-viscosity model identifier (`newtonian` or `powerLaw`).
+    #[serde(default = "default_viscosity_model_name")]
+    pub viscosity_model: String,
+    /// Minimum apparent viscosity over fluid cells (Pa·s); equals the constant
+    /// viscosity under the Newtonian model.
+    #[serde(default)]
+    pub apparent_viscosity_min: f64,
+    /// Maximum apparent viscosity over fluid cells (Pa·s); equals the constant
+    /// viscosity under the Newtonian model.
+    #[serde(default)]
+    pub apparent_viscosity_max: f64,
+    /// Mean apparent viscosity over fluid cells (Pa·s); equals the constant
+    /// viscosity under the Newtonian model.
+    #[serde(default)]
+    pub apparent_viscosity_mean: f64,
     /// Minimum eddy viscosity over fluid cells (m²/s).
     #[serde(default)]
     pub eddy_viscosity_min: f64,
@@ -680,9 +702,10 @@ pub fn solve_with_checkpoint(
         Some((k, epsilon)) => Some(kepsilon_eddy(&mesh, k, epsilon)),
         None => eddy_viscosity_field(&mesh, model, &u, &v),
     };
+    let mut apparent = apparent_viscosity_field(&mesh, model, &u, &v);
     let porous = porous_cells(&mesh, model);
     if !model.time.adaptive {
-        check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref())?;
+        check_explicit_stability(&mesh, model, &u, &v, eddy.as_deref(), apparent.as_deref())?;
     }
 
     let mut u_star = u.clone();
@@ -728,8 +751,9 @@ pub fn solve_with_checkpoint(
             Some((k, epsilon)) => Some(kepsilon_eddy(&mesh, k, epsilon)),
             None => eddy_viscosity_field(&mesh, model, &u, &v),
         };
+        apparent = apparent_viscosity_field(&mesh, model, &u, &v);
         let dt = if model.time.adaptive {
-            adaptive_dt(&mesh, model, &u, &v, eddy.as_deref())
+            adaptive_dt(&mesh, model, &u, &v, eddy.as_deref(), apparent.as_deref())
         } else {
             model.time.dt
         };
@@ -745,6 +769,7 @@ pub fn solve_with_checkpoint(
                 &p,
                 temperature.as_deref(),
                 eddy.as_deref(),
+                apparent.as_deref(),
                 &porous,
                 dt,
                 &mut u_star,
@@ -761,6 +786,7 @@ pub fn solve_with_checkpoint(
                 &p,
                 temperature.as_deref(),
                 eddy.as_deref(),
+                apparent.as_deref(),
                 &porous,
                 dt,
                 &mut u_star,
@@ -825,6 +851,7 @@ pub fn solve_with_checkpoint(
                 transport_kepsilon(
                     &mesh,
                     model.fluid.viscosity,
+                    apparent.as_deref(),
                     dt,
                     &u,
                     &v,
@@ -869,6 +896,7 @@ pub fn solve_with_checkpoint(
                 &v,
                 &p,
                 eddy.as_deref(),
+                apparent.as_deref(),
                 step,
                 &mut force_samples,
             );
@@ -921,10 +949,22 @@ pub fn solve_with_checkpoint(
         pressure_coefficient(&p, model.fluid.density, reference_velocity(model));
     let (vorticity_min, vorticity_max) = pressure_range(&mesh, &vorticity_field);
     let (stream_function_min, stream_function_max) = pressure_range(&mesh, &stream_function_field);
-    let forces = build_forces(&mesh, model, &u, &v, &p, eddy.as_deref(), &force_samples);
+    let final_apparent = apparent_viscosity_field(&mesh, model, &u, &v);
+    let forces = build_forces(
+        &mesh,
+        model,
+        &u,
+        &v,
+        &p,
+        eddy.as_deref(),
+        final_apparent.as_deref(),
+        &force_samples,
+    );
     let probes = build_probes(model, &probe_cells, &probe_samples);
-    let wall_shear_summary = wall_shear(&mesh, model, &u, &v);
+    let wall_shear_summary = wall_shear(&mesh, model, final_apparent.as_deref(), &u, &v);
     let (eddy_min, eddy_max, eddy_mean) = eddy_stats(&mesh, eddy.as_deref());
+    let (viscosity_min, viscosity_max, viscosity_mean) =
+        viscosity_stats(&mesh, final_apparent.as_deref(), model.fluid.viscosity);
     let (tke_min, tke_max, tke_mean) =
         eddy_stats(&mesh, kepsilon.as_ref().map(|(k, _)| k.as_slice()));
     let (dissipation_min, dissipation_max, dissipation_mean) = eddy_stats(
@@ -1000,6 +1040,10 @@ pub fn solve_with_checkpoint(
             .as_ref()
             .map_or("none", |turbulence| turbulence.model.as_str())
             .to_string(),
+        viscosity_model: model.fluid.viscosity_model.as_str().to_string(),
+        apparent_viscosity_min: viscosity_min,
+        apparent_viscosity_max: viscosity_max,
+        apparent_viscosity_mean: viscosity_mean,
         eddy_viscosity_min: eddy_min,
         eddy_viscosity_max: eddy_max,
         eddy_viscosity_mean: eddy_mean,
@@ -1421,6 +1465,7 @@ fn momentum_derivative(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
     porous: &[i32],
     du: &mut [f64],
     dv: &mut [f64],
@@ -1500,7 +1545,8 @@ fn momentum_derivative(
                 mesh.pressure_index(i - 1, j)
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_west]) / dx;
-            let effective = nu + u_face_eddy(mesh, eddy, i, j);
+            let effective =
+                u_face_viscosity(mesh, apparent, i, j, nu) + u_face_eddy(mesh, eddy, i, j);
             let porous_owner = face_porous_owner(
                 mesh,
                 porous,
@@ -1610,7 +1656,8 @@ fn momentum_derivative(
                 mesh.pressure_index(i, j - 1)
             };
             let pressure_gradient = (p[mesh.pressure_index(i, j)] - p[pressure_south]) / dy;
-            let effective = nu + v_face_eddy(mesh, eddy, i, j);
+            let effective =
+                v_face_viscosity(mesh, apparent, i, j, nu) + v_face_eddy(mesh, eddy, i, j);
             let porous_owner = face_porous_owner(
                 mesh,
                 porous,
@@ -1664,6 +1711,7 @@ fn momentum_euler(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
     porous: &[i32],
     dt: f64,
     u_star: &mut [f64],
@@ -1680,6 +1728,7 @@ fn momentum_euler(
         p,
         temperature,
         eddy,
+        apparent,
         porous,
         du,
         dv,
@@ -1704,6 +1753,7 @@ fn momentum_heun(
     p: &[f64],
     temperature: Option<&[f64]>,
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
     porous: &[i32],
     dt: f64,
     u_star: &mut [f64],
@@ -1725,6 +1775,7 @@ fn momentum_heun(
         p,
         temperature,
         eddy,
+        apparent,
         porous,
         &mut du1,
         &mut dv1,
@@ -1746,6 +1797,7 @@ fn momentum_heun(
         p,
         temperature,
         eddy,
+        apparent,
         porous,
         &mut du2,
         &mut dv2,
@@ -1926,16 +1978,72 @@ fn mixing_length_field(mesh: &Mesh, turbulence: &Turbulence, u: &[f64], v: &[f64
             if mesh.solid[index] {
                 continue;
             }
-            let du_dx = cell_gradient(mesh, u, v, i, j, Gradient::UDx);
-            let du_dy = cell_gradient(mesh, u, v, i, j, Gradient::UDy);
-            let dv_dx = cell_gradient(mesh, u, v, i, j, Gradient::VDx);
-            let dv_dy = cell_gradient(mesh, u, v, i, j, Gradient::VDy);
-            let strain =
-                (2.0 * (du_dx * du_dx + dv_dy * dv_dy) + (du_dy + dv_dx) * (du_dy + dv_dx)).sqrt();
+            let strain = strain_rate_magnitude(mesh, u, v, i, j);
             field[index] = length_squared * strain;
         }
     }
     field
+}
+
+/// Cell-centred magnitude of the resolved strain-rate tensor,
+/// `|S| = √(2·S_ij·S_ij)`.
+///
+/// It is the rate used by the mixing-length and power-law models.
+fn strain_rate_magnitude(mesh: &Mesh, u: &[f64], v: &[f64], i: usize, j: usize) -> f64 {
+    let du_dx = cell_gradient(mesh, u, v, i, j, Gradient::UDx);
+    let du_dy = cell_gradient(mesh, u, v, i, j, Gradient::UDy);
+    let dv_dx = cell_gradient(mesh, u, v, i, j, Gradient::VDx);
+    let dv_dy = cell_gradient(mesh, u, v, i, j, Gradient::VDy);
+    (2.0 * (du_dx * du_dx + dv_dy * dv_dy) + (du_dy + dv_dx) * (du_dy + dv_dx)).sqrt()
+}
+
+/// Cell-centred apparent viscosity of the configured model, or `None` when the
+/// constant Newtonian path is active.
+///
+/// Solid cells carry `0`, which the face averages ignore. At exactly zero strain
+/// rate the power law returns the consistency `K` for `n < 1`, `0` for `n > 1`
+/// and `K` for `n = 1`, so the field never becomes infinite.
+fn apparent_viscosity_field(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Option<Vec<f64>> {
+    if model.fluid.viscosity_model != ViscosityModel::PowerLaw {
+        return None;
+    }
+    let mut field = vec![0.0; mesh.pressure_count()];
+    for j in 0..mesh.ny {
+        for i in 0..mesh.nx {
+            let index = mesh.pressure_index(i, j);
+            if mesh.solid[index] {
+                continue;
+            }
+            let strain = strain_rate_magnitude(mesh, u, v, i, j);
+            field[index] = power_law_viscosity(&model.fluid, strain);
+        }
+    }
+    Some(field)
+}
+
+/// Ostwald–de Waele apparent viscosity `clamp(K·γ̇^(n−1))`.
+fn power_law_viscosity(fluid: &Fluid, strain: f64) -> f64 {
+    let consistency = fluid.consistency.unwrap_or(fluid.viscosity);
+    let power = fluid.power.unwrap_or(1.0);
+    let raw = if strain > 0.0 {
+        consistency * strain.powf(power - 1.0)
+    } else if power < 1.0 {
+        fluid.max_viscosity.unwrap_or(consistency)
+    } else if power == 1.0 {
+        consistency
+    } else {
+        0.0
+    };
+    // A subnormal strain rate with n < 1 can overflow the power; fall back to
+    // the configured cap or K so the field and the stability guards stay finite.
+    let raw = if raw.is_finite() {
+        raw
+    } else {
+        fluid.max_viscosity.unwrap_or(consistency)
+    };
+    let lower = fluid.min_viscosity.unwrap_or(0.0);
+    let upper = fluid.max_viscosity.unwrap_or(f64::INFINITY);
+    raw.clamp(lower, upper)
 }
 
 /// Standard `k`–`ε` closure constants used by the two-equation model.
@@ -1991,6 +2099,7 @@ fn kepsilon_eddy(mesh: &Mesh, k: &[f64], epsilon: &[f64]) -> Vec<f64> {
 fn transport_kepsilon(
     mesh: &Mesh,
     viscosity: f64,
+    apparent: Option<&[f64]>,
     dt: f64,
     u: &[f64],
     v: &[f64],
@@ -2011,8 +2120,14 @@ fn transport_kepsilon(
     }
     let eddy = kepsilon_eddy(mesh, k, epsilon);
     let max_eddy = eddy.iter().copied().fold(0.0_f64, f64::max);
+    let max_molecular = apparent.map_or(viscosity, |field| {
+        field
+            .iter()
+            .copied()
+            .fold(0.0_f64, |maximum, value| maximum.max(value))
+    });
     let diffusion_number =
-        (viscosity + max_eddy) * dt * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
+        (max_molecular + max_eddy) * dt * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
     if diffusion_number > 0.5 {
         return Err(CfdError::new(
             "solver/unstable",
@@ -2035,6 +2150,7 @@ fn transport_kepsilon(
             let energy = k[index].max(0.0);
             let dissipation = epsilon[index].max(K_EPSILON_FLOOR);
             let nu_t = eddy[index];
+            let molecular = apparent.map_or(viscosity, |field| field[index]);
             let du_dx = cell_gradient(mesh, u, v, i, j, Gradient::UDx);
             let du_dy = cell_gradient(mesh, u, v, i, j, Gradient::UDy);
             let dv_dx = cell_gradient(mesh, u, v, i, j, Gradient::VDx);
@@ -2042,8 +2158,8 @@ fn transport_kepsilon(
             let strain =
                 (2.0 * (du_dx * du_dx + dv_dy * dv_dy) + (du_dy + dv_dx) * (du_dy + dv_dx)).sqrt();
             let production = nu_t * strain * strain;
-            let kappa_k = viscosity + nu_t / K_EPSILON_SIGMA_K;
-            let kappa_epsilon = viscosity + nu_t / K_EPSILON_SIGMA_EPSILON;
+            let kappa_k = molecular + nu_t / K_EPSILON_SIGMA_K;
+            let kappa_epsilon = molecular + nu_t / K_EPSILON_SIGMA_EPSILON;
             let k_source = -cell_advection(mesh, u, v, k, i, j)
                 + cell_diffusion(mesh, k, i, j, kappa_k)
                 + production
@@ -2192,6 +2308,65 @@ fn u_face_eddy(mesh: &Mesh, eddy: Option<&[f64]>, i: usize, j: usize) -> f64 {
     }
 }
 
+/// Mean apparent viscosity of the fluid cells adjacent to an x-face.
+///
+/// `fallback` is the constant Newtonian viscosity used when the power-law field
+/// is inactive, so the default path is unchanged.
+fn u_face_viscosity(
+    mesh: &Mesh,
+    apparent: Option<&[f64]>,
+    i: usize,
+    j: usize,
+    fallback: f64,
+) -> f64 {
+    let Some(field) = apparent else {
+        return fallback;
+    };
+    let mut sum = 0.0;
+    let mut count = 0;
+    if i > 0 && !mesh.is_solid(i - 1, j) {
+        sum += field[mesh.pressure_index(i - 1, j)];
+        count += 1;
+    }
+    if i < mesh.nx && !mesh.is_solid(i, j) {
+        sum += field[mesh.pressure_index(i, j)];
+        count += 1;
+    }
+    if count == 0 {
+        fallback
+    } else {
+        sum / count as f64
+    }
+}
+
+/// Mean apparent viscosity of the fluid cells adjacent to a y-face.
+fn v_face_viscosity(
+    mesh: &Mesh,
+    apparent: Option<&[f64]>,
+    i: usize,
+    j: usize,
+    fallback: f64,
+) -> f64 {
+    let Some(field) = apparent else {
+        return fallback;
+    };
+    let mut sum = 0.0;
+    let mut count = 0;
+    if j > 0 && !mesh.is_solid(i, j - 1) {
+        sum += field[mesh.pressure_index(i, j - 1)];
+        count += 1;
+    }
+    if j < mesh.ny && !mesh.is_solid(i, j) {
+        sum += field[mesh.pressure_index(i, j)];
+        count += 1;
+    }
+    if count == 0 {
+        fallback
+    } else {
+        sum / count as f64
+    }
+}
+
 fn v_face_eddy(mesh: &Mesh, eddy: Option<&[f64]>, i: usize, j: usize) -> f64 {
     let Some(field) = eddy else {
         return 0.0;
@@ -2235,6 +2410,46 @@ fn eddy_stats(mesh: &Mesh, eddy: Option<&[f64]>) -> (f64, f64, f64) {
     } else {
         (min, max, sum / count as f64)
     }
+}
+
+/// Apparent-viscosity statistics over fluid cells.
+///
+/// Without a power-law field every statistic is the constant viscosity. A
+/// uniform field reports its value exactly as the mean, so `n = 1` with
+/// `K = mu` reproduces the Newtonian report field for field.
+fn viscosity_stats(mesh: &Mesh, apparent: Option<&[f64]>, fallback: f64) -> (f64, f64, f64) {
+    let Some(field) = apparent else {
+        return (fallback, fallback, fallback);
+    };
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut sum = 0.0;
+    let mut count = 0;
+    for (index, value) in field.iter().enumerate() {
+        if mesh.solid[index] {
+            continue;
+        }
+        min = min.min(*value);
+        max = max.max(*value);
+        sum += *value;
+        count += 1;
+    }
+    if count == 0 || !min.is_finite() || !max.is_finite() {
+        (fallback, fallback, fallback)
+    } else {
+        let mean = if min == max { min } else { sum / count as f64 };
+        (min, max, mean)
+    }
+}
+
+/// Largest apparent viscosity over fluid cells, used by the stability guards.
+fn max_apparent_viscosity(apparent: Option<&[f64]>, fallback: f64) -> f64 {
+    apparent.map_or(fallback, |field| {
+        field
+            .iter()
+            .copied()
+            .fold(0.0_f64, |maximum, value| maximum.max(value))
+    })
 }
 
 /// Per-region mean cell speed and Darcy–Forchheimer drag acceleration.
@@ -2357,6 +2572,7 @@ fn check_explicit_stability(
     u: &[f64],
     v: &[f64],
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
 ) -> Result<(), CfdError> {
     let mut report = CheckReport::new();
     let max_speed = max_velocity(u, v).max(max_boundary_speed(model));
@@ -2369,7 +2585,8 @@ fn check_explicit_stability(
             ),
         ));
     }
-    let diffusion_number = (model.fluid.viscosity + max_eddy_viscosity(eddy))
+    let diffusion_number = (max_apparent_viscosity(apparent, model.fluid.viscosity)
+        + max_eddy_viscosity(eddy))
         * model.time.dt
         * (1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy));
     if diffusion_number > 0.5 {
@@ -2416,9 +2633,10 @@ fn check_porous_stability(model: &Model, max_speed: f64, dt: f64) -> Result<(), 
 /// The report mirrors the guards [`solve`] runs before stepping: it measures
 /// the convective Courant number and the explicit diffusion numbers of the
 /// configured `time.dt` and derives the largest step that satisfies every
-/// checked bound. Only the molecular viscosity enters the diffusion number; the
-/// eddy viscosity of a turbulence model evolves during the solve and is checked
-/// there. `max_stable_dt` is `None` when no explicit term limits the step.
+/// checked bound. The molecular term is the largest apparent viscosity of the
+/// power-law model (the constant viscosity when Newtonian); the eddy viscosity
+/// of a turbulence model evolves during the solve and is checked there.
+/// `max_stable_dt` is `None` when no explicit term limits the step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StabilityLimits {
@@ -2437,7 +2655,20 @@ pub struct StabilityLimits {
     pub dt: f64,
     /// Convective Courant number `maxVelocity·dt/min(dx, dy)`.
     pub cfl: f64,
-    /// Explicit diffusion number `ν·dt·(1/dx² + 1/dy²)`.
+    /// Apparent-viscosity model identifier (`newtonian` or `powerLaw`).
+    #[serde(default = "default_viscosity_model_name")]
+    pub viscosity_model: String,
+    /// Minimum apparent viscosity over fluid cells at the initial state (Pa·s).
+    #[serde(default)]
+    pub apparent_viscosity_min: f64,
+    /// Maximum apparent viscosity over fluid cells at the initial state (Pa·s).
+    /// It drives the diffusion number and the stable-step bound.
+    #[serde(default)]
+    pub apparent_viscosity_max: f64,
+    /// Mean apparent viscosity over fluid cells at the initial state (Pa·s).
+    #[serde(default)]
+    pub apparent_viscosity_mean: f64,
+    /// Explicit diffusion number `nu_eff,max·dt·(1/dx² + 1/dy²)`.
     pub diffusion_number: f64,
     /// Explicit scalar diffusion number, when scalar transport is configured.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2463,8 +2694,24 @@ pub fn stability_limits(model: &Model) -> Result<StabilityLimits, CfdError> {
     let dt = model.time.dt;
     let h = mesh.dx.min(mesh.dy);
     let cell_factor = 1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy);
+
+    // Build the field the solve starts from so the apparent-viscosity range is
+    // measured rather than assumed.
+    let mut u = vec![0.0; mesh.u_count()];
+    let mut v = vec![0.0; mesh.v_count()];
+    if let Some(initial) = &model.initial {
+        u.fill(initial.velocity[0]);
+        v.fill(initial.velocity[1]);
+    }
+    let boundaries = transient_boundaries(model, 0.0);
+    mesh.apply_velocity_boundaries(&boundaries, &mut u, &mut v);
+    let apparent = apparent_viscosity_field(&mesh, model, &u, &v);
+    let (viscosity_min, viscosity_max, viscosity_mean) =
+        viscosity_stats(&mesh, apparent.as_deref(), model.fluid.viscosity);
+    let effective_viscosity = viscosity_max;
+
     let cfl = max_velocity * dt / h;
-    let diffusion_number = model.fluid.viscosity * dt * cell_factor;
+    let diffusion_number = effective_viscosity * dt * cell_factor;
     let scalar_diffusion_number = model
         .scalar
         .as_ref()
@@ -2478,8 +2725,8 @@ pub fn stability_limits(model: &Model) -> Result<StabilityLimits, CfdError> {
     if max_velocity > 0.0 {
         max_stable_dt = max_stable_dt.min(h / max_velocity);
     }
-    if model.fluid.viscosity > 0.0 {
-        max_stable_dt = max_stable_dt.min(0.5 / (model.fluid.viscosity * cell_factor));
+    if effective_viscosity > 0.0 {
+        max_stable_dt = max_stable_dt.min(0.5 / (effective_viscosity * cell_factor));
     }
     let diffusivity = scalar_diffusivity(model);
     if diffusivity > 0.0 {
@@ -2501,6 +2748,10 @@ pub fn stability_limits(model: &Model) -> Result<StabilityLimits, CfdError> {
         max_velocity,
         dt,
         cfl,
+        viscosity_model: model.fluid.viscosity_model.as_str().to_string(),
+        apparent_viscosity_min: viscosity_min,
+        apparent_viscosity_max: viscosity_max,
+        apparent_viscosity_mean: viscosity_mean,
         diffusion_number,
         scalar_diffusion_number,
         porous_number,
@@ -2589,14 +2840,22 @@ fn scalar_diffusivity(model: &Model) -> f64 {
 /// classic `0.5·h²/ν` bound for the two-dimensional Laplacian and also accounts
 /// for the passive scalar. The configured `time.dt` is always an upper bound, so
 /// enabling adaptivity can only reduce a step.
-fn adaptive_dt(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64], eddy: Option<&[f64]>) -> f64 {
+fn adaptive_dt(
+    mesh: &Mesh,
+    model: &Model,
+    u: &[f64],
+    v: &[f64],
+    eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
+) -> f64 {
     let max_speed = max_velocity(u, v).max(max_boundary_speed(model));
     let cell_factor = 1.0 / (mesh.dx * mesh.dx) + 1.0 / (mesh.dy * mesh.dy);
     let mut limit = f64::INFINITY;
     if max_speed > 0.0 {
         limit = limit.min(model.time.target_cfl * mesh.dx.min(mesh.dy) / max_speed);
     }
-    let viscosity = model.fluid.viscosity + max_eddy_viscosity(eddy);
+    let viscosity =
+        max_apparent_viscosity(apparent, model.fluid.viscosity) + max_eddy_viscosity(eddy);
     if viscosity > 0.0 {
         limit = limit.min(0.5 / (viscosity * cell_factor));
     }
@@ -3296,10 +3555,11 @@ fn append_force_samples(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
     step: usize,
     samples: &mut [Vec<ForceSample>],
 ) {
-    let raw = raw_forces(mesh, model, u, v, p, eddy);
+    let raw = raw_forces(mesh, model, u, v, p, eddy, apparent);
     for (index, force) in raw.into_iter().enumerate() {
         samples[index].push(ForceSample {
             step,
@@ -3317,6 +3577,7 @@ fn append_force_samples(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_forces(
     mesh: &Mesh,
     model: &Model,
@@ -3324,9 +3585,10 @@ fn build_forces(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
     samples: &[Vec<ForceSample>],
 ) -> Vec<ObstacleForce> {
-    let raw = raw_forces(mesh, model, u, v, p, eddy);
+    let raw = raw_forces(mesh, model, u, v, p, eddy, apparent);
     model
         .obstacles
         .iter()
@@ -3529,11 +3791,17 @@ fn build_probes(
 /// viscosity vanishes at a wall by construction. With a `wallFunction` section
 /// the shear of cells above the viscous-sublayer crossover follows the log law
 /// instead, and every side reports the mean `y⁺`.
-fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear> {
+fn wall_shear(
+    mesh: &Mesh,
+    model: &Model,
+    apparent: Option<&[f64]>,
+    u: &[f64],
+    v: &[f64],
+) -> Vec<WallShear> {
     let speed = reference_speed(model);
     let scale = 0.5 * model.fluid.density * speed * speed;
     let density = model.fluid.density;
-    let mu = model.fluid.viscosity;
+    let viscosity = model.fluid.viscosity;
     let wall_function = model.wall_function.as_ref();
     let mut report = Vec::new();
     for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
@@ -3554,6 +3822,8 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
                     }
                     let centre =
                         0.5 * (v[mesh.v_index(column, j)] + v[mesh.v_index(column, j + 1)]);
+                    let mu =
+                        apparent.map_or(viscosity, |field| field[mesh.pressure_index(column, j)]);
                     let (shear, y_plus) = wall_shear_at(
                         boundary.velocity[1] - centre,
                         0.5 * mesh.dx,
@@ -3574,6 +3844,7 @@ fn wall_shear(mesh: &Mesh, model: &Model, u: &[f64], v: &[f64]) -> Vec<WallShear
                         continue;
                     }
                     let centre = 0.5 * (u[mesh.u_index(i, row)] + u[mesh.u_index(i + 1, row)]);
+                    let mu = apparent.map_or(viscosity, |field| field[mesh.pressure_index(i, row)]);
                     let (shear, y_plus) = wall_shear_at(
                         boundary.velocity[0] - centre,
                         0.5 * mesh.dy,
@@ -3678,6 +3949,7 @@ fn raw_forces(
     v: &[f64],
     p: &[f64],
     eddy: Option<&[f64]>,
+    apparent: Option<&[f64]>,
 ) -> Vec<ForceValues> {
     let count = model.obstacles.len();
     let mut fx = vec![0.0; count];
@@ -3693,6 +3965,7 @@ fn raw_forces(
         .map(|obstacle| obstacle.centroid())
         .collect();
     let mu = model.fluid.viscosity;
+    let fluid_mu = |index: usize| apparent.map_or(mu, |field| field[index]);
 
     for j in 0..mesh.ny {
         for i in 0..=mesh.nx {
@@ -3719,7 +3992,8 @@ fn raw_forces(
             let pressure = p[mesh.pressure_index(fluid_i, j)];
             let (uc, _) = mesh.cell_velocity(u, v, fluid_i, j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(fluid_i, j)]);
-            let shear = (mu + eddy_face) * uc / (0.5 * mesh.dx);
+            let shear =
+                (fluid_mu(mesh.pressure_index(fluid_i, j)) + eddy_face) * uc / (0.5 * mesh.dx);
             let pressure_x = sign * pressure * mesh.dy;
             let viscous_x = sign * shear * mesh.dy;
             let force_x = pressure_x + viscous_x;
@@ -3756,7 +4030,8 @@ fn raw_forces(
             let pressure = p[mesh.pressure_index(i, fluid_j)];
             let (_, vc) = mesh.cell_velocity(u, v, i, fluid_j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(i, fluid_j)]);
-            let shear = (mu + eddy_face) * vc / (0.5 * mesh.dy);
+            let shear =
+                (fluid_mu(mesh.pressure_index(i, fluid_j)) + eddy_face) * vc / (0.5 * mesh.dy);
             let pressure_y = sign * pressure * mesh.dx;
             let viscous_y = sign * shear * mesh.dx;
             let force_y = pressure_y + viscous_y;

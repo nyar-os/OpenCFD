@@ -24,7 +24,7 @@ use crate::model::{
     Boundaries, Boundary, BoundaryKind, Buoyancy, ConvectionScheme, Fluid, InitialField,
     InletProfile, MeshConfig, Model, Obstacle, PorousRegion, Probe, Reference, ScalarConfig,
     ScalarSource, Side, ThermalConfig, TimeScheme, TimeSettings, TransientInlet, Turbulence,
-    TurbulenceModel, WallFunction,
+    TurbulenceModel, ViscosityModel, WallFunction,
 };
 use crate::particles::{
     export_particles as write_particles, ParticleConfig, DEFAULT_PARTICLE_STEPS,
@@ -360,6 +360,35 @@ impl OpenCfd {
         self.edit(|model| {
             model.fluid.density = density;
             model.fluid.viscosity = viscosity;
+        })
+    }
+
+    /// Sets density, dynamic viscosity and the apparent-viscosity model and
+    /// writes the document back.
+    ///
+    /// `consistency`, `power`, `min_viscosity` and `max_viscosity` are stored as
+    /// given; validation rejects missing or illegal power-law parameters with
+    /// `fluid/invalid-viscosity` and an unknown model with
+    /// `fluid/invalid-viscosity-model`, leaving the file untouched.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fluid_set_with_model(
+        &mut self,
+        density: f64,
+        viscosity: f64,
+        viscosity_model: ViscosityModel,
+        consistency: Option<f64>,
+        power: Option<f64>,
+        min_viscosity: Option<f64>,
+        max_viscosity: Option<f64>,
+    ) -> Result<CaseSummary, CfdError> {
+        self.edit(|model| {
+            model.fluid.density = density;
+            model.fluid.viscosity = viscosity;
+            model.fluid.viscosity_model = viscosity_model;
+            model.fluid.consistency = consistency;
+            model.fluid.power = power;
+            model.fluid.min_viscosity = min_viscosity;
+            model.fluid.max_viscosity = max_viscosity;
         })
     }
 

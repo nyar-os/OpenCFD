@@ -277,7 +277,7 @@ fn force_decomposition_separates_pressure_and_shear() {
             pressure[mesh.pressure_index(i, j)] = 2.0 + i as f64 + 3.0 * j as f64;
         }
     }
-    let pressure_only = raw_forces(&mesh, &model, &u, &v, &pressure, None);
+    let pressure_only = raw_forces(&mesh, &model, &u, &v, &pressure, None, None);
     let force = pressure_only[0];
     assert!(
         force.fx_pressure.abs() > 1e-9,
@@ -307,7 +307,7 @@ fn force_decomposition_separates_pressure_and_shear() {
             shear_v[mesh.v_index(i, j)] = j as f64;
         }
     }
-    let shear_only = raw_forces(&mesh, &model, &shear_u, &shear_v, &zeros, None);
+    let shear_only = raw_forces(&mesh, &model, &shear_u, &shear_v, &zeros, None, None);
     let force = shear_only[0];
     assert!(
         force.fx_viscous.abs() > 1e-9,
@@ -397,7 +397,7 @@ fn wall_shear_reproduces_a_linear_tangential_profile() {
         }
     }
 
-    let shear = wall_shear(&mesh, &model, &u, &v);
+    let shear = wall_shear(&mesh, &model, None, &u, &v);
     assert_eq!(shear.len(), 3, "the inlet side must be skipped");
     let mu = model.fluid.viscosity;
     let find = |side: &str| {

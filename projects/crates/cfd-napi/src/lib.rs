@@ -19,7 +19,7 @@ use cfd_model::{
     BoundaryKind, CfdError, ConvectionScheme, ExportField, ExportFormat, ExportLayout,
     InletProfile, Obstacle, OpenCfd, OpenCfdOptions, PorousRegion, Probe, ProfileLine,
     ScalarSource, Side, SolveOptions, ThermalConfig, TimeScheme, TransientInlet, TurbulenceModel,
-    WallFunction,
+    ViscosityModel, WallFunction,
 };
 use serde_json::{json, Value};
 use wae::{function, register_module, CallContext, Error, JsValue, Result};
@@ -180,13 +180,38 @@ fn mesh_set(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
-/// Sets density and dynamic viscosity of one session document.
+/// Sets density, dynamic viscosity and (optionally) the apparent-viscosity
+/// model of one session document.
+///
+/// When the model argument is absent the constant Newtonian fields are written
+/// without touching the stored model.
 #[function]
 fn fluid_set(ctx: CallContext) -> Result<JsValue> {
     let handle = handle(&ctx, 0)?;
     let density = number(&ctx, 1)?;
     let viscosity = number(&ctx, 2)?;
-    let summary = with_session(handle, |session| session.fluid_set(density, viscosity))?;
+    let model = optional_text(&ctx, 3)?;
+    let summary = match model {
+        Some(raw) => {
+            let viscosity_model = raw.parse::<ViscosityModel>().map_err(fail)?;
+            let consistency = optional_number(&ctx, 4)?;
+            let power = optional_number(&ctx, 5)?;
+            let min_viscosity = optional_number(&ctx, 6)?;
+            let max_viscosity = optional_number(&ctx, 7)?;
+            with_session(handle, |session| {
+                session.fluid_set_with_model(
+                    density,
+                    viscosity,
+                    viscosity_model,
+                    consistency,
+                    power,
+                    min_viscosity,
+                    max_viscosity,
+                )
+            })?
+        }
+        None => with_session(handle, |session| session.fluid_set(density, viscosity))?,
+    };
     respond(&ctx, &json!(summary))
 }
 

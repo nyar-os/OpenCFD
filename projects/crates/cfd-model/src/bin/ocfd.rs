@@ -7,7 +7,8 @@ use cfd_model::{
     write_atomic, BoundaryKind, CaseSummary, CfdError, ConvectionScheme, ExportField, ExportFormat,
     ExportLayout, InletProfile, Obstacle, OpenCfd, OpenCfdOptions, ParticleConfig, ParticleSeed,
     PorousRegion, Probe, ProfileLine, ScalarSource, Side, SideThermal, SolveOptions, ThermalConfig,
-    TimeScheme, TimeSeries, TransientInlet, TurbulenceModel, WallFunction, DEFAULT_PARTICLE_STEPS,
+    TimeScheme, TimeSeries, TransientInlet, TurbulenceModel, ViscosityModel, WallFunction,
+    DEFAULT_PARTICLE_STEPS,
 };
 
 const USAGE: &str = "\
@@ -17,6 +18,7 @@ Usage:
   ocfd create <file.ocfd>
   ocfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
   ocfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
+  ocfd fluid set <file> --viscosity-model power-law --consistency <K> --power <n> [--min-viscosity <Pa.s>] [--max-viscosity <Pa.s>]
   ocfd time set <file> --dt <s> --steps <n> --pressure-iterations <n> [--tolerance <v>]
   ocfd time scheme set <file> --scheme euler|rk2
   ocfd time adaptive set <file> --cfl <n|off>
@@ -199,16 +201,57 @@ fn mesh_set(args: &[String]) -> Result<i32, CfdError> {
 }
 
 fn fluid_set(args: &[String]) -> Result<i32, CfdError> {
-    let parsed = parse(args, &["--rho", "--mu"], &[])?;
-    let file = positional(&parsed, 0, "fluid set <file> --rho <kg/m3> --mu <Pa.s>")?;
-    let density = required_number(&parsed, "--rho")?;
-    let viscosity = required_number(&parsed, "--mu")?;
+    let parsed = parse(
+        args,
+        &[
+            "--rho",
+            "--mu",
+            "--viscosity-model",
+            "--consistency",
+            "--power",
+            "--min-viscosity",
+            "--max-viscosity",
+        ],
+        &[],
+    )?;
+    let file = positional(
+        &parsed,
+        0,
+        "fluid set <file> --rho <kg/m3> --mu <Pa.s> | --viscosity-model power-law --consistency <K> --power <n>",
+    )?;
     let mut session = open_session(file)?;
-    let summary = session.fluid_set(density, viscosity)?;
-    println!(
-        "fluid set: rho={} kg/m3, mu={} Pa.s",
-        summary.fluid.density, summary.fluid.viscosity
-    );
+    match parsed.options.get("--viscosity-model") {
+        Some(raw) => {
+            let viscosity_model = raw.parse::<ViscosityModel>()?;
+            let current = session.summary()?.fluid;
+            let density = number(&parsed, "--rho")?.unwrap_or(current.density);
+            let viscosity = number(&parsed, "--mu")?.unwrap_or(current.viscosity);
+            let summary = session.fluid_set_with_model(
+                density,
+                viscosity,
+                viscosity_model,
+                number(&parsed, "--consistency")?,
+                number(&parsed, "--power")?,
+                number(&parsed, "--min-viscosity")?,
+                number(&parsed, "--max-viscosity")?,
+            )?;
+            println!(
+                "fluid set: rho={} kg/m3, mu={} Pa.s, viscosityModel={}",
+                summary.fluid.density,
+                summary.fluid.viscosity,
+                summary.fluid.viscosity_model.as_str()
+            );
+        }
+        None => {
+            let density = required_number(&parsed, "--rho")?;
+            let viscosity = required_number(&parsed, "--mu")?;
+            let summary = session.fluid_set(density, viscosity)?;
+            println!(
+                "fluid set: rho={} kg/m3, mu={} Pa.s",
+                summary.fluid.density, summary.fluid.viscosity
+            );
+        }
+    }
     Ok(0)
 }
 

@@ -79,16 +79,105 @@ impl Default for MeshConfig {
     }
 }
 
-/// Constant-property Newtonian fluid.
+/// Apparent-viscosity model selected by `fluid.viscosityModel`.
+///
+/// `Newtonian` uses the constant `fluid.viscosity`. `PowerLaw` evaluates the
+/// Ostwald–de Waele relation `mu_eff = K · γ̇^(n−1)` from the local
+/// strain-rate magnitude and clamps it to `minViscosity`/`maxViscosity`.
+/// An unrecognised identifier is preserved as [`Self::Unknown`] so validation
+/// reports `fluid/invalid-viscosity-model` instead of a JSON parse error.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ViscosityModel {
+    /// Constant dynamic viscosity (the default).
+    #[default]
+    Newtonian,
+    /// Power-law apparent viscosity.
+    PowerLaw,
+    /// Identifier read from a document that this build does not know.
+    Unknown(String),
+}
+
+impl ViscosityModel {
+    /// Returns the identifier used in documents, reports and the CLI.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Newtonian => "newtonian",
+            Self::PowerLaw => "powerLaw",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl FromStr for ViscosityModel {
+    type Err = CfdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "newtonian" => Ok(Self::Newtonian),
+            "powerLaw" | "power-law" | "power_law" => Ok(Self::PowerLaw),
+            other => Err(CfdError::new(
+                "fluid/invalid-viscosity-model",
+                format!(
+                    "unknown viscosity model `{other}`; only newtonian or powerLaw is supported"
+                ),
+            )),
+        }
+    }
+}
+
+impl Serialize for ViscosityModel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ViscosityModel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.as_str() {
+            "newtonian" => Self::Newtonian,
+            "powerLaw" | "power-law" | "power_law" => Self::PowerLaw,
+            other => Self::Unknown(other.to_string()),
+        })
+    }
+}
+
+/// Fluid properties and apparent-viscosity model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Fluid {
     /// Density `rho` (kg/m³).
     #[serde(default = "default_density")]
     pub density: f64,
-    /// Dynamic viscosity `mu` (Pa·s); zero means inviscid flow.
+    /// Dynamic viscosity `mu` (Pa·s); zero means inviscid flow. Ignored by the
+    /// momentum diffusion of the `powerLaw` model but kept as the document
+    /// reference value (and for the Reynolds number).
     #[serde(default = "default_viscosity")]
     pub viscosity: f64,
+    /// Apparent-viscosity model; omitted keeps the Newtonian constant viscosity.
+    #[serde(default, skip_serializing_if = "viscosity_model_is_newtonian")]
+    pub viscosity_model: ViscosityModel,
+    /// Consistency coefficient `K` (Pa·sⁿ) of the `powerLaw` model; required and
+    /// positive for that model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consistency: Option<f64>,
+    /// Flow-behaviour index `n` of the `powerLaw` model; required and in
+    /// `(0, 2]` for that model. `n < 1` is shear-thinning, `n > 1`
+    /// shear-thickening and `n = 1` reduces to `mu_eff = K`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<f64>,
+    /// Lower apparent-viscosity clamp (Pa·s) of the `powerLaw` model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_viscosity: Option<f64>,
+    /// Upper apparent-viscosity clamp (Pa·s) of the `powerLaw` model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_viscosity: Option<f64>,
 }
 
 impl Default for Fluid {
@@ -96,8 +185,17 @@ impl Default for Fluid {
         Self {
             density: default_density(),
             viscosity: default_viscosity(),
+            viscosity_model: ViscosityModel::default(),
+            consistency: None,
+            power: None,
+            min_viscosity: None,
+            max_viscosity: None,
         }
     }
+}
+
+fn viscosity_model_is_newtonian(model: &ViscosityModel) -> bool {
+    *model == ViscosityModel::Newtonian
 }
 
 /// Force and moment reference quantities.
@@ -1633,6 +1731,64 @@ impl Model {
                 "fluid/invalid",
                 "viscosity must be a finite non-negative number",
             ));
+        }
+        match &self.fluid.viscosity_model {
+            ViscosityModel::Newtonian => {}
+            ViscosityModel::PowerLaw => {
+                if !self.fluid.consistency.is_some_and(finite_positive) {
+                    report.push(Issue::error(
+                        "fluid/invalid-viscosity",
+                        "fluid.consistency must be a finite positive number for the powerLaw model",
+                    ));
+                }
+                if !self
+                    .fluid
+                    .power
+                    .is_some_and(|power| power.is_finite() && power > 0.0 && power <= 2.0)
+                {
+                    report.push(Issue::error(
+                        "fluid/invalid-viscosity",
+                        "fluid.power must be a finite number in (0, 2] for the powerLaw model",
+                    ));
+                }
+                if self
+                    .fluid
+                    .min_viscosity
+                    .is_some_and(|value| !value.is_finite() || value < 0.0)
+                {
+                    report.push(Issue::error(
+                        "fluid/invalid-viscosity",
+                        "fluid.minViscosity must be a finite non-negative number",
+                    ));
+                }
+                if self
+                    .fluid
+                    .max_viscosity
+                    .is_some_and(|value| !finite_positive(value))
+                {
+                    report.push(Issue::error(
+                        "fluid/invalid-viscosity",
+                        "fluid.maxViscosity must be a finite positive number",
+                    ));
+                }
+                if let (Some(min), Some(max)) = (self.fluid.min_viscosity, self.fluid.max_viscosity)
+                {
+                    if min > max {
+                        report.push(Issue::error(
+                            "fluid/invalid-viscosity",
+                            "fluid.minViscosity must not exceed fluid.maxViscosity",
+                        ));
+                    }
+                }
+            }
+            ViscosityModel::Unknown(raw) => {
+                report.push(Issue::error(
+                    "fluid/invalid-viscosity-model",
+                    format!(
+                        "unknown fluid.viscosityModel `{raw}`; only newtonian or powerLaw is supported"
+                    ),
+                ));
+            }
         }
         if let Some(reference) = &self.reference {
             for (name, value) in [
