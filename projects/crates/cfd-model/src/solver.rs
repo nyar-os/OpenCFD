@@ -2457,8 +2457,8 @@ pub fn stability_limits(model: &Model) -> Result<StabilityLimits, CfdError> {
     }
     let stable = cfl <= 1.0
         && diffusion_number <= 0.5
-        && scalar_diffusion_number.map_or(true, |value| value <= 0.5)
-        && porous_number.map_or(true, |value| value <= 1.0);
+        && scalar_diffusion_number.is_none_or(|value| value <= 0.5)
+        && porous_number.is_none_or(|value| value <= 1.0);
     Ok(StabilityLimits {
         cells: mesh.pressure_count(),
         fluid_cells: mesh.solid.iter().filter(|solid| !**solid).count(),
