@@ -644,6 +644,36 @@ impl OpenCfd {
         self.edit(|model| model.probes.clear())
     }
 
+    /// Moves the first point monitor with `id` to `(x, y)` and writes the
+    /// document back.
+    ///
+    /// Fails with `probe/not-found` when no probe carries `id`, leaving the
+    /// document unchanged. The new position goes through the same domain and
+    /// obstacle validation as [`OpenCfd::probe_add`].
+    pub fn probe_update(&mut self, id: &str, x: f64, y: f64) -> Result<CaseSummary, CfdError> {
+        self.bound_path()?;
+        let index = self.probe_index(id)?;
+        self.edit(|model| {
+            model.probes[index] = Probe {
+                id: id.to_string(),
+                x,
+                y,
+            };
+        })
+    }
+
+    /// Removes the first point monitor with `id` and writes the document back.
+    ///
+    /// Fails with `probe/not-found` when no probe carries `id`, leaving the
+    /// document unchanged.
+    pub fn probe_remove(&mut self, id: &str) -> Result<CaseSummary, CfdError> {
+        self.bound_path()?;
+        let index = self.probe_index(id)?;
+        self.edit(|model| {
+            model.probes.remove(index);
+        })
+    }
+
     /// Appends a volumetric scalar source or sink and writes the document back.
     ///
     /// An empty id is replaced by `source-N`, where `N` is the one-based
@@ -945,6 +975,40 @@ impl OpenCfd {
                 "the session is not bound to a file; create or open an .ocfd document first",
             )
         })
+    }
+
+    /// Position of the first obstacle carrying `id`.
+    fn obstacle_index(&self, id: &str) -> Result<usize, CfdError> {
+        self.model
+            .obstacles
+            .iter()
+            .position(|obstacle| obstacle.id() == id)
+            .ok_or_else(|| {
+                CfdError::new(
+                    "obstacle/not-found",
+                    format!(
+                        "no obstacle has id `{id}`; available ids: {}",
+                        available_ids(self.model.obstacles.iter().map(Obstacle::id))
+                    ),
+                )
+            })
+    }
+
+    /// Position of the first probe carrying `id`.
+    fn probe_index(&self, id: &str) -> Result<usize, CfdError> {
+        self.model
+            .probes
+            .iter()
+            .position(|probe| probe.id() == id)
+            .ok_or_else(|| {
+                CfdError::new(
+                    "probe/not-found",
+                    format!(
+                        "no probe has id `{id}`; available ids: {}",
+                        available_ids(self.model.probes.iter().map(Probe::id))
+                    ),
+                )
+            })
     }
 }
 

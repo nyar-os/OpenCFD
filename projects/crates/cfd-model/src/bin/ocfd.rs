@@ -26,12 +26,16 @@ Usage:
   ocfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   ocfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>] [--id <name>]
   ocfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
+  ocfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>]
+  ocfd obstacle update <file> --id <name> --kind circle --x <m> --y <m> --r <m>
   ocfd obstacle list <file>
   ocfd obstacle remove <file> --id <name>
   ocfd porous add <file> --x0 <m> --y0 <m> --x1 <m> --y1 <m> --permeability <m2> [--inertial <n>] [--id <name>]
   ocfd porous list <file>
   ocfd porous remove <file> --id <name>
   ocfd probe add <file> --x <m> --y <m> [--id <name>]
+  ocfd probe update <file> --id <name> --x <m> --y <m>
+  ocfd probe remove <file> --id <name>
   ocfd probe list <file>
   ocfd probe clear <file>
   ocfd inlet series set <file> --side left|right|top|bottom [--u <t:v,...>] [--v <t:v,...>] [--pressure <t:v,...>]
@@ -701,15 +705,17 @@ fn wall_function_clear(args: &[String]) -> Result<i32, CfdError> {
 fn probe_command(args: &[String]) -> Result<i32, CfdError> {
     match args.first().map(String::as_str) {
         Some("add") => probe_add(&args[1..]),
+        Some("update") => probe_update(&args[1..]),
+        Some("remove") => probe_remove(&args[1..]),
         Some("list") => probe_list(&args[1..]),
         Some("clear") => probe_clear(&args[1..]),
         Some(other) => Err(CfdError::new(
             "cli/unknown-command",
-            format!("`probe` has no subcommand `{other}`; only add, list and clear are supported"),
+            format!("`probe` has no subcommand `{other}`; use add, update, remove, list or clear"),
         )),
         None => Err(CfdError::new(
             "cli/missing-argument",
-            "`probe` requires a subcommand; only add, list and clear are supported",
+            "`probe` requires a subcommand; use add, update, remove, list or clear",
         )),
     }
 }
@@ -732,6 +738,35 @@ fn probe_add(args: &[String]) -> Result<i32, CfdError> {
         added.y,
         summary.probes.len()
     );
+    Ok(0)
+}
+
+fn probe_update(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--id", "--x", "--y"], &[])?;
+    let file = positional(
+        &parsed,
+        0,
+        "probe update <file> --id <name> --x <m> --y <m>",
+    )?;
+    let id = required(&parsed, "--id")?.to_string();
+    let x = required_number(&parsed, "--x")?;
+    let y = required_number(&parsed, "--y")?;
+    let mut session = open_session(file)?;
+    let summary = session.probe_update(&id, x, y)?;
+    println!(
+        "moved probe `{id}` to ({x}, {y}) m; {} total",
+        summary.probes.len()
+    );
+    Ok(0)
+}
+
+fn probe_remove(args: &[String]) -> Result<i32, CfdError> {
+    let parsed = parse(args, &["--id"], &[])?;
+    let file = positional(&parsed, 0, "probe remove <file> --id <name>")?;
+    let id = required(&parsed, "--id")?;
+    let mut session = open_session(file)?;
+    let summary = session.probe_remove(id)?;
+    println!("removed probe `{id}`; {} total", summary.probes.len());
     Ok(0)
 }
 

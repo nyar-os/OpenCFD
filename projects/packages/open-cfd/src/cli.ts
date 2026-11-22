@@ -40,8 +40,12 @@ usage:
   open-cfd boundary profile set <file> --side left|right|top|bottom --profile uniform|parabolic|powerLaw [--exponent <n>]
   open-cfd obstacle add <file> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--id <name>]
   open-cfd obstacle add <file> --kind circle --x <m> --y <m> --r <m> [--id <name>]
+  open-cfd obstacle update <file> --id <name> --kind rect --x0 <m> --y0 <m> --x1 <m> --y1 <m> [--rotation <deg>]
+  open-cfd obstacle update <file> --id <name> --kind circle --x <m> --y <m> --r <m>
   open-cfd obstacle list <file>
   open-cfd probe add <file> --x <m> --y <m> [--id <name>]
+  open-cfd probe update <file> --id <name> --x <m> --y <m>
+  open-cfd probe remove <file> --id <name>
   open-cfd probe list <file>
   open-cfd probe clear <file>
   open-cfd scalar set <file> --diffusivity <m2/s> [--initial <T>] [--inlet <T>]
@@ -564,15 +568,41 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
                 console.log('cleared all probes');
                 return 0;
             }
-            if (action !== 'add') {
+            if (action !== 'add' && action !== 'update' && action !== 'remove') {
                 throw cliError(
                     'cli/unknown-command',
                     action === undefined
-                        ? '`probe` needs the `add`, `list` or `clear` subcommand'
-                        : `\`probe\` subcommand \`${action}\` does not exist; use add, list or clear`,
+                        ? '`probe` needs the `add`, `update`, `remove`, `list` or `clear` subcommand'
+                        : `\`probe\` subcommand \`${action}\` does not exist; use add, update, remove, list or clear`,
                 );
             }
             const parsed = parseArguments(rest.slice(1), ['--id', '--x', '--y']);
+            if (action === 'remove') {
+                const file = positional(parsed, 0, 'probe remove <file> --id <name>');
+                const id = requiredOption(parsed, '--id');
+                const document = await session.open(file);
+                const summary = document.removeProbe(id);
+                console.log(`removed probe ${id}; ${summary.probes.length} total`);
+                return 0;
+            }
+            if (action === 'update') {
+                const file = positional(
+                    parsed,
+                    0,
+                    'probe update <file> --id <name> --x <m> --y <m>',
+                );
+                const id = requiredOption(parsed, '--id');
+                const document = await session.open(file);
+                const summary = document.updateProbe(
+                    id,
+                    numberOption(parsed, '--x'),
+                    numberOption(parsed, '--y'),
+                );
+                console.log(
+                    `moved probe ${id}; ${summary.probes.length} total`,
+                );
+                return 0;
+            }
             const file = positional(
                 parsed,
                 0,

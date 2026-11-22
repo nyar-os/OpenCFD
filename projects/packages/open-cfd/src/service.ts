@@ -229,6 +229,18 @@ export function probeAdd(handle: number, probe: Probe): CaseSummary {
     );
 }
 
+/** Moves one point monitor and writes the document back. */
+export function probeUpdate(handle: number, id: string, x: number, y: number): CaseSummary {
+    return decode<CaseSummary>(() =>
+        binding('probe.update').probe_update(handle, id, x, y),
+    );
+}
+
+/** Removes one point monitor and writes the document back. */
+export function probeRemove(handle: number, id: string): CaseSummary {
+    return decode<CaseSummary>(() => binding('probe.remove').probe_remove(handle, id));
+}
+
 /** Returns the point monitors in document order. */
 export function probeList(handle: number): readonly Probe[] {
     return decode<readonly Probe[]>(() => binding('probe.list').probe_list(handle));

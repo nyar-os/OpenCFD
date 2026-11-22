@@ -150,6 +150,18 @@ export class CfdCase {
         return this.adopt(service.probeAdd(this.handle, probe));
     }
 
+    /** Moves one point monitor and writes the document back. */
+    updateProbe(id: string, x: number, y: number): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.probeUpdate(this.handle, id, x, y));
+    }
+
+    /** Removes one point monitor and writes the document back. */
+    removeProbe(id: string): CaseSummary {
+        this.assertOpen();
+        return this.adopt(service.probeRemove(this.handle, id));
+    }
+
     /** Returns the point monitors in document order. */
     listProbes(): readonly Probe[] {
         this.assertOpen();

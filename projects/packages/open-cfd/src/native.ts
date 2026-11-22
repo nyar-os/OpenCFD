@@ -28,8 +28,11 @@ export interface NativeBinding {
     boundary_reset(handle: number, side?: string): string;
     boundary_profile_set(handle: number, side: string, profile: string, exponent?: number): string;
     obstacle_add(handle: number, requestJson: string): string;
+    obstacle_update(handle: number, id: string, requestJson: string): string;
     obstacle_list(handle: number): string;
     probe_add(handle: number, requestJson: string): string;
+    probe_update(handle: number, id: string, x: number, y: number): string;
+    probe_remove(handle: number, id: string): string;
     probe_list(handle: number): string;
     probe_clear(handle: number): string;
     scalar_source_add(handle: number, requestJson: string): string;

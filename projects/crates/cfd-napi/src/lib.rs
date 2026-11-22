@@ -357,6 +357,26 @@ fn probe_clear(ctx: CallContext) -> Result<JsValue> {
     respond(&ctx, &json!(summary))
 }
 
+/// Moves one point monitor and returns the summary.
+#[function]
+fn probe_update(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let x = number(&ctx, 2)?;
+    let y = number(&ctx, 3)?;
+    let summary = with_session(handle, |session| session.probe_update(&id, x, y))?;
+    respond(&ctx, &json!(summary))
+}
+
+/// Removes one point monitor and returns the summary.
+#[function]
+fn probe_remove(ctx: CallContext) -> Result<JsValue> {
+    let handle = handle(&ctx, 0)?;
+    let id = text(&ctx, 1)?;
+    let summary = with_session(handle, |session| session.probe_remove(&id))?;
+    respond(&ctx, &json!(summary))
+}
+
 /// Appends one volumetric scalar source and returns the summary.
 #[function]
 fn scalar_source_add(ctx: CallContext) -> Result<JsValue> {
