@@ -511,6 +511,9 @@ pub struct Solution {
     pub v: Vec<f64>,
     /// Cell-centred pressure values.
     pub p: Vec<f64>,
+    /// Cell-centred pressure coefficient `2(p − pRef)/(ρU²)` with the gauge
+    /// datum `pRef = 0` and `U` the resolved force reference speed.
+    pub pressure_coefficient: Vec<f64>,
     /// Cell-centred passive scalar, when the case configures one.
     pub temperature: Option<Vec<f64>>,
     /// Cell-centred vorticity `ω = ∂v/∂x − ∂u/∂y` (1/s).
@@ -914,6 +917,8 @@ pub fn solve_with_checkpoint(
     let (min_pressure, max_pressure) = pressure_range(&mesh, &p);
     let vorticity_field = vorticity(&mesh, &u, &v);
     let stream_function_field = stream_function(&mesh, &u, &v);
+    let pressure_coefficient_field =
+        pressure_coefficient(&p, model.fluid.density, reference_velocity(model));
     let (vorticity_min, vorticity_max) = pressure_range(&mesh, &vorticity_field);
     let (stream_function_min, stream_function_max) = pressure_range(&mesh, &stream_function_field);
     let forces = build_forces(&mesh, model, &u, &v, &p, eddy.as_deref(), &force_samples);
@@ -1019,6 +1024,7 @@ pub fn solve_with_checkpoint(
         u,
         v,
         p,
+        pressure_coefficient: pressure_coefficient_field,
         temperature,
         vorticity: vorticity_field,
         stream_function: stream_function_field,
@@ -3762,18 +3768,13 @@ fn raw_forces(
         }
     }
 
-    let default_speed = reference_speed(model);
+    let speed = reference_velocity(model);
     model
         .obstacles
         .iter()
         .enumerate()
         .map(|(index, obstacle)| {
             let length = obstacle.characteristic_length();
-            let speed = model
-                .reference
-                .as_ref()
-                .and_then(|reference| reference.velocity)
-                .unwrap_or(default_speed);
             let area = model
                 .reference
                 .as_ref()
@@ -3974,6 +3975,26 @@ fn compute_nusselt(
 fn obstacle_owner(mesh: &Mesh, cell: usize) -> Option<usize> {
     let id = *mesh.solid_id.get(cell)?;
     usize::try_from(id).ok()
+}
+
+/// `2(p − pRef)/(ρU²)` with the gauge datum `pRef = 0`.
+fn pressure_coefficient(pressure: &[f64], density: f64, speed: f64) -> Vec<f64> {
+    let scale = 0.5 * density * speed * speed;
+    if !scale.is_finite() || scale <= 0.0 {
+        return vec![0.0; pressure.len()];
+    }
+    pressure.iter().map(|value| value / scale).collect()
+}
+
+/// Reference speed shared by the force coefficients and the pressure
+/// coefficient: an explicit `reference.velocity`, otherwise the maximum inlet
+/// speed, otherwise 1 m/s.
+fn reference_velocity(model: &Model) -> f64 {
+    model
+        .reference
+        .as_ref()
+        .and_then(|reference| reference.velocity)
+        .unwrap_or_else(|| reference_speed(model))
 }
 
 fn reference_speed(model: &Model) -> f64 {
@@ -4443,6 +4464,15 @@ mod tests {
             sample.pressure
         );
         assert!((sample.temperature.expect("temperature") - 101.27).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pressure_coefficient_uses_the_gauge_datum_and_reference_speed() {
+        let cp = pressure_coefficient(&[-2.0, 0.0, 2.0], 1.0, 2.0);
+        assert_eq!(cp, vec![-1.0, 0.0, 1.0]);
+        let scaled = pressure_coefficient(&[4.0], 2.0, 1.0);
+        assert!((scaled[0] - 4.0).abs() < 1e-12);
+        assert_eq!(pressure_coefficient(&[1.0], 0.0, 1.0), vec![0.0]);
     }
 
     #[test]

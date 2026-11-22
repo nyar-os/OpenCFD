@@ -105,6 +105,7 @@ pub const CAPABILITIES_JSON: &str = r#"{
     "convergence": "supported",
     "vorticity": "supported",
     "streamFunction": "supported",
+    "pressureCoefficient": "supported",
     "convectionSchemes": "supported",
     "timeSchemes": "supported",
     "adaptiveTimeStep": "supported",

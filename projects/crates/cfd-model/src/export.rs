@@ -25,6 +25,9 @@ pub enum ExportField {
     TurbulentKineticEnergy,
     /// Turbulent dissipation rate `ε` in m²/s³ (`kEpsilon` model).
     TurbulentDissipation,
+    /// Pressure coefficient `2(p − pRef)/(ρU²)` with `pRef = 0` (gauge) and
+    /// `U` the resolved force reference speed.
+    PressureCoefficient,
 }
 
 impl ExportField {
@@ -38,6 +41,7 @@ impl ExportField {
             Self::Speed => "speed",
             Self::TurbulentKineticEnergy => "turbulentKineticEnergy",
             Self::TurbulentDissipation => "turbulentDissipation",
+            Self::PressureCoefficient => "pressureCoefficient",
         }
     }
 
@@ -51,6 +55,7 @@ impl ExportField {
             Self::Speed => "m/s",
             Self::TurbulentKineticEnergy => "m²/s²",
             Self::TurbulentDissipation => "m²/s³",
+            Self::PressureCoefficient => "-",
         }
     }
 }
@@ -71,10 +76,11 @@ impl FromStr for ExportField {
             "turbulentDissipation" | "turbulent-dissipation" | "epsilon" => {
                 Ok(Self::TurbulentDissipation)
             }
+            "pressureCoefficient" | "pressure-coefficient" | "cp" => Ok(Self::PressureCoefficient),
             other => Err(CfdError::new(
                 "export/invalid-field",
                 format!(
-                    "unknown export field `{other}`; only pressure, temperature, vorticity, streamFunction, speed, turbulentKineticEnergy or turbulentDissipation is supported"
+                    "unknown export field `{other}`; only pressure, temperature, vorticity, streamFunction, speed, turbulentKineticEnergy, turbulentDissipation or pressureCoefficient is supported"
                 ),
             )),
         }
@@ -165,6 +171,7 @@ fn field_values(solution: &Solution, field: ExportField) -> Result<Vec<f64>, Cfd
         })?,
         ExportField::Vorticity => solution.vorticity.clone(),
         ExportField::StreamFunction => solution.stream_function.clone(),
+        ExportField::PressureCoefficient => solution.pressure_coefficient.clone(),
         ExportField::Speed => {
             let mut speed = vec![0.0; mesh.pressure_count()];
             for j in 0..mesh.ny {
@@ -1400,6 +1407,7 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
     let mut pressure = Vec::with_capacity(count);
     let mut vorticity = Vec::with_capacity(count);
     let mut stream_function = Vec::with_capacity(count);
+    let mut pressure_coefficient = Vec::with_capacity(count);
     let mut turbulent_kinetic_energy = Vec::with_capacity(count);
     let mut turbulent_dissipation = Vec::with_capacity(count);
     match layout {
@@ -1414,6 +1422,7 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
                     pressure.push(solution.p[index]);
                     vorticity.push(solution.vorticity[index]);
                     stream_function.push(solution.stream_function[index]);
+                    pressure_coefficient.push(solution.pressure_coefficient[index]);
                     if let Some(field) = &solution.turbulent_kinetic_energy {
                         turbulent_kinetic_energy.push(field[index]);
                     }
@@ -1446,6 +1455,9 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
                     stream_function.push(node_average(mesh, i, j, |ci, cj| {
                         solution.stream_function[mesh.pressure_index(ci, cj)]
                     }));
+                    pressure_coefficient.push(node_average(mesh, i, j, |ci, cj| {
+                        solution.pressure_coefficient[mesh.pressure_index(ci, cj)]
+                    }));
                     if let Some(field) = &solution.turbulent_kinetic_energy {
                         turbulent_kinetic_energy.push(node_average(mesh, i, j, |ci, cj| {
                             field[mesh.pressure_index(ci, cj)]
@@ -1467,6 +1479,7 @@ fn solution_fields(solution: &Solution, layout: ExportLayout) -> Vec<Field> {
         Field::scalar("temperature", temperature),
         Field::scalar("vorticity", vorticity),
         Field::scalar("streamFunction", stream_function),
+        Field::scalar("pressureCoefficient", pressure_coefficient),
     ];
     if !turbulent_kinetic_energy.is_empty() {
         fields.push(Field::scalar(

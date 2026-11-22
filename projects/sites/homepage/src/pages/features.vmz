@@ -129,7 +129,9 @@
                         After a solve, write cell-centred
                         <code>x,y,pressure,u,v,magnitude,temperature</code> CSV,
                         legacy ASCII <code>STRUCTURED_POINTS</code> VTK, or an SVG
-                        pressure/temperature field.
+                        pressure/temperature field. Derived fields include the
+                        pressure coefficient <code>cp</code>, selectable as
+                        <code>--field pressureCoefficient</code>.
                     </p>
                 </article>
                 <article class="feature">

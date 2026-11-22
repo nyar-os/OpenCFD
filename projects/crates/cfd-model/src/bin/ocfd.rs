@@ -63,7 +63,7 @@ Usage:
   ocfd reynolds <file>
   ocfd stability <file>
   ocfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
+  ocfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|pressureCoefficient|turbulentKineticEnergy|turbulentDissipation] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>[;<x,y>...]] [--particle-steps <n>] --out <dir|file>
   ocfd capabilities
   ocfd --help
 
@@ -1431,7 +1431,7 @@ fn export(args: &[String]) -> Result<i32, CfdError> {
     let file = positional(
         &parsed,
         0,
-        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
+        "export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|pressureCoefficient] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] [--seed <x,y>] [--particle-steps <n>] --out <dir|file>",
     )?;
     let format = required(&parsed, "--format")?.parse::<ExportFormat>()?;
     let selected_field = parsed

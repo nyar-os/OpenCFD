@@ -388,7 +388,8 @@ export type ExportField =
     | 'streamFunction'
     | 'speed'
     | 'turbulentKineticEnergy'
-    | 'turbulentDissipation';
+    | 'turbulentDissipation'
+    | 'pressureCoefficient';
 
 /**
  * Sampling layout of a CSV or VTK field export. `node` averages the adjacent

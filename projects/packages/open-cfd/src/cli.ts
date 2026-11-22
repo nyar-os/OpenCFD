@@ -59,7 +59,7 @@ usage:
   open-cfd reynolds <file>
   open-cfd stability <file>
   open-cfd solve <file> [--steps <n>] [--tolerance <v>] [--check-every <n>] [--restart <checkpoint.json>] [--checkpoint <checkpoint.json>] [--out report.json]
-  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>
+  open-cfd export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|pressureCoefficient] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>
   open-cfd capabilities
   open-cfd --help
 
@@ -245,13 +245,14 @@ const EXPORT_FIELDS: readonly ExportField[] = [
     'vorticity',
     'streamFunction',
     'speed',
+    'pressureCoefficient',
 ];
 
 function parseExportField(raw: string): ExportField {
     if (!EXPORT_FIELDS.includes(raw as ExportField)) {
         throw cliError(
             'cli/unknown-format',
-            `unknown export field \`${raw}\`; use pressure, temperature, vorticity, streamFunction or speed`,
+            `unknown export field \`${raw}\`; use pressure, temperature, vorticity, streamFunction, speed or pressureCoefficient`,
         );
     }
     return raw as ExportField;
@@ -865,7 +866,7 @@ async function dispatch(session: OpenCFD, argv: readonly string[]): Promise<numb
             const file = positional(
                 parsed,
                 0,
-                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>',
+                'export <file> --format csv|vtk|svg|contours|streamlines|residuals|forces|coefficients|probes|particles|profile|statistics [--field pressure|temperature|vorticity|streamFunction|speed|pressureCoefficient] [--layout cell|node] [--line <x0,y0,x1,y1>] [--samples <n>] --out <dir|file>',
             );
             const format = parseExportFormat(requiredOption(parsed, '--format'));
             const rawField = parsed.options['--field'];

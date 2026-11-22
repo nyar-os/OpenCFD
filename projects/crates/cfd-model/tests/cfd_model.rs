@@ -86,6 +86,54 @@ fn still_cavity_stays_at_rest_without_nan() {
     assert_eq!(balance.relative_error, 0.0);
     assert!(solution.report.converged);
     assert_eq!(solution.report.steps, 40);
+    let cp = &solution.pressure_coefficient;
+    assert_finite(cp, "pressureCoefficient");
+    let min = cp.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = cp.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert!(
+        (max - min).abs() < 1e-12,
+        "a stationary field should have a constant cp, got {min}..{max}"
+    );
+}
+
+#[test]
+fn pressure_coefficient_decreases_along_a_channel() {
+    let mut model = mesh_model(20, 12);
+    model.mesh.length_x = 2.0;
+    model.fluid.density = 1.0;
+    model.fluid.viscosity = 0.02;
+    model.time.dt = 0.01;
+    model.time.steps = 300;
+    model.time.pressure_iterations = 80;
+    model.boundaries.left = Boundary {
+        kind: BoundaryKind::Inlet,
+        velocity: [1.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.right = Boundary {
+        kind: BoundaryKind::Outlet,
+        velocity: [0.0, 0.0],
+        pressure: 0.0,
+    };
+    model.boundaries.top = Boundary::wall();
+    model.boundaries.bottom = Boundary::wall();
+
+    let solution = solve(&model).expect("channel solve");
+    let mesh = &solution.mesh;
+    let mut previous = f64::INFINITY;
+    let row = mesh.ny / 2;
+    for i in (mesh.nx / 4..mesh.nx).step_by(mesh.nx / 4) {
+        let value = solution.pressure_coefficient[mesh.pressure_index(i, row)];
+        assert!(
+            value <= previous + 1e-9,
+            "cp should not rise downstream at column {i}: {value} > {previous}"
+        );
+        previous = value;
+    }
+    assert!(
+        previous < 0.0,
+        "the downstream cp should be below the datum"
+    );
 }
 
 #[test]
@@ -283,12 +331,23 @@ fn csv_and_vtk_exports_have_expected_shape() {
     let lines: Vec<&str> = csv.lines().collect();
     assert_eq!(
         lines[0],
-        "x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction"
+        "x,y,z,pressure,velocity_x,velocity_y,velocity_z,magnitude,temperature,vorticity,streamFunction,pressureCoefficient"
     );
     assert_eq!(lines.len(), 12 * 10 + 1);
-    for line in &lines[1..] {
-        assert_eq!(line.split(',').count(), 11);
+    for (line, expected) in lines[1..].iter().zip(&solution.pressure_coefficient) {
+        assert_eq!(line.split(',').count(), 12);
+        let value: f64 = line
+            .split(',')
+            .nth(11)
+            .expect("pressureCoefficient column")
+            .parse()
+            .expect("numeric cp");
+        assert!((value - expected).abs() < 1e-9);
     }
+    assert_eq!(
+        ExportField::from_str("cp").expect("cp field"),
+        ExportField::PressureCoefficient
+    );
 
     let vtk_path = export_vtk(&solution, &directory).expect("vtk");
     let vtk = fs::read_to_string(&vtk_path).expect("read vtk");
@@ -304,6 +363,7 @@ fn csv_and_vtk_exports_have_expected_shape() {
         "SCALARS magnitude double 1",
         "SCALARS vorticity double 1",
         "SCALARS streamFunction double 1",
+        "SCALARS pressureCoefficient double 1",
         "LOOKUP_TABLE default",
         "VECTORS velocity double",
     ] {
@@ -416,6 +476,7 @@ fn document_round_trip_and_defaults() {
     assert!(CAPABILITIES_JSON.contains("\"buoyancy\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"vorticity\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"streamFunction\": \"supported\""));
+    assert!(CAPABILITIES_JSON.contains("\"pressureCoefficient\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"convectionSchemes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"timeSchemes\": \"supported\""));
     assert!(CAPABILITIES_JSON.contains("\"adaptiveTimeStep\": \"supported\""));
