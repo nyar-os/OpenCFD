@@ -494,7 +494,9 @@ fn session_create_edit_solve_export_matches_cli() {
     assert_eq!(force.format, "forces");
     assert!(fs::read_to_string(&force_path)
         .expect("read forces")
-        .starts_with("obstacle,kind,step,fx,fy,mz,cd,cl,cm\n"));
+        .starts_with(
+            "obstacle,kind,step,fx,fy,fxPressure,fxViscous,fyPressure,fyViscous,mz,cd,cl,cm\n"
+        ));
     let coefficient_path = directory.join("coefficients.csv");
     let coefficient = session
         .export(ExportFormat::Coefficients, &coefficient_path)

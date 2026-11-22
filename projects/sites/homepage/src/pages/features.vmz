@@ -107,7 +107,9 @@
                         Rectangular and circular obstacles are masked by cell
                         centre. Pressure and viscous shear on solid faces produce
                         per-obstacle <code>Cd</code> and <code>Cl</code> in the
-                        report.
+                        report, with <code>fxPressure</code>,
+                        <code>fxViscous</code>, <code>fyPressure</code> and
+                        <code>fyViscous</code> decomposed separately.
                     </p>
                 </article>
                 <article class="feature">

@@ -514,8 +514,14 @@ fn channel_with_circle_obstacle_has_finite_positive_drag() {
     assert!(force.cd > 0.0, "drag coefficient {}", force.cd);
     assert!(force.fx > 0.0, "drag force {}", force.fx);
     assert!(!force.history.is_empty());
+    assert!(force.fx_pressure.is_finite() && force.fx_viscous.is_finite());
+    assert!(force.fy_pressure.is_finite() && force.fy_viscous.is_finite());
+    assert!((force.fx - (force.fx_pressure + force.fx_viscous)).abs() < 1e-9);
+    assert!((force.fy - (force.fy_pressure + force.fy_viscous)).abs() < 1e-9);
     for sample in &force.history {
         assert!(sample.cm.is_finite() && sample.mz.is_finite());
+        assert!((sample.fx - (sample.fx_pressure + sample.fx_viscous)).abs() < 1e-9);
+        assert!((sample.fy - (sample.fy_pressure + sample.fy_viscous)).abs() < 1e-9);
     }
     assert!((force.reference_velocity - 1.0).abs() < 1e-12);
     assert!((force.reference_area - 0.2).abs() < 1e-12);
@@ -1574,7 +1580,10 @@ fn history_exports_have_stable_csv_shapes() {
     );
     let forces = fs::read_to_string(&force_path).expect("read forces");
     let force_lines: Vec<&str> = forces.lines().collect();
-    assert_eq!(force_lines[0], "obstacle,kind,step,fx,fy,mz,cd,cl,cm");
+    assert_eq!(
+        force_lines[0],
+        "obstacle,kind,step,fx,fy,fxPressure,fxViscous,fyPressure,fyViscous,mz,cd,cl,cm"
+    );
     let samples: usize = solution
         .report
         .forces
@@ -1584,7 +1593,7 @@ fn history_exports_have_stable_csv_shapes() {
     assert_eq!(force_lines.len(), samples + 1);
     assert!(samples > 0);
     for line in &force_lines[1..] {
-        assert_eq!(line.split(',').count(), 9);
+        assert_eq!(line.split(',').count(), 13);
         assert!(line.starts_with("cyl,circle,"));
     }
 

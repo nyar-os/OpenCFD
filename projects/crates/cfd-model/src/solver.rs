@@ -168,6 +168,18 @@ pub struct ForceSample {
     pub fx: f64,
     /// Total force in y (N).
     pub fy: f64,
+    /// Pressure contribution to `fx` (N).
+    #[serde(default)]
+    pub fx_pressure: f64,
+    /// Viscous contribution to `fx` (N).
+    #[serde(default)]
+    pub fx_viscous: f64,
+    /// Pressure contribution to `fy` (N).
+    #[serde(default)]
+    pub fy_pressure: f64,
+    /// Viscous contribution to `fy` (N).
+    #[serde(default)]
+    pub fy_viscous: f64,
     /// Total moment about the obstacle centroid, positive counter-clockwise
     /// (N·m).
     #[serde(default)]
@@ -195,6 +207,18 @@ pub struct ObstacleForce {
     pub fx: f64,
     /// Total pressure plus viscous force in y (N).
     pub fy: f64,
+    /// Pressure contribution to `fx` (N).
+    #[serde(default)]
+    pub fx_pressure: f64,
+    /// Viscous contribution to `fx` (N).
+    #[serde(default)]
+    pub fx_viscous: f64,
+    /// Pressure contribution to `fy` (N).
+    #[serde(default)]
+    pub fy_pressure: f64,
+    /// Viscous contribution to `fy` (N).
+    #[serde(default)]
+    pub fy_viscous: f64,
     /// Total moment about the obstacle centroid (N·m), positive
     /// counter-clockwise.
     #[serde(default)]
@@ -3275,6 +3299,10 @@ fn append_force_samples(
             step,
             fx: force.fx,
             fy: force.fy,
+            fx_pressure: force.fx_pressure,
+            fx_viscous: force.fx_viscous,
+            fy_pressure: force.fy_pressure,
+            fy_viscous: force.fy_viscous,
             mz: force.mz,
             cd: force.cd,
             cl: force.cl,
@@ -3309,6 +3337,10 @@ fn build_forces(
                 kind: obstacle.kind().to_string(),
                 fx: force.fx,
                 fy: force.fy,
+                fx_pressure: force.fx_pressure,
+                fx_viscous: force.fx_viscous,
+                fy_pressure: force.fy_pressure,
+                fy_viscous: force.fy_viscous,
                 mz: force.mz,
                 cd: force.cd,
                 cl: force.cl,
@@ -3644,6 +3676,10 @@ fn raw_forces(
     let count = model.obstacles.len();
     let mut fx = vec![0.0; count];
     let mut fy = vec![0.0; count];
+    let mut fx_pressure = vec![0.0; count];
+    let mut fx_viscous = vec![0.0; count];
+    let mut fy_pressure = vec![0.0; count];
+    let mut fy_viscous = vec![0.0; count];
     let mut mz = vec![0.0; count];
     let pivots: Vec<(f64, f64)> = model
         .obstacles
@@ -3678,8 +3714,12 @@ fn raw_forces(
             let (uc, _) = mesh.cell_velocity(u, v, fluid_i, j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(fluid_i, j)]);
             let shear = (mu + eddy_face) * uc / (0.5 * mesh.dx);
-            let force_x = sign * (pressure + shear) * mesh.dy;
+            let pressure_x = sign * pressure * mesh.dy;
+            let viscous_x = sign * shear * mesh.dy;
+            let force_x = pressure_x + viscous_x;
             fx[owner] += force_x;
+            fx_pressure[owner] += pressure_x;
+            fx_viscous[owner] += viscous_x;
             let (_, face_y) = mesh.u_position(i, j);
             mz[owner] -= (face_y - pivots[owner].1) * force_x;
         }
@@ -3711,8 +3751,12 @@ fn raw_forces(
             let (_, vc) = mesh.cell_velocity(u, v, i, fluid_j);
             let eddy_face = eddy.map_or(0.0, |field| field[mesh.pressure_index(i, fluid_j)]);
             let shear = (mu + eddy_face) * vc / (0.5 * mesh.dy);
-            let force_y = sign * (pressure + shear) * mesh.dx;
+            let pressure_y = sign * pressure * mesh.dx;
+            let viscous_y = sign * shear * mesh.dx;
+            let force_y = pressure_y + viscous_y;
             fy[owner] += force_y;
+            fy_pressure[owner] += pressure_y;
+            fy_viscous[owner] += viscous_y;
             let (face_x, _) = mesh.v_position(i, j);
             mz[owner] += (face_x - pivots[owner].0) * force_y;
         }
@@ -3746,6 +3790,10 @@ fn raw_forces(
             ForceValues {
                 fx: fx[index],
                 fy: fy[index],
+                fx_pressure: fx_pressure[index],
+                fx_viscous: fx_viscous[index],
+                fy_pressure: fy_pressure[index],
+                fy_viscous: fy_viscous[index],
                 mz: mz[index],
                 cd: fx[index] * force_scale,
                 cl: fy[index] * force_scale,
@@ -3762,6 +3810,10 @@ fn raw_forces(
 struct ForceValues {
     fx: f64,
     fy: f64,
+    fx_pressure: f64,
+    fx_viscous: f64,
+    fy_pressure: f64,
+    fy_viscous: f64,
     mz: f64,
     cd: f64,
     cl: f64,
@@ -4391,6 +4443,87 @@ mod tests {
             sample.pressure
         );
         assert!((sample.temperature.expect("temperature") - 101.27).abs() < 1e-12);
+    }
+
+    #[test]
+    fn force_decomposition_separates_pressure_and_shear() {
+        let mut mesh = Mesh::new(&MeshConfig {
+            nx: 6,
+            ny: 4,
+            length_x: 1.0,
+            length_y: 1.0,
+        })
+        .expect("mesh");
+        let obstacle = crate::model::Obstacle::Rect {
+            id: "block".to_string(),
+            x0: 2.0 * mesh.dx,
+            y0: mesh.dy,
+            x1: 4.0 * mesh.dx,
+            y1: 3.0 * mesh.dy,
+            rotation: 0.0,
+        };
+        mesh.apply_obstacles(std::slice::from_ref(&obstacle))
+            .expect("obstacles");
+        let mut model = Model::new();
+        model.fluid.viscosity = 0.01;
+        model.obstacles = vec![obstacle];
+
+        let u = vec![0.0; mesh.u_count()];
+        let v = vec![0.0; mesh.v_count()];
+        let mut pressure = vec![0.0; mesh.pressure_count()];
+        for j in 0..mesh.ny {
+            for i in 0..mesh.nx {
+                pressure[mesh.pressure_index(i, j)] = 2.0 + i as f64 + 3.0 * j as f64;
+            }
+        }
+        let pressure_only = raw_forces(&mesh, &model, &u, &v, &pressure, None);
+        let force = pressure_only[0];
+        assert!(
+            force.fx_pressure.abs() > 1e-9,
+            "fxPressure {}",
+            force.fx_pressure
+        );
+        assert!(
+            force.fy_pressure.abs() > 1e-9,
+            "fyPressure {}",
+            force.fy_pressure
+        );
+        assert_eq!(force.fx_viscous, 0.0);
+        assert_eq!(force.fy_viscous, 0.0);
+        assert_eq!(force.fx, force.fx_pressure);
+        assert_eq!(force.fy, force.fy_pressure);
+
+        let zeros = vec![0.0; mesh.pressure_count()];
+        let mut shear_u = vec![0.0; mesh.u_count()];
+        for j in 0..mesh.ny {
+            for i in 0..=mesh.nx {
+                shear_u[mesh.u_index(i, j)] = i as f64;
+            }
+        }
+        let mut shear_v = vec![0.0; mesh.v_count()];
+        for j in 0..=mesh.ny {
+            for i in 0..mesh.nx {
+                shear_v[mesh.v_index(i, j)] = j as f64;
+            }
+        }
+        let shear_only = raw_forces(&mesh, &model, &shear_u, &shear_v, &zeros, None);
+        let force = shear_only[0];
+        assert!(
+            force.fx_viscous.abs() > 1e-9,
+            "fxViscous {}",
+            force.fx_viscous
+        );
+        assert!(
+            force.fy_viscous.abs() > 1e-9,
+            "fyViscous {}",
+            force.fy_viscous
+        );
+        assert_eq!(force.fx_pressure, 0.0);
+        assert_eq!(force.fy_pressure, 0.0);
+        assert_eq!(force.fx, force.fx_viscous);
+        assert_eq!(force.fy, force.fy_viscous);
+        assert!((force.fx - (force.fx_pressure + force.fx_viscous)).abs() < 1e-12);
+        assert!((force.fy - (force.fy_pressure + force.fy_viscous)).abs() < 1e-12);
     }
 
     #[test]

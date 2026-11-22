@@ -461,6 +461,14 @@ export interface ForceSample {
     readonly step: number;
     readonly fx: number;
     readonly fy: number;
+    /** Pressure contribution to `fx` in N. */
+    readonly fxPressure: number;
+    /** Viscous contribution to `fx` in N. */
+    readonly fxViscous: number;
+    /** Pressure contribution to `fy` in N. */
+    readonly fyPressure: number;
+    /** Viscous contribution to `fy` in N. */
+    readonly fyViscous: number;
     /** Moment about the obstacle centroid in N·m, positive counter-clockwise. */
     readonly mz: number;
     readonly cd: number;
@@ -475,6 +483,14 @@ export interface ObstacleForce {
     readonly kind: 'rect' | 'circle';
     readonly fx: number;
     readonly fy: number;
+    /** Pressure contribution to `fx` in N. */
+    readonly fxPressure: number;
+    /** Viscous contribution to `fx` in N. */
+    readonly fxViscous: number;
+    /** Pressure contribution to `fy` in N. */
+    readonly fyPressure: number;
+    /** Viscous contribution to `fy` in N. */
+    readonly fyViscous: number;
     /** Moment about the obstacle centroid in N·m, positive counter-clockwise. */
     readonly mz: number;
     readonly cd: number;
