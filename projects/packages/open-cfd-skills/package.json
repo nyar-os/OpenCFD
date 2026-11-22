@@ -1,7 +1,6 @@
 {
     "name": "@wae/open-cfd-skills",
-    "version": "0.0.0",
-    "private": true,
+    "version": "0.0.1",
     "description": "Agent skills for OpenCFD: create, edit, validate, solve and export two-dimensional incompressible cases",
     "license": "CC0-1.0",
     "type": "module",

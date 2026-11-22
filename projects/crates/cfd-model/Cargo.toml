@@ -1,6 +1,6 @@
 [package]
 name = "cfd-model"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 publish = false
 description = "Honest 2D incompressible Navier-Stokes solver, document format and CLI"

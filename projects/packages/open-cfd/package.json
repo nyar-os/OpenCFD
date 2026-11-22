@@ -1,6 +1,6 @@
 {
     "name": "@wae/open-cfd",
-    "version": "0.1.0",
+    "version": "0.0.0",
     "private": true,
     "description": "Two-dimensional incompressible Navier-Stokes cases on one native model",
     "license": "CC0-1.0",
