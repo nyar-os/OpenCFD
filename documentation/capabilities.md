@@ -44,6 +44,7 @@ that a capability exists.
 | `buoyancy` | supported | Boussinesq coupling; requires `scalar` |
 | `turbulence` | supported | `none`, `constant`, `mixingLength` |
 | `kEpsilonTurbulence` | supported | Standard k–ε with explicit `k` and `ε` transport |
+| `powerLawViscosity` | supported | `fluid.viscosityModel: newtonian` or `powerLaw` |
 | `heat` | supported | Thermal side/obstacle conditions, heat source and Nusselt numbers |
 | `compressible` | unsupported | — |
 | `threeD` | unsupported | — |
@@ -97,6 +98,8 @@ Requests for an unsupported route fail with `capability/not-implemented`
 | `timeScheme` | `euler` or `rk2` |
 | `convection` | `upwind`, `central` or `quick` |
 | `turbulenceModel` | `none`, `constant`, `mixingLength` or `kEpsilon` |
+| `viscosityModel` | `newtonian` or `powerLaw` |
+| `apparentViscosityMin` / `apparentViscosityMax` / `apparentViscosityMean` | Apparent viscosity over fluid cells (Pa·s); all three equal the constant `mu` under Newtonian |
 | `eddyViscosityMin` / `eddyViscosityMax` / `eddyViscosityMean` | Eddy viscosity over fluid cells (m²/s) |
 | `turbulentKineticEnergyMin` / `…Max` / `…Mean` | `k` statistics (m²/s²) under `kEpsilon` |
 | `turbulentDissipationMin` / `…Max` / `…Mean` | `ε` statistics (m²/s³) under `kEpsilon` |
@@ -196,7 +199,9 @@ rectangle with `nx × ny` quads.
    every face between a solid cell and a fluid cell, or between two solid
    cells, carries zero velocity.
 2. **Momentum prediction**: explicit convection plus central-difference
-   diffusion and the configured time scheme produce tentative `u*` and `v*`. A
+   diffusion and the configured time scheme produce tentative `u*` and `v*`. The
+   diffusion coefficient of a face is the mean of its fluid cell values of
+   molecular or apparent viscosity plus the eddy viscosity. A
    configured `pressureGradient` adds the uniform body force `-∇p/ρ` to every
    open face. A `porous` region adds the Darcy–Forchheimer sink
    `−(ν/K)U − (C_F/√K)|U|U` to the open faces whose adjacent cell the region
@@ -238,18 +243,21 @@ rectangle with `nx × ny` quads.
    is capped at 1000 entries.
 8. **Stability guards**: before solving, the explicit convective CFL number and
    momentum and scalar diffusion numbers are checked; a violation returns
-   `solver/unstable` and never emits NaN or Inf. The standalone `stability`
-   report measures the same bounds (including the porous drag rate) and the
-   largest satisfying step, but never edits the document. Every step also checks
-   that all fields are finite. With adaptive stepping the initial guard is
-   skipped because every step is clamped instead.
+   `solver/unstable` and never emits NaN or Inf. The momentum diffusion number
+   uses the largest apparent viscosity on the field plus the largest eddy
+   viscosity, so a power-law case is guarded conservatively. The standalone
+   `stability` report measures the same bounds (including the porous drag rate)
+   and the largest satisfying step, but never edits the document. Every step
+   also checks that all fields are finite. With adaptive stepping the initial
+   guard is skipped because every step is clamped instead.
 9. **Turbulence**: `constant` applies a fixed `nuT`; `mixingLength` evaluates
    `nuT = l²·|S|` per cell from the resolved strain-rate tensor; `kEpsilon`
    solves standard `k` and `ε` transport explicitly with `νt = 0.09·k²/ε`,
-   first-order upwind advection and central diffusion. Fluid faces use the mean
-   of the adjacent cell values; solid cells carry zero. `kEpsilon` needs
-   positive initial `k` and `epsilon` and shares the explicit diffusion and CFL
-   guards.
+   first-order upwind advection and central diffusion. The molecular term added
+   to the eddy viscosity is the local apparent viscosity (the constant `mu`
+   under Newtonian). Fluid faces use the mean of the adjacent cell values;
+   solid cells carry zero. `kEpsilon` needs positive initial `k` and `epsilon`
+   and shares the explicit diffusion and CFL guards.
 10. **Thermal transport**: with a `thermal` section the scalar equation becomes
     an energy equation. The transported diffusivity is `k/(ρ·cp)`; sides and
     obstacle surfaces use fixed temperature or fixed heat flux, and a uniform
@@ -264,11 +272,13 @@ rectangle with `nx × ny` quads.
 12. **Probes and wall shear**: each probe is bound to the nearest pressure cell
     and records `u`, `v`, speed, pressure and temperature every `checkEvery`
     sampling step, using the same bounded history as residuals and forces. Every
-    wall side reports `μ·(u_t,wall − u_t,cell)/(half-cell distance)` averaged over
-    its fluid-adjacent boundary cells, so a linear tangential profile is
-    reproduced exactly. A `wallFunction` section replaces that estimate above
-    `minYPlus` by solving `u⁺ = (1/κ)ln(y⁺) + B` for the friction velocity and
-    reporting `τ_w = ρu_τ²`; every side also reports `meanYPlus`.
+    wall side reports `μ_eff·(u_t,wall − u_t,cell)/(half-cell distance)` averaged
+    over its fluid-adjacent boundary cells, so a linear tangential profile is
+    reproduced exactly. `μ_eff` is the apparent viscosity of the adjacent fluid
+    cell (the constant `mu` under Newtonian). A `wallFunction` section replaces
+    that estimate above `minYPlus` by solving `u⁺ = (1/κ)ln(y⁺) + B` for the
+    friction velocity and reporting `τ_w = ρu_τ²`; every side also reports
+    `meanYPlus`.
 13. **Boundary mass balance**: after the final projection, outward mass flux
     `ρ·u·dy` or `ρ·v·dx` is integrated over all four sides. The report splits it
     into inflow and outflow magnitudes and reports the signed net and
@@ -285,12 +295,25 @@ rectangle with `nx × ny` quads.
     legend carries the discrete bands and the physical range. `speed` is
     `√(u² + v²)` at cell centres.
 16. **Adaptive time step**: with `time.adaptive`, every step is recomputed as
-    `min(time.dt, targetCfl·min(dx,dy)/max(U), 0.5/((ν+νt)·(1/dx²+1/dy²)),
+    `min(time.dt, targetCfl·min(dx,dy)/max(U), 0.5/((μ_eff+νt)·(1/dx²+1/dy²)),
     0.5/(κ·(1/dx²+1/dy²)), 0.9/(ν/K + C_F·|U|/√K))`, where `U` includes boundary
-    velocities, `κ` is the scalar or thermal diffusivity and the last term bounds
-    explicit porous drag. The report stores the mean, smallest and largest step
-    and the summed physical time, so a fixed step budget reaches a different
-    final time than the non-adaptive run.
+    velocities, `μ_eff` is the largest apparent viscosity on the field (the
+    constant `mu` under Newtonian), `κ` is the scalar or thermal diffusivity and
+    the last term bounds explicit porous drag. The report stores the mean,
+    smallest and largest step and the summed physical time, so a fixed step
+    budget reaches a different final time than the non-adaptive run.
+17. **Apparent-viscosity models**: `fluid.viscosityModel` selects `newtonian`
+    (default; constant `fluid.viscosity`) or `powerLaw`. The power law evaluates
+    `μ_eff = clamp(K·γ̇^(n−1), minViscosity, maxViscosity)` per fluid cell, where
+    `K = consistency` (Pa·sⁿ), `n = power ∈ (0, 2]` and `γ̇` is the local
+    strain-rate magnitude `|S| = √(2·S_ij·S_ij)`, the same measure as the
+    mixing-length model. The face diffusion coefficient and wall shear use the
+    cell values (faces average the two fluid neighbours). At exactly zero strain
+    rate the field stays finite: `μ_eff = K` for `n ≤ 1` (or `maxViscosity` when
+    set for `n < 1`) and `μ_eff = minViscosity` (or `0`) for `n > 1`. Missing or
+    invalid `K`, `n` or clamps return `fluid/invalid-viscosity`; an unknown model
+    returns `fluid/invalid-viscosity-model` and nothing is written. `n = 1` with
+    `K = mu` reproduces the Newtonian results field for field.
 
 Upwind plus explicit Euler is first-order in space and time, so the default
 configuration has visible numerical diffusion. `central` and `quick` sharpen
@@ -433,6 +456,13 @@ cargo test -p cfd-model --offline
     `transient/invalid`; a driven inlet reports its history.
 41. **Reynolds number**: the report resolves the speed and length sources
     (`reference`, `inlet`, `default`; `reference`, `obstacle`, `domainHeight`).
+42. **Power-law viscosity**: `n = 1` with `K = mu` reproduces the Newtonian
+    solve report field for field; a shear-thinning case has a lower mean
+    apparent viscosity than its zero-strain value in the sheared region and
+    stays finite; `minViscosity`/`maxViscosity` clamp the reported range;
+    unknown models, missing or illegal `K`, `n` and clamps fail with the stable
+    codes without writing the file; the solve and `stability` reports expose
+    the model and apparent-viscosity statistics.
 
 Unit tests live in `projects/crates/cfd-model/tests/unit/`; `src/solver.rs` and
 `src/export.rs` declare them with `#[cfg(test)] #[path = "../tests/unit/..."]`,
@@ -489,10 +519,13 @@ cargo test -p cfd-model -p open-cfd-napi --offline
 ## Limitations
 
 - Two dimensions only; no three-dimensional or axisymmetric support.
-- Single-phase, incompressible, constant-density, constant-viscosity Newtonian
-  flow. Turbulence is limited to a constant eddy viscosity, a mixing length and
-  standard k–ε; there is no Reynolds-stress, LES or wall-modelled momentum
-  treatment, so high-Reynolds-number results remain an approximation.
+- Single-phase, incompressible, constant-density flow. Viscosity is constant
+  Newtonian by default or an Ostwald–de Waele power law without yield stress,
+  thixotropy, temperature dependence or a generalised non-Newtonian tensor
+  (the power law acts on the strain-rate magnitude). Turbulence is limited to a
+  constant eddy viscosity, a mixing length and standard k–ε; there is no
+  Reynolds-stress, LES or wall-modelled momentum treatment, so
+  high-Reynolds-number results remain an approximation.
 - Uniform structured Cartesian meshes only; no body-fitted meshes, adaptive
   refinement, moving meshes or immersed boundaries. Obstacles and porous regions
   are stair-stepped by cell centre. Because the mesh is uniform, `meshQuality`

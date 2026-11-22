@@ -50,9 +50,18 @@ open-cfd mesh set <file> --nx <n> --ny <n> --length-x <m> --length-y <m>
 
 ```shell
 open-cfd fluid set <file> --rho <kg/m3> --mu <Pa.s>
+open-cfd fluid set <file> --viscosity-model power-law --consistency <K> --power <n> \
+    [--rho <kg/m3>] [--mu <Pa.s>] [--min-viscosity <Pa.s>] [--max-viscosity <Pa.s>]
 ```
 
-`--mu 0` is accepted and means inviscid flow.
+`--mu 0` is accepted and means inviscid flow. The first form writes only the
+density and constant viscosity. The second selects the Ostwald–de Waele model
+with `mu_eff = clamp(K·γ̇^(n−1))`; `--consistency` (K > 0) and `--power`
+(0 < n ≤ 2) are required for `power-law`, while `--rho`/`--mu` keep their
+current values when omitted. `--viscosity-model newtonian` restores the
+constant model. `--min-viscosity` and `--max-viscosity` clamp the apparent
+viscosity. An unknown model fails with `fluid/invalid-viscosity-model`; illegal
+parameters fail with `fluid/invalid-viscosity`; neither writes the file.
 
 ### time
 
@@ -194,8 +203,10 @@ open-cfd capabilities
 `validate` prints the resolved mesh, fluid, step count and step size, or exits
 with the validation error. `quality`, `reynolds` and `stability` print JSON.
 `stability` reports the CFL, diffusion, scalar and porous limits without editing
-`time.dt`; a case that violates them fails on `solve`. `capabilities` prints the
-capability matrix from the native library.
+`time.dt`, including `viscosityModel` and the measured
+`apparentViscosityMin`/`Max`/`Mean`; the diffusion number and `maxStableDt` use
+the largest apparent viscosity. A case that violates the limits fails on
+`solve`. `capabilities` prints the capability matrix from the native library.
 
 ## solve
 
